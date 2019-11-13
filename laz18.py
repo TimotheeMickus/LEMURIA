@@ -58,13 +58,14 @@ def train_epoch(model, data_iterator, optim):
 
         R = compute_reward(action_l)
         log_p = compute_log_p(log_p_s, log_p_l)
-        loss = - R * log_p
+        loss = - (R * log_p)
 
         loss = loss.mean()
+        loss = loss - BETA_L * h_l.mean()
+        loss = loss - BETA_S * h_s.mean()
+
         loss.backward()
         optim.step()
-        # loss = loss + BETA_L * h_l.mean()
-        # loss = loss + BETA_S * h_s.mean()
 
         # logger variables
         avg_loss += loss.item()
