@@ -1,5 +1,6 @@
-import torch, torchvision
 import itertools as it
+
+import torch, torchvision
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 

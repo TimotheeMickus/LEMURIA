@@ -4,14 +4,14 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from config import *
-from utils import ConvNetImageEncoder
+from utils import build_cnn_encoder
 
 
 class ListenerMessageEncoder(nn.Module):
     def __init__(self):
         super(ListenerMessageEncoder, self).__init__()
-        self.embedding = nn.Embedding(ALPHABET_SIZE, HIDDEN)
-        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1)
+        self.embedding = nn.Embedding(ALPHABET_SIZE + 1, HIDDEN, padding_idx=PAD)
+        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1, batch_first=True)
 
     def forward(self, messages, lengths):
         embeddings = self.embedding(messages)
@@ -24,7 +24,7 @@ class ListenerMessageEncoder(nn.Module):
 class Listener(nn.Module):
     def __init__(self):
         super(Listener, self).__init__()
-        self.obj_encoder = ConvNetImageEncoder()
+        self.obj_encoder = build_cnn_encoder()
         self.msg_encoder = ListenerMessageEncoder()
 
     def forward(self, objects, messages, lengths):
@@ -39,12 +39,9 @@ class Listener(nn.Module):
         #score
         scores = torch.bmm(objs, msg_embedding.unsqueeze(-1)).squeeze(-1)
         probs = F.softmax(scores, dim=-1)
-        log_probs = probs.log()
         dist = Categorical(probs)
         action = dist.sample()
         h = dist.entropy()
-
-        index = torch.arange(probs.size(-1)).expand_as(probs).long().to(DEVICE)
-        log_p = log_probs.masked_select(index == action.unsqueeze(-1))
+        log_p = dist.log_prob(action)
 
         return action, h, log_p
