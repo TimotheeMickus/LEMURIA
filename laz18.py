@@ -1,52 +1,62 @@
 from datetime import datetime as t
 
 import torch.nn as nn
-import torch.optim as optim
 
 from config import *
 from data import get_dataloader
-from speaker import Speaker
-from listener import Listener
-
-def compute_reward(action_l):
-    reward = (action_l == 0).float()
-    return reward
-
-def compute_log_p(log_p_s, log_p_l):
-    """
-    Input:
-        `log_p_q`, log probs for speaker policy
-        `log_p_l`, log probs for listener policy
-    Output:
-        \bigg(\sum \limits_{l=1}^L \log p_{\pi^s}(m^l_t|m^{<l}_t, u) + \log p_{\pi^L}(u_{t'}|z, U) \bigg)
-    """
-    log_p = log_p_s.sum(dim=1) + log_p_l
-    return log_p
-
-def build_optimizer(θ):
-    return optim.RMSprop(θ, lr=LR)
+from utils import build_optimizer
+from speaker import SenderPolicy
+from listener import ReceiverPolicy
 
 class CommunicationGame(nn.Module):
     def __init__(self):
         super(CommunicationGame, self).__init__()
-        self.speaker = Speaker()
-        self.listener = Listener()
+        self.sender = SenderPolicy()
+        self.receiver = ReceiverPolicy()
 
-    def forward(self, inputs, return_message=True):
+    def forward(self, inputs):
         """
         Input:
-            `inputs` of shape [Batch, K, 3, 124, 124]
+            `inputs` of shape [Batch, K, *IMG_SHAPE]. The target image is the first of the K images
+        Output:
+            `sender_outcome`, `PolicyOutcome` for sender
+            `receiver_outcome`, `PolicyOutcome` for receiver
         """
         # input[:,0] is target, the remainder are distractors
         inputs = inputs.float()
         target_img = inputs[:,0]
-        message, lens, log_p_s, h_s = self.speaker(target_img)
-        action_l, h_l, log_p_l = self.listener(inputs, message, lens)
-        if return_message:
-            return log_p_s, h_s, action_l, h_l, log_p_l, message
-        return log_p_s, h_s, action_l, h_l, log_p_l
+        sender_outcome = self.sender(target_img)
+        receiver_outcome = self.receiver(inputs, *sender_outcome.action)
+        return sender_outcome, receiver_outcome
+
+def compute_reward(receiver_action):
+    """
+        return reward function
+    """
+    # by design, first image is the target
+    reward = (receiver_action == 0).float()
+    return reward
+
+def compute_log_prob(sender_log_prob, receiver_log_prob):
+    """
+    Input:
+        `sender_log_prob`, log probs for sender policy
+        `receiver_log_prob`, log prob for receiver policy
+    Output:
+        \bigg(\sum \limits_{l=1}^L \log p_{\pi^s}(m^l_t|m^{<l}_t, u) + \log p_{\pi^L}(u_{t'}|z, U) \bigg)
+    """
+    log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
+    return log_prob
+
 
 def train_epoch(model, data_iterator, optim):
+    """
+        Model training function
+        Input:
+            `model`, a `CommunicationGame` model
+            `data_iterator`, an infinite iterator over (batched) data
+            `optim`, the optimizer
+    """
     model.train()
     avg_loss = 0.
     avg_acc = 0.
@@ -54,20 +64,23 @@ def train_epoch(model, data_iterator, optim):
     for i,batch in enumerate(data_iterator, start=1):
         batch = batch.to(DEVICE)
         optim.zero_grad()
-        log_p_s, h_s, action_l, h_l, log_p_l, action_s = model(batch)
+        sender_outcome, receiver_outcome = model(batch)
 
-        R = compute_reward(action_l)
-        log_p = compute_log_p(log_p_s, log_p_l)
-        loss = - (R * log_p)
+        R = compute_reward(receiver_outcome.action)
+        log_prob = compute_log_prob(
+            sender_outcome.log_prob,
+            receiver_outcome.log_prob)
+        loss = - (R * log_prob)
 
         loss = loss.mean()
-        loss = loss - BETA_L * h_l.mean()
-        loss = loss - BETA_S * h_s.mean()
+        # entropy penalties
+        loss = loss - BETA_SENDER * sender_outcome.entropy.mean()
+        loss = loss - BETA_RECEIVER * receiver_outcome.entropy.mean()
 
         loss.backward()
         optim.step()
 
-        # logger variables
+        # update running averages
         avg_loss += loss.item()
         acc = R.sum().item()
         avg_acc += acc / BATCH_SIZE
@@ -79,6 +92,5 @@ def train_epoch(model, data_iterator, optim):
 if __name__ == "__main__":
     model = CommunicationGame().to(DEVICE)
     optimizer = build_optimizer(model.parameters())
-    import torch
     data_loader = get_dataloader()
     train_epoch(model, data_loader, optimizer)
