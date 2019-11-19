@@ -4,9 +4,9 @@ import torch.nn as nn
 
 from config import *
 from data import get_dataloader
+from receiver import ReceiverPolicy
+from sender import SenderPolicy
 from utils import build_optimizer
-from speaker import SenderPolicy
-from listener import ReceiverPolicy
 
 class CommunicationGame(nn.Module):
     def __init__(self):
