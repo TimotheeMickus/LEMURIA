@@ -68,7 +68,7 @@ class ReceiverPolicy(nn.Module):
         dist = Categorical(probs)
 
         # get outcome
-        action = dist.sample()
+        action = dist.sample() if self.training else probs.argmax(dim=-1)
         entropy = dist.entropy()
         log_prob = dist.log_prob(action)
 

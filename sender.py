@@ -44,7 +44,7 @@ class SenderMessageDecoder(nn.Module):
             # select action for step
             probs =  F.softmax(output, dim=-1)
             dist = Categorical(probs)
-            action = dist.sample()
+            action = dist.sample() if self.training else probs.argmax(dim=-1)
 
 
             # ignore prediction for completed messages
