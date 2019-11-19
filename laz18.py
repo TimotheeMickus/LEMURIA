@@ -68,7 +68,7 @@ def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
     """
     model.train()
     total_r = 0.
-    start_i = min(epoch - 1, 0)
+    start_i = max(epoch - 1, 0)
     start_i *= 1000
     with tqdm.tqdm(total=iter_steps, postfix={"R": total_r}, unit="B",
         desc="Epoch %i" % epoch) as pbar:
