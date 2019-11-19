@@ -12,12 +12,16 @@ class SpeakerDecoder(nn.Module):
         super(SpeakerDecoder, self).__init__()
         self.embedding = nn.Embedding(ALPHABET_SIZE + 2, HIDDEN, padding_idx=PAD)
         self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1)
-        self.proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
+        self.c_proj = nn.Linear(HIDDEN, HIDDEN)
+        self.h_proj = nn.Linear(HIDDEN, HIDDEN)
+        self.a_proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
 
     def forward(self, encoded, return_stats=True):
         ipt = torch.ones(BATCH_SIZE).long().to(DEVICE) * BOS
         ipt = self.embedding(ipt)
-        state = (encoded.unsqueeze(0), encoded.unsqueeze(0))
+        c, h = (encoded, encoded)
+        c, h = self.c_proj(c).unsqueeze(0), self.h_proj(h).unsqueeze(0)
+        state = (c, h)
 
         # output(s)
         msg = []
@@ -32,7 +36,7 @@ class SpeakerDecoder(nn.Module):
 
         for i in range(MSG_LEN):
             l_opt, state = self.lstm(ipt.unsqueeze(0), state)
-            opt = self.proj(l_opt).squeeze(0)
+            opt = self.a_proj(l_opt).squeeze(0)
 
             probs =  F.softmax(opt, dim=-1)
             #select action
