@@ -53,7 +53,7 @@ def compute_log_prob(sender_log_prob, receiver_log_prob):
     return log_prob
 
 
-def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=10,
+def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
     event_writer=None):
     """
         Model training function
@@ -112,6 +112,8 @@ if __name__ == "__main__":
     data_loader = get_dataloader()
     event_writer = SummaryWriter()
     print(t.now(), "training start...")
+    if not os.path.isdir(MODEL_CKPT_DIR):
+        os.makedirs(MODEL_CKPT_DIR)
     for epoch in range(1, EPOCHS + 1):
         train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
         torch.save(model.state_dict(), os.path.join(MODEL_CKPT_DIR, "model_e%i.pt" % epoch))
