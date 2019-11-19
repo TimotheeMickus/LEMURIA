@@ -6,9 +6,9 @@ from config import *
 def build_cnn_encoder():
     layers = []
     strides = STRIDES
-    ipts = [FILTERS] * len(STRIDES); ipts[0] = IMG_SHAPE[0]
-    opts = [FILTERS] * len(STRIDES); opts[-1] = HIDDEN
-    fs = [nn.BatchNorm2d] * len(STRIDES); fs[-1] = lambda _ : nn.Flatten()
+    ipts = [IMG_SHAPE[0]] + [FILTERS] * (len(STRIDES) - 1)
+    opts = [FILTERS] * (len(STRIDES) - 1) + [HIDDEN]
+    fs = [nn.BatchNorm2d] * (len(STRIDES) - 1) + [lambda _ : nn.Flatten()]
     for s,i,o,f in zip(strides, ipts, opts, fs):
         layers.append(
             nn.Sequential(

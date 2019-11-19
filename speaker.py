@@ -10,11 +10,14 @@ from utils import build_cnn_encoder
 class SpeakerDecoder(nn.Module):
     def __init__(self):
         super(SpeakerDecoder, self).__init__()
-        self.embedding = nn.Embedding(ALPHABET_SIZE + 1, HIDDEN, padding_idx=PAD)
-        self.lstm = nn.LSTM(HIDDEN, ALPHABET_SIZE, 1)
+        self.embedding = nn.Embedding(ALPHABET_SIZE + 2, HIDDEN, padding_idx=PAD)
+        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1)
+        self.proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
 
     def forward(self, encoded, return_stats=True):
-        ipt, state = encoded, None
+        ipt = torch.ones(BATCH_SIZE).long().to(DEVICE) * BOS
+        ipt = self.embedding(ipt)
+        state = (encoded.unsqueeze(0), encoded.unsqueeze(0))
 
         # output(s)
         msg = []
@@ -28,9 +31,10 @@ class SpeakerDecoder(nn.Module):
         has_stopped.requires_grad = False
 
         for i in range(MSG_LEN):
-            opt, state = self.lstm(ipt.unsqueeze(0), state)
+            l_opt, state = self.lstm(ipt.unsqueeze(0), state)
+            opt = self.proj(l_opt).squeeze(0)
 
-            probs =  F.softmax(opt, dim=-1).squeeze(0)
+            probs =  F.softmax(opt, dim=-1)
             #select action
             dist = Categorical(probs)
             action = dist.sample()
@@ -60,7 +64,7 @@ class SpeakerDecoder(nn.Module):
             h = torch.stack(h, dim=1)
             h = h.sum(dim=1, keepdim=True)
             h = h / msg_len.float()
-            return (msg, msg_len), {"log_p": log_probs, "xent": h}
+            return (msg, msg_len), {"log_p": log_probs, "ent": h}
         return (msg, msg_len)
 
 
@@ -73,4 +77,4 @@ class Speaker(nn.Module):
     def forward(self, objects):
         encoded = self.encoder(objects)
         (decoded, decoded_len), stats = self.decoder(encoded)
-        return decoded, decoded_len, stats["log_p"], stats["xent"]
+        return decoded, decoded_len, stats["log_p"], stats["ent"]

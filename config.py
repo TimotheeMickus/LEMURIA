@@ -1,6 +1,6 @@
-ALPHABET_SIZE = 17 + 1 # + 1 for EOS
-EOS, PAD = 0, ALPHABET_SIZE
-MSG_LEN = 7
+ALPHABET_SIZE = 10 + 2 # + 1 for EOS,
+EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
+MSG_LEN = 5
 NUMBER_OF_DISTRACTORS = 2
 K = NUMBER_OF_DISTRACTORS + 1 # size of pools of image for listener
 
@@ -13,6 +13,7 @@ KERNEL_SIZE = 3
 
 BATCH_SIZE = 32
 LR = .0001
+#lr tested:.0001, .00001, .001, .000001
 BETA_S = .01
 BETA_L = .001
 
