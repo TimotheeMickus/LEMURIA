@@ -93,7 +93,7 @@ def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
             optim.step()
 
             # update running average reward
-            r = R.sum().item() / BATCH_SIZE
+            r = R.sum().item() / batch.size(0)
             total_r += r
             pbar.set_postfix({"R" : total_r / i}, refresh=False)
             pbar.update()

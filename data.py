@@ -38,7 +38,8 @@ class SingleClassDataLoader():
             for d in iter(self.distractor_loader))
         for examples, classes in self.target_loader:
             # load distractors
-            distractors = [[] for i in range(BATCH_SIZE)]
+            batch_size = classes.size(0)
+            distractors = [[] for i in range(batch_size)]
             forbidden = {i:c for i,c in enumerate(classes)}
             filled = set()
             while True:
@@ -47,7 +48,7 @@ class SingleClassDataLoader():
                 if fst_valid is None: continue
                 distractors[fst_valid].append(distractor.squeeze(0))
                 if len(distractors[fst_valid]) == K - 1: filled.add(fst_valid)
-                if len(filled) == BATCH_SIZE: break
+                if len(filled) == batch_size: break
             yield torch.cat([
                 examples.unsqueeze(1),
                 torch.stack([

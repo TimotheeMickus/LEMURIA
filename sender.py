@@ -21,7 +21,7 @@ class SenderMessageDecoder(nn.Module):
 
     def forward(self, encoded):
         # initialize first input and state
-        input = torch.ones(BATCH_SIZE).long().to(DEVICE) * BOS
+        input = torch.ones(encoded.size(0)).long().to(DEVICE) * BOS
         input = self.embedding(input)
         cell = self.cell_proj(encoded).unsqueeze(0)
         hidden = self.hidden_proj(encoded).unsqueeze(0)
@@ -33,7 +33,7 @@ class SenderMessageDecoder(nn.Module):
         entropy = []
 
         # stopping mechanism when EOS has been produced
-        has_stopped = torch.zeros(BATCH_SIZE).bool().to(DEVICE)
+        has_stopped = torch.zeros(encoded.size(0)).bool().to(DEVICE)
         has_stopped.requires_grad = False
 
         # produce message

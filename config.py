@@ -22,8 +22,8 @@ BETA_RECEIVER = .001
 #IMG_SHAPE = (3, 124, 124) # Original dataset size
 IMG_SHAPE = (3, 128, 128) # COIL size
 
-DATASET_PATH = "/home/tmickus/data/img/coil/coil-100/png/"
+DATASET_PATH = "/home/tmickus/data/img/coil/coil-100/train/"
 
 DEVICE = "cuda"
 MODEL_CKPT_DIR = "models/"
-EPOCHS = 100
+EPOCHS = 1000
