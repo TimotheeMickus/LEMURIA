@@ -1,6 +1,6 @@
-ALPHABET_SIZE = 10 + 1 # + 1 for EOS,
+ALPHABET_SIZE = 5 + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
-MSG_LEN = 5
+MSG_LEN = 4
 NUMBER_OF_DISTRACTORS = 2
 K = NUMBER_OF_DISTRACTORS + 1 # size of pools of image for listener
 
