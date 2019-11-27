@@ -24,6 +24,6 @@ IMG_SHAPE = (3, 128, 128) # COIL size
 
 DATASET_PATH = "/home/tmickus/data/img/coil/coil-100/train/"
 
-DEVICE = "cuda"
+DEVICE = "cpu"
 MODEL_CKPT_DIR = "models/"
 EPOCHS = 1000
