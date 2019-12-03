@@ -110,7 +110,7 @@ if __name__ == "__main__":
     model = CommunicationGame().to(DEVICE)
     optimizer = build_optimizer(model.parameters())
     data_loader = get_dataloader()
-    event_writer = SummaryWriter()
+    event_writer = SummaryWriter(SUMMARIES_DIR)
     print(t.now(), "training start...")
     if not os.path.isdir(MODEL_CKPT_DIR):
         os.makedirs(MODEL_CKPT_DIR)

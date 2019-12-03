@@ -4,8 +4,12 @@ import argparse
 
 this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
 
+import socket # for `gethostname`
+from datetime import datetime
+
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument('-data_set', help='the path to the data set', default=(os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train')))
+arg_parser.add_argument('-summaries', help='the path to the TensorBoard summaries for this run', default=(os.path.join(this_path, os.pardir, 'runs', (datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + socket.gethostname()))))
 arg_parser.add_argument('-device', help='what to run PyTorch on', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
 args = arg_parser.parse_args()
@@ -40,5 +44,10 @@ DATASET_PATH = args.data_set
 #DEVICE = "cpu"
 #DEVICE = 'cpu' if(args.cpu) else 'gpu'
 DEVICE = args.device
-MODEL_CKPT_DIR = "models/"
+
+#MODEL_CKPT_DIR = "models/"
+MODEL_CKPT_DIR = os.path.join(this_path, os.pardir, 'models')
+
+SUMMARIES_DIR = args.summaries
+
 EPOCHS = 1000
