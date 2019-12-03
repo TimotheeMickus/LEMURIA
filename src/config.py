@@ -8,9 +8,9 @@ import socket # for `gethostname`
 from datetime import datetime
 
 arg_parser = argparse.ArgumentParser()
-arg_parser.add_argument('-data_set', help='the path to the data set', default=(os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train')))
-arg_parser.add_argument('-summaries', help='the path to the TensorBoard summaries for this run', default=(os.path.join(this_path, os.pardir, 'runs', (datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + socket.gethostname()))))
-arg_parser.add_argument('-device', help='what to run PyTorch on', default='cpu')
+arg_parser.add_argument('--data_set', help='the path to the data set', default=(os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train')))
+arg_parser.add_argument('--summaries', help='the path to the TensorBoard summaries for this run', default=(os.path.join(this_path, os.pardir, 'runs', (datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + socket.gethostname()))))
+arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
 args = arg_parser.parse_args()
 
