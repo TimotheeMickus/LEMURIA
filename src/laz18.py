@@ -17,6 +17,7 @@ from utils import build_optimizer
 class CommunicationGame(nn.Module):
     def __init__(self):
         super(CommunicationGame, self).__init__()
+
         self.sender = SenderPolicy()
         self.receiver = ReceiverPolicy()
 
@@ -28,11 +29,17 @@ class CommunicationGame(nn.Module):
             `sender_outcome`, `PolicyOutcome` for sender
             `receiver_outcome`, `PolicyOutcome` for receiver
         """
-        # input[:,0] is target, the remainder are distractors
-        inputs = inputs.float()
-        target_img = inputs[:,0]
-        sender_outcome = self.sender(target_img)
-        receiver_outcome = self.receiver(inputs, *sender_outcome.action)
+        inputs = inputs.float() # Converts the images from ??? to float TODO
+        target_img = inputs[:,0] # These are the targets (the others are distractors)
+
+        sender_inputs = target_img
+        if(NOISE_STD_DEV > 0.0): sender_inputs = torch.clamp((sender_inputs + (NOISE_STD_DEV * torch.rand(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        sender_outcome = self.sender(sender_inputs)
+
+        receiver_inputs = inputs
+        if(NOISE_STD_DEV > 0.0): receiver_inputs = torch.clamp((receiver_inputs + (NOISE_STD_DEV * torch.rand(size=receiver_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        receiver_outcome = self.receiver(receiver_inputs, *sender_outcome.action)
+
         return sender_outcome, receiver_outcome
 
 def compute_reward(receiver_action):
