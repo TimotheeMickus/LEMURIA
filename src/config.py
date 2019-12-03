@@ -1,3 +1,15 @@
+import os
+import sys
+import argparse
+
+this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
+
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument('-data_set', help='the path to the data set', default=(os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train')))
+arg_parser.add_argument('-device', help='what to run PyTorch on', default='cpu')
+#arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
+args = arg_parser.parse_args()
+
 ALPHABET_SIZE = 5 + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
 MSG_LEN = 4
@@ -22,8 +34,11 @@ BETA_RECEIVER = .001
 #IMG_SHAPE = (3, 124, 124) # Original dataset size
 IMG_SHAPE = (3, 128, 128) # COIL size
 
-DATASET_PATH = "/home/tmickus/data/img/coil/coil-100/train/"
+#DATASET_PATH = "/home/tmickus/data/img/coil/coil-100/train/"
+DATASET_PATH = args.data_set
 
-DEVICE = "cpu"
+#DEVICE = "cpu"
+#DEVICE = 'cpu' if(args.cpu) else 'gpu'
+DEVICE = args.device
 MODEL_CKPT_DIR = "models/"
 EPOCHS = 1000
