@@ -80,7 +80,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     total_reward = 0.0 # sum of the rewards since the beginning of the epoch 
     total_items = 0 # number of training instances since the beginning of the epoch
     start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
-    end_id = start_i + steps_per_epoch
+    end_i = start_i + steps_per_epoch
     with tqdm.tqdm(total=steps_per_epoch, postfix={"R": total_reward}, unit="B", desc=("Epoch %i" % epoch)) as pbar:
         for i, batch in zip(range(start_i, end_i), data_iterator):
             batch = batch.to(DEVICE)
