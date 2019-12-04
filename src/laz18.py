@@ -42,13 +42,14 @@ class CommunicationGame(nn.Module):
 
         return sender_outcome, receiver_outcome
 
-def compute_reward(receiver_action):
+def compute_rewards(receiver_action):
     """
-        return reward function
+        returns the reward for each element of a batch
     """
     # by design, the first image is the target
-    reward = (receiver_action == 0).float()
-    return reward
+    rewards = (receiver_action == 0).float()
+
+    return rewards
 
 def compute_log_prob(sender_log_prob, receiver_log_prob):
     """
@@ -62,8 +63,7 @@ def compute_log_prob(sender_log_prob, receiver_log_prob):
     return log_prob
 
 
-def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
-    event_writer=None):
+def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
     """
         Model training function
         Input:
@@ -72,48 +72,52 @@ def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
             `optim`, the optimizer
         Optional arguments:
             `epoch`: epoch number to display in progressbar
-            `iter_steps`: number of steps for epoch
+            `steps_per_epoch`: number of steps for epoch
             `event_writer`: tensorboard writer to log evolution of values
     """
-    model.train()
-    total_r = 0.
-    start_i = max(epoch - 1, 0)
-    start_i *= 1000
-    with tqdm.tqdm(total=iter_steps, postfix={"R": total_r}, unit="B",
-        desc="Epoch %i" % epoch) as pbar:
-        for i,batch in zip(range(1, iter_steps+1), data_iterator):
+    model.train() # sets the model in training mode
+    
+    total_reward = 0.0 # sum of the rewards since the beginning of the epoch 
+    total_items = 0 # number of training instances since the beginning of the epoch
+    start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
+    end_id = start_i + steps_per_epoch
+    with tqdm.tqdm(total=steps_per_epoch, postfix={"R": total_reward}, unit="B", desc=("Epoch %i" % epoch)) as pbar:
+        for i, batch in zip(range(start_i, end_i), data_iterator):
             batch = batch.to(DEVICE)
             optim.zero_grad()
             sender_outcome, receiver_outcome = model(batch)
 
-            R = compute_reward(receiver_outcome.action)
+            rewards = compute_rewards(receiver_outcome.action)
             log_prob = compute_log_prob(
                 sender_outcome.log_prob,
                 receiver_outcome.log_prob)
-            loss = - (R * log_prob)
+            loss = - (rewards * log_prob)
 
             loss = loss.mean()
             # entropy penalties
-            loss = loss - BETA_SENDER * sender_outcome.entropy.mean()
-            loss = loss - BETA_RECEIVER * receiver_outcome.entropy.mean()
+            loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
+            loss = loss - (BETA_RECEIVER * receiver_outcome.entropy.mean())
 
             # backprop
             loss.backward()
             optim.step()
 
             # updates running average reward
-            r = R.sum().item() / batch.size(0)
-            total_r += r
-            pbar.set_postfix({"R" : total_r / i}, refresh=False)
+            avg_reward = rewards.sum().item() / batch.size(0) # average reward of the batch
+            total_reward += rewards.sum().item()
+            total_items += batch.size(0)
+
+            pbar.set_postfix({"R" : total_reward / total_items}, refresh=False)
             pbar.update()
 
             # logs some values
             if event_writer is not None:
-                event_writer.add_scalar('train/reward', r, start_i + i)
-                event_writer.add_scalar('train/loss', loss.item(), start_i + i)
+                event_writer.add_scalar('train/reward', avg_reward, i)
+                event_writer.add_scalar('train/loss', loss.item(), i)
 
     model.eval()
-    return model
+
+    return model # TODO Is there any reason to return the model?
 
 if __name__ == "__main__":
     if not os.path.isdir(DATASET_PATH):
@@ -129,6 +133,6 @@ if __name__ == "__main__":
         os.makedirs(MODEL_CKPT_DIR)
 
     print(datetime.now(), "training start...")
-    for epoch in range(1, EPOCHS + 1):
+    for epoch in range(1, (EPOCHS + 1)):
         train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
-        torch.save(model.state_dict(), os.path.join(MODEL_CKPT_DIR, "model_e%i.pt" % epoch))
+        torch.save(model.state_dict(), os.path.join(MODEL_CKPT_DIR, ("model_e%i.pt" % epoch)))
