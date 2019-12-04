@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
 from config import *
-from data import get_dataloader
+from data import get_data_loader
 from receiver import ReceiverPolicy
 from sender import SenderPolicy
 from utils import build_optimizer
@@ -124,15 +124,19 @@ if __name__ == "__main__":
         print("Directory '%s' not found." % DATASET_PATH)
         sys.exit()
 
-    model = CommunicationGame().to(DEVICE)
-    optimizer = build_optimizer(model.parameters())
-    data_loader = get_data_loader()
-    event_writer = SummaryWriter(SUMMARY_DIR)
+    for run in range(RUNS):
+        print('Run %i' % run)
+        run_models_dir = os.path.join(MODELS_DIR, str(run))
 
-    if(SAVE_MODEL and (not os.path.isdir(MODELS_DIR))):
-        os.makedirs(MODELS_DIR)
+        model = CommunicationGame().to(DEVICE)
+        optimizer = build_optimizer(model.parameters())
+        data_loader = get_data_loader()
+        event_writer = SummaryWriter(SUMMARY_DIR, filename_suffix=('_' + str(run)))
 
-    print(datetime.now(), "training start...")
-    for epoch in range(1, (EPOCHS + 1)):
-        train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
-        if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(MODELS_DIR, ("model_e%i.pt" % epoch)))
+        if(SAVE_MODEL and (not os.path.isdir(run_models_dir))):
+            os.makedirs(run_models_dir)
+
+        print(datetime.now(), "training start...")
+        for epoch in range(1, (EPOCHS + 1)):
+            train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
+            if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))

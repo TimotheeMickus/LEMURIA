@@ -32,6 +32,8 @@ arg_parser.add_argument('--distractors', help='number of distractors', default=2
 
 arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
 
+arg_parser.add_argument('--runs', help='number of runs', default=1, type=int)
+
 args = arg_parser.parse_args()
 
 
@@ -72,3 +74,5 @@ SAVE_MODEL = args.save_model
 MODELS_DIR = args.models.replace('[summary]', SUMMARY_DIR)
 
 EPOCHS = args.epochs
+
+RUNS = args.runs
