@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
-
 from config import *
 from utils import build_cnn_encoder, PolicyOutcome
 

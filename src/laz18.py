@@ -77,11 +77,12 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     """
     model.train() # sets the model in training mode
     
-    total_reward = 0.0 # sum of the rewards since the beginning of the epoch 
-    total_items = 0 # number of training instances since the beginning of the epoch
-    start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
-    end_i = start_i + steps_per_epoch
-    with tqdm.tqdm(total=steps_per_epoch, postfix={"R": total_reward}, unit="B", desc=("Epoch %i" % epoch)) as pbar:
+    def loop(callback=None):
+        total_reward = 0.0 # sum of the rewards since the beginning of the epoch 
+        total_items = 0 # number of training instances since the beginning of the epoch
+        start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
+        end_i = start_i + steps_per_epoch
+
         for i, batch in zip(range(start_i, end_i), data_iterator):
             batch = batch.to(DEVICE)
             optim.zero_grad()
@@ -107,13 +108,25 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             total_reward += rewards.sum().item()
             total_items += batch.size(0)
 
-            pbar.set_postfix({"R" : total_reward / total_items}, refresh=False)
-            pbar.update()
+            if(callback is not None): callback(total_reward / total_items)
 
             # logs some values
             if event_writer is not None:
                 event_writer.add_scalar('train/reward', avg_reward, i)
                 event_writer.add_scalar('train/loss', loss.item(), i)
+
+    if(SIMPLE_DISPLAY):
+        def callback(r):
+            print('R: %f' % r)
+
+        loop(callback)
+    else:
+        with tqdm.tqdm(total=steps_per_epoch, postfix={"R": 0.0}, unit="B", desc=("Epoch %i" % epoch)) as pbar:
+            def callback(r):
+                pbar.set_postfix({"R" : r}, refresh=False)
+                pbar.update()
+
+            loop(callback)
 
     model.eval()
 

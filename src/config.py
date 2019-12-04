@@ -17,6 +17,8 @@ arg_parser.add_argument('--summary', help='the path to the TensorBoard summary f
 
 arg_parser.add_argument('-save_model', help='saves the model after each epoch', action='store_true')
 
+arg_parser.add_argument('-simple_display', help='displays the information in a simple way (not using tqdm)', action='store_true')
+
 #default_models = os.path.join(default_summary, 'models')
 #arg_parser.add_argument('--models', help='the path to the saved models', default=default_models)
 arg_parser.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=os.path.join('[summary]', 'models'))
@@ -76,3 +78,5 @@ MODELS_DIR = args.models.replace('[summary]', SUMMARY_DIR)
 EPOCHS = args.epochs
 
 RUNS = args.runs
+
+SIMPLE_DISPLAY = args.simple_display
