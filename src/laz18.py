@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from datetime import datetime as t
+from datetime import datetime
 import os
 
 import torch
@@ -120,9 +120,11 @@ if __name__ == "__main__":
     optimizer = build_optimizer(model.parameters())
     data_loader = get_dataloader()
     event_writer = SummaryWriter(SUMMARIES_DIR)
-    print(t.now(), "training start...")
+
     if not os.path.isdir(MODEL_CKPT_DIR):
         os.makedirs(MODEL_CKPT_DIR)
+
+    print(datetime.now(), "training start...")
     for epoch in range(1, EPOCHS + 1):
         train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
         torch.save(model.state_dict(), os.path.join(MODEL_CKPT_DIR, "model_e%i.pt" % epoch))
