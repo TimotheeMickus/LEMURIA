@@ -12,13 +12,14 @@ arg_parser = argparse.ArgumentParser()
 default_data_set = (os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train'))
 arg_parser.add_argument('--data_set', help='the path to the data set', default=default_data_set)
 
-default_summary = os.path.join(this_path, os.pardir, 'runs', (datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + socket.gethostname()))
-arg_parser.add_argument('--summary', help='the path to the TensorBoard summary for this run', default=default_summary)
+default_summary = os.path.join(this_path, os.pardir, 'runs', ('[now]_' + socket.gethostname()))
+arg_parser.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the %Y-%m-%d_%H-%M-%S format)', default=default_summary)
 
 arg_parser.add_argument('-save_model', help='saves the model after each epoch', action='store_true')
 
-default_models = os.path.join(default_summary, 'models')
-arg_parser.add_argument('--models', help='the path to the saved models', default=default_models)
+#default_models = os.path.join(default_summary, 'models')
+#arg_parser.add_argument('--models', help='the path to the saved models', default=default_models)
+arg_parser.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=os.path.join('[summary]', 'models'))
 
 arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
@@ -65,9 +66,9 @@ DATASET_PATH = args.data_set
 
 DEVICE = args.device
 
-SAVE_MODEL = args.save_model
-MODELS_DIR = args.models
+SUMMARY_DIR = args.summary.replace('[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
 
-SUMMARY_DIR = args.summary
+SAVE_MODEL = args.save_model
+MODELS_DIR = args.models.replace('[summary]', SUMMARY_DIR)
 
 EPOCHS = args.epochs
