@@ -125,6 +125,8 @@ if __name__ == "__main__":
         sys.exit()
 
     for run in range(RUNS):
+        # TODO I'm wondering whether any (e.g., memory) cleaning needs to be done between runs
+
         print('Run %i' % run)
         run_models_dir = os.path.join(MODELS_DIR, str(run))
 
