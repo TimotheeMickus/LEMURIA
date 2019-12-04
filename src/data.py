@@ -17,6 +17,7 @@ class DistinctTargetClassDataLoader():
             batch_size=BATCH_SIZE,
             num_workers=1,
             shuffle=True)
+
         # distractor images, that require to be matched with targets
         self.distractor_dataset = ImageFolder(
             root=DATASET_PATH,
@@ -35,59 +36,64 @@ class DistinctTargetClassDataLoader():
             for distractor in self.distractor_loader:
                 yield distractor
 
-    def _get_examples(self):
+    def _get_batch(self):
         """
-        Generator yielding examples constructed on the fly.
+        Generator yielding a batch (target + list of distractors) constructed on the fly.
         Ensures no distractor has the same class as the target it is paired with
         """
-        def _first_valid(distractor_class, target_classes, examples_filled):
+        def match_with_target(distractor_class, target_classes, examples_filled):
             """
-            Return the first target that can be matched with this distractor
+            Returns the index of the first target that can be matched with this distractor, or None
             """
-            for batch_item in target_classes:
-                if distractor_class == target_classes[batch_item]:
-                    # ignore this target if the distractor has the same class
+            for target_idx, target_class in enumerate(target_classes):
+                if distractor_class == target_class:
+                    # ignores this target because the distractor is of the same class
                     continue
-                if batch_item in examples_filled:
-                    # ignore this target if it has already enough distractors
+                if target_idx in examples_filled:
+                    # ignores this target because it has already enough distractors
                     continue
-                # return first match
-                return batch_item
-            # return no match
+
+                # returns first match
+                return target_idx
+                
+            # returns no match
             return None
-        distractors_generator = self.iter_distractors()
-        for examples, classes in self.target_loader:
-            # load distractors
-            current_batch_size = classes.size(0)
-            distractors = [[] for i in range(current_batch_size)] # will contain distractors
-            target_classes = dict(enumerate(classes)) # holds information necessary to discard distractors
-            examples_filled = set() # container for targets with enough distractors
 
+        distractors_generator = self.iter_distractors()
+        for targets, target_classes in self.target_loader: # a tensor of images and the tensor of corresponding classes
+            current_batch_size = target_classes.size(0)
+
+            distractors = [[] for _ in range(current_batch_size)] # will contain the list of distractors for each target of the batch
+
+            # instead of iterating over the targets and finding distractors for them, we iterate over potential distractors and assign them (when possible) to a target
+            examples_filled = set() # will contain the index of the targets with enough distractors
             while len(examples_filled) != current_batch_size:
-                # get next distractor
+                # gets the next distractor
                 distractor, distractor_class = next(distractors_generator)
-                # match distractor with target
-                first_valid_match = _first_valid(distractor_class, target_classes, examples_filled)
-                if first_valid_match is None:
-                    # no matching target for this distractor
+
+                # tries to match the distractor with a target
+                match_idx = match_with_target(distractor_class, target_classes, examples_filled)
+                if match_idx is None:
+                    # no possible target for this distractor
                     continue
 
-                # add where match
-                distractors[first_valid_match].append(distractor.squeeze(0))
+                # adds the distractor to its matched target
+                distractors[match_idx].append(distractor.squeeze(0))
 
-                if len(distractors[first_valid_match]) == K - 1:
-                    # target has enough distractors
-                    examples_filled.add(first_valid_match)
+                if len(distractors[match_idx]) == (K - 1):
+                    # the target has enough distractors
+                    examples_filled.add(match_idx)
 
-            # to tensors
+            # conversion to tensors
             distractors = torch.stack([torch.stack(d) for d in distractors])
-            batch = torch.cat([examples.unsqueeze(1), distractors], dim=1)
+            batch = torch.cat([targets.unsqueeze(1), distractors], dim=1)
+
             yield batch
 
     def __iter__(self):
         """cycling iterator over examples"""
         while True:
-            for example in self._get_examples():
+            for example in self._get_batch():
                 yield example
 
 def get_dataloader():
