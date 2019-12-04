@@ -126,7 +126,7 @@ if __name__ == "__main__":
 
     model = CommunicationGame().to(DEVICE)
     optimizer = build_optimizer(model.parameters())
-    data_loader = get_dataloader()
+    data_loader = get_data_loader()
     event_writer = SummaryWriter(SUMMARY_DIR)
 
     if(SAVE_MODEL and (not os.path.isdir(MODELS_DIR))):

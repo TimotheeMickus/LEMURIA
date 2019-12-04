@@ -96,5 +96,5 @@ class DistinctTargetClassDataLoader():
             for example in self._get_batch():
                 yield example
 
-def get_dataloader():
+def get_data_loader():
     return DistinctTargetClassDataLoader()
