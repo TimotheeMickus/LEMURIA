@@ -46,7 +46,7 @@ def compute_reward(receiver_action):
     """
         return reward function
     """
-    # by design, first image is the target
+    # by design, the first image is the target
     reward = (receiver_action == 0).float()
     return reward
 
@@ -101,13 +101,13 @@ def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
             loss.backward()
             optim.step()
 
-            # update running average reward
+            # updates running average reward
             r = R.sum().item() / batch.size(0)
             total_r += r
             pbar.set_postfix({"R" : total_r / i}, refresh=False)
             pbar.update()
 
-            # log values
+            # logs some values
             if event_writer is not None:
                 event_writer.add_scalar('train/reward', r, start_i + i)
                 event_writer.add_scalar('train/loss', loss.item(), start_i + i)
