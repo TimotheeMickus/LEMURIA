@@ -15,7 +15,7 @@ arg_parser.add_argument('--device', help='what to run PyTorch on (potentially av
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
 arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=5, type=int)
 arg_parser.add_argument('--distractors', help='number of distractors', default=2, type=int)
-arg_parser.add_argument('--epochs', help='number of epochs', default=1000, type=int)
+arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
 args = arg_parser.parse_args()
 
 ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
