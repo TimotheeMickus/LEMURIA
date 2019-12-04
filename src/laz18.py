@@ -33,11 +33,11 @@ class CommunicationGame(nn.Module):
         target_img = inputs[:,0] # These are the targets (the others are distractors)
 
         sender_inputs = target_img
-        if(NOISE_STD_DEV > 0.0): sender_inputs = torch.clamp((sender_inputs + (NOISE_STD_DEV * torch.rand(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        if(NOISE_STD_DEV > 0.0): sender_inputs = torch.clamp((sender_inputs + (NOISE_STD_DEV * torch.randn(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
         sender_outcome = self.sender(sender_inputs)
 
         receiver_inputs = inputs
-        if(NOISE_STD_DEV > 0.0): receiver_inputs = torch.clamp((receiver_inputs + (NOISE_STD_DEV * torch.rand(size=receiver_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        if(NOISE_STD_DEV > 0.0): receiver_inputs = torch.clamp((receiver_inputs + (NOISE_STD_DEV * torch.randn(size=receiver_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
         receiver_outcome = self.receiver(receiver_inputs, *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
