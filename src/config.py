@@ -8,15 +8,31 @@ import socket # for `gethostname`
 from datetime import datetime
 
 arg_parser = argparse.ArgumentParser()
-arg_parser.add_argument('--data_set', help='the path to the data set', default=(os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train')))
-arg_parser.add_argument('--summaries', help='the path to the TensorBoard summaries for this run', default=(os.path.join(this_path, os.pardir, 'runs', (datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + socket.gethostname()))))
+
+default_data_set = (os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train'))
+arg_parser.add_argument('--data_set', help='the path to the data set', default=default_data_set)
+
+default_summary = os.path.join(this_path, os.pardir, 'runs', (datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + socket.gethostname()))
+arg_parser.add_argument('--summary', help='the path to the TensorBoard summary for this run', default=default_summary)
+
+arg_parser.add_argument('-save_model', help='saves the model after each epoch', action='store_true')
+
+default_models = os.path.join(default_summary, 'models')
+arg_parser.add_argument('--models', help='the path to the saved models', default=default_models)
+
 arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
+
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
+
 arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=5, type=int)
+
 arg_parser.add_argument('--distractors', help='number of distractors', default=2, type=int)
+
 arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
+
 args = arg_parser.parse_args()
+
 
 ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
@@ -49,8 +65,9 @@ DATASET_PATH = args.data_set
 
 DEVICE = args.device
 
-MODEL_CKPT_DIR = os.path.join(this_path, os.pardir, 'models')
+SAVE_MODEL = args.save_model
+MODELS_DIR = args.models
 
-SUMMARIES_DIR = args.summaries
+SUMMARY_DIR = args.summary
 
 EPOCHS = args.epochs

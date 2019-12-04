@@ -120,19 +120,19 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     return model # TODO Is there any reason to return the model?
 
 if __name__ == "__main__":
-    if not os.path.isdir(DATASET_PATH):
+    if(not os.path.isdir(DATASET_PATH)):
         print("Directory '%s' not found." % DATASET_PATH)
         sys.exit()
 
     model = CommunicationGame().to(DEVICE)
     optimizer = build_optimizer(model.parameters())
     data_loader = get_dataloader()
-    event_writer = SummaryWriter(SUMMARIES_DIR)
+    event_writer = SummaryWriter(SUMMARY_DIR)
 
-    if not os.path.isdir(MODEL_CKPT_DIR):
-        os.makedirs(MODEL_CKPT_DIR)
+    if(SAVE_MODEL and (not os.path.isdir(MODELS_DIR))):
+        os.makedirs(MODELS_DIR)
 
     print(datetime.now(), "training start...")
     for epoch in range(1, (EPOCHS + 1)):
         train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
-        torch.save(model.state_dict(), os.path.join(MODEL_CKPT_DIR, ("model_e%i.pt" % epoch)))
+        if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(MODELS_DIR, ("model_e%i.pt" % epoch)))
