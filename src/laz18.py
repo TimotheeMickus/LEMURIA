@@ -116,6 +116,10 @@ def train_epoch(model, data_iterator, optim, epoch=0, iter_steps=1000,
     return model
 
 if __name__ == "__main__":
+    if not os.path.isdir(DATASET_PATH):
+        print("Directory '%s' not found." % DATASET_PATH)
+        sys.exit()
+
     model = CommunicationGame().to(DEVICE)
     optimizer = build_optimizer(model.parameters())
     data_loader = get_dataloader()
