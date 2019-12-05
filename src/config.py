@@ -20,8 +20,8 @@ arg_parser.add_argument('-save_model', help='saves the model after each epoch', 
 arg_parser.add_argument('-simple_display', help='displays the information in a simple way (not using tqdm)', action='store_true')
 
 #default_models = os.path.join(default_summary, 'models')
-#arg_parser.add_argument('--models', help='the path to the saved models', default=default_models)
-arg_parser.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=os.path.join('[summary]', 'models'))
+default_models = os.path.join('[summary]', 'models')
+arg_parser.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models)
 
 arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
