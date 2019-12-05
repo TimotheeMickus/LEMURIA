@@ -138,18 +138,18 @@ if __name__ == "__main__":
         sys.exit()
 
     for run in range(RUNS):
-        # TODO I'm wondering whether any (e.g., memory) cleaning needs to be done between runs
-
         print('Run %i' % run)
+
         run_models_dir = os.path.join(MODELS_DIR, str(run))
+        run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
+
+        if(not os.path.isdir(run_summary_dir): os.makedirs(run_summary_dir)
+        if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         model = CommunicationGame().to(DEVICE)
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader()
-        event_writer = SummaryWriter(SUMMARY_DIR, filename_suffix=('_' + str(run)))
-
-        if(SAVE_MODEL and (not os.path.isdir(run_models_dir))):
-            os.makedirs(run_models_dir)
+        event_writer = SummaryWriter(run_summary_dir)
 
         print(datetime.now(), "training start...")
         for epoch in range(1, (EPOCHS + 1)):
