@@ -143,7 +143,7 @@ if __name__ == "__main__":
         run_models_dir = os.path.join(MODELS_DIR, str(run))
         run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
 
-        if(not os.path.isdir(run_summary_dir): os.makedirs(run_summary_dir)
+        if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         model = CommunicationGame().to(DEVICE)
