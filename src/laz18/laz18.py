@@ -10,9 +10,17 @@ import tqdm
 
 from config import *
 from data import get_data_loader
+
+# [START] Imports shared code from the parent directory
+parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
+sys.path.append(parent_dir_path)
+
 from receiver import ReceiverPolicy
 from sender import SenderPolicy
 from utils import build_optimizer
+
+sys.path.remove(parent_dir_path)
+# [END] Imports shared code from the parent directory
 
 class CommunicationGame(nn.Module):
     def __init__(self):
@@ -29,7 +37,7 @@ class CommunicationGame(nn.Module):
             `sender_outcome`, `PolicyOutcome` for sender
             `receiver_outcome`, `PolicyOutcome` for receiver
         """
-        inputs = inputs.float() # Converts the images from ??? to float TODO
+        inputs = inputs.float() # Makes sure the images are float tensors
         target_img = inputs[:,0] # These are the targets (the others are distractors)
 
         sender_inputs = target_img

@@ -9,10 +9,10 @@ from datetime import datetime
 
 arg_parser = argparse.ArgumentParser()
 
-default_data_set = (os.path.join(this_path, os.pardir, 'data', 'coil', 'coil-100' ,'train'))
+default_data_set = (os.path.join(this_path, os.pardir, os.pardir, 'data', 'coil', 'coil-100' ,'train'))
 arg_parser.add_argument('--data_set', help='the path to the data set', default=default_data_set)
 
-default_summary = os.path.join(this_path, os.pardir, 'runs', ('[now]_' + socket.gethostname()))
+default_summary = os.path.join(this_path, os.pardir, os.pardir, 'runs', ('[now]_' + socket.gethostname()))
 arg_parser.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary)
 
 arg_parser.add_argument('-save_model', help='saves the model after each epoch', action='store_true')
