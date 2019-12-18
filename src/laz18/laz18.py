@@ -6,6 +6,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
+import torchvision
 import tqdm
 
 from config import *
@@ -38,11 +39,11 @@ class CommunicationGame(nn.Module):
             `receiver_outcome`, `PolicyOutcome` for receiver
         """
         inputs = inputs.float() # Makes sure the images are float tensors
-        target_img = inputs[:,0] # These are the targets (the others are distractors)
+        #show_img(torchvision.utils.make_grid(inputs[0]))
 
-        sender_inputs = target_img
+        sender_inputs = inputs[:,0] # These are the targets (the others are distractors)
         #input(sender_inputs.shape)
-        #show_img(sender_inputs[0])
+        #input(sender_inputs[0])
         if(NOISE_STD_DEV > 0.0): sender_inputs = torch.clamp((sender_inputs + (NOISE_STD_DEV * torch.randn(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
         sender_outcome = self.sender(sender_inputs)
 
