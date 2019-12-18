@@ -52,12 +52,17 @@ class CommunicationGame(nn.Module):
 
         return sender_outcome, receiver_outcome
 
-def compute_rewards(receiver_action):
+def compute_rewards(sender_action, receiver_action):
     """
         returns the reward for each element of a batch
     """
     # by design, the first image is the target
-    rewards = (receiver_action == 0).float()
+    guess_rewards = (receiver_action == 0).float()
+
+    msg_lengths = torch.squeeze(sender_action[1], dim=1).float() # Il est très important de floater, sinon ça fait n'importe quoi
+    length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+
+    rewards = (guess_rewards - length_penalties)
 
     return rewards
 
@@ -98,7 +103,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             optim.zero_grad()
             sender_outcome, receiver_outcome = model(batch)
 
-            rewards = compute_rewards(receiver_outcome.action)
+            rewards = compute_rewards(sender_outcome.action, receiver_outcome.action)
             log_prob = compute_log_prob(
                 sender_outcome.log_prob,
                 receiver_outcome.log_prob)

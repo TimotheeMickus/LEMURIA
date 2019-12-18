@@ -30,6 +30,8 @@ arg_parser.add_argument('--batch', help='batch size', default=32, type=int)
 
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
 
+arg_parser.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
+
 arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=64, type=int) # There are 32 intuitive classes of images in the data set
 
 arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
@@ -41,7 +43,7 @@ args = arg_parser.parse_args()
 
 ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
-MSG_LEN = 4
+MSG_LEN = 16 # Max length of a message
 
 K = 3 # size of pools of image for listener
 
@@ -52,7 +54,7 @@ FILTERS = 32
 STRIDES = (2, 2, 1, 2, 1, 2, 1, 2) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
 KERNEL_SIZE = 3
 
-BATCH_SIZE = args.batch
+BATCH_SIZE = args.batch # Try with small values, such as 0.1
 LR = .0001
 
 # BETA values for reweighting entropy penalty
