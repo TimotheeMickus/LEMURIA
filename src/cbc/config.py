@@ -26,6 +26,8 @@ arg_parser.add_argument('--models', help='the path to the saved models (\'[summa
 arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
 
+arg_parser.add_argument('--batch', help='batch size', default=32, type=int)
+
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
 
 arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=64, type=int) # There are 32 intuitive classes of images in the data set
@@ -48,7 +50,7 @@ HIDDEN = 50
 CONV_LAYERS = 8
 FILTERS = 32
 STRIDES = (2, 2, 1, 2, 1, 2, 1, 2) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
-KERNEL_SIZE = 3
+KERNEL_SIZE = args.batch
 
 BATCH_SIZE = 32
 LR = .0001
@@ -57,8 +59,7 @@ LR = .0001
 BETA_SENDER = .01
 BETA_RECEIVER = .001
 
-#IMG_SHAPE = (3, 124, 124) # Original dataset size
-IMG_SHAPE = (3, 128, 128) # COIL size
+IMG_SHAPE = (3, 128, 128)
 
 NOISE_STD_DEV = args.noise
 

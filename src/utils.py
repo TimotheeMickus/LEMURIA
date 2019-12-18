@@ -3,11 +3,22 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
+import torchvision
+import matplotlib.pyplot as plt
+import numpy as np
 
 from config import *
 
-# struct for policy outcomes
+# Displays a tensor as an image (channels as the first dimension)
+def show_img(img):
+    plt.imshow(np.transpose(img, (1,2,0)), interpolation='nearest')
+    plt.show()
+
+# Displays a tensor as an image (channels as the first dimension)
+def simple_show_img(img):
+    torchvision.transforms.functional.to_pil_image(img).show()
+
+# Structure for policy outcomes
 PolicyOutcome = namedtuple("Policy", ["entropy", "log_prob", "action"])
 
 def build_optimizer(θ):
