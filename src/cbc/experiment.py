@@ -22,49 +22,45 @@ from utils import build_optimizer, show_img, show_imgs
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
-class CommunicationGame(nn.Module):
+class Model(nn.Module):
     def __init__(self):
-        super(CommunicationGame, self).__init__()
+        super(Model, self).__init__()
 
         self.sender = SenderPolicy()
         self.receiver = ReceiverPolicy()
 
-    def forward(self, inputs):
+    def forward(self, batch):
         """
         Input:
-            `inputs` of shape [Batch, K, *IMG_SHAPE]. The target image is the first of the K images
+            `batch` is a Batch (a kind of named tuple); 'alice_input' is a tensor of shape [BATCH_SIZE, *IMG_SHAPE] and 'bob_input' is a tensor of shape [BATCH_SIZE, K, *IMG_SHAPE]
         Output:
             `sender_outcome`, `PolicyOutcome` for sender
             `receiver_outcome`, `PolicyOutcome` for receiver
         """
-        inputs = inputs.float() # Makes sure the images are float tensors
-        if(NOISE_STD_DEV > 0.0): inputs = torch.clamp((inputs + (NOISE_STD_DEV * torch.randn(size=inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
-        #show_imgs(inputs[0])
+        
+        #show_img(batch.alice_input[0])
+        #show_imgs(batch.bob_input[0])
 
-        sender_inputs = inputs[:,0]
-        #input(sender_inputs.shape)
-        #input(sender_inputs[0])
-        sender_outcome = self.sender(sender_inputs)
+        sender_outcome = self.sender(batch.alice_input)
 
-        receiver_inputs = inputs[:,1:].contiguous()
-        #input(receiver_inputs.shape)
-        receiver_outcome = self.receiver(receiver_inputs, *sender_outcome.action)
+        receiver_outcome = self.receiver(batch.bob_input, *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
 
 def compute_rewards(sender_action, receiver_action):
     """
-        returns the reward for each element of a batch
+        returns the reward as well as the success for each element of a batch
     """
-    # by design, the first image is the target
-    guess_rewards = (receiver_action == 0).float()
+    successes = (receiver_action == 0).float() # by design, the first image is the target
+    
+    guess_rewards = successes
 
     msg_lengths = torch.squeeze(sender_action[1], dim=1).float() # Il est très important de floater, sinon ça fait n'importe quoi
     length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
     rewards = (guess_rewards - length_penalties)
 
-    return rewards
+    return (rewards, successes)
 
 def compute_log_prob(sender_log_prob, receiver_log_prob):
     """
@@ -82,7 +78,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     """
         Model training function
         Input:
-            `model`, a `CommunicationGame` model
+            `model`, a `Model` model
             `data_iterator`, an infinite iterator over (batched) data
             `optim`, the optimizer
         Optional arguments:
@@ -99,11 +95,10 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
         end_i = start_i + steps_per_epoch
 
         for i, batch in zip(range(start_i, end_i), data_iterator):
-            batch = batch.to(DEVICE)
             optim.zero_grad()
             sender_outcome, receiver_outcome = model(batch)
 
-            rewards = compute_rewards(sender_outcome.action, receiver_outcome.action)
+            (rewards, successes) = compute_rewards(sender_outcome.action, receiver_outcome.action)
             log_prob = compute_log_prob(
                 sender_outcome.log_prob,
                 receiver_outcome.log_prob)
@@ -118,17 +113,23 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             loss.backward()
             optim.step()
 
+            avg_reward = rewards.mean().item() # average reward of the batch
+            avg_success = successes.mean().item() # average success of the batch
+            msg_lengths = torch.squeeze(sender_outcome.action[1], dim=1).float() # Il est très important de floater, sinon ça fait n'importe quoi
+            avg_msg_length = msg_lengths.mean().item()
+
             # updates running average reward
-            avg_reward = rewards.sum().item() / batch.size(0) # average reward of the batch
             total_reward += rewards.sum().item()
-            total_items += batch.size(0)
+            total_items += batch.size
 
             if(callback is not None): callback(total_reward / total_items)
 
             # logs some values
             if event_writer is not None:
                 event_writer.add_scalar('train/reward', avg_reward, i)
+                event_writer.add_scalar('train/success', avg_success, i)
                 event_writer.add_scalar('train/loss', loss.item(), i)
+                event_writer.add_scalar('train/msg_length', avg_msg_length, i)
 
     if(SIMPLE_DISPLAY):
         def callback(r):
@@ -145,8 +146,6 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
 
     model.eval()
 
-    return model # TODO Is there any reason to return the model?
-
 if __name__ == "__main__":
     if(not os.path.isdir(DATASET_PATH)):
         print("Directory '%s' not found." % DATASET_PATH)
@@ -161,7 +160,7 @@ if __name__ == "__main__":
         if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        model = CommunicationGame().to(DEVICE)
+        model = Model().to(DEVICE)
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader()
         event_writer = SummaryWriter(run_summary_dir)
