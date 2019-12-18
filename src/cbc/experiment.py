@@ -39,16 +39,16 @@ class CommunicationGame(nn.Module):
             `receiver_outcome`, `PolicyOutcome` for receiver
         """
         inputs = inputs.float() # Makes sure the images are float tensors
+        if(NOISE_STD_DEV > 0.0): inputs = torch.clamp((inputs + (NOISE_STD_DEV * torch.randn(size=inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        show_img(torchvision.utils.make_grid(inputs[0]))
 
         sender_inputs = inputs[:,0]
         #input(sender_inputs.shape)
-        #show_img(sender_inputs[0])
-        if(NOISE_STD_DEV > 0.0): sender_inputs = torch.clamp((sender_inputs + (NOISE_STD_DEV * torch.randn(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        #input(sender_inputs[0])
         sender_outcome = self.sender(sender_inputs)
 
         receiver_inputs = inputs[:,1:]
-        show_img(torchvision.utils.make_grid(receiver_inputs[0]))
-        if(NOISE_STD_DEV > 0.0): receiver_inputs = torch.clamp((receiver_inputs + (NOISE_STD_DEV * torch.randn(size=receiver_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        #input(receiver_inputs.shape)
         receiver_outcome = self.receiver(receiver_inputs, *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
