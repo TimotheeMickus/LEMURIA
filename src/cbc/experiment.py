@@ -6,7 +6,6 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-import torchvision
 import tqdm
 
 from config import *
@@ -18,7 +17,7 @@ sys.path.append(parent_dir_path)
 
 from receiver import ReceiverPolicy
 from sender import SenderPolicy
-from utils import build_optimizer, show_img
+from utils import build_optimizer, show_img, show_imgs
 
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
@@ -40,7 +39,7 @@ class CommunicationGame(nn.Module):
         """
         inputs = inputs.float() # Makes sure the images are float tensors
         if(NOISE_STD_DEV > 0.0): inputs = torch.clamp((inputs + (NOISE_STD_DEV * torch.randn(size=inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
-        show_img(torchvision.utils.make_grid(inputs[0]))
+        #show_imgs(inputs[0])
 
         sender_inputs = inputs[:,0]
         #input(sender_inputs.shape)

@@ -18,6 +18,9 @@ def show_img(img):
 def simple_show_img(img):
     torchvision.transforms.functional.to_pil_image(img).show()
 
+def show_imgs(imgs):
+    show_img(torchvision.utils.make_grid(imgs))
+
 # Structure for policy outcomes
 PolicyOutcome = namedtuple("Policy", ["entropy", "log_prob", "action"])
 
