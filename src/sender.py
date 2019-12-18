@@ -19,7 +19,7 @@ class SenderMessageDecoder(nn.Module):
         self.action_space_proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
 
     def forward(self, encoded):
-        # initialize first input and state
+        # initializes first input and state
         input = torch.ones(encoded.size(0)).long().to(DEVICE) * BOS
         input = self.embedding(input)
         cell = self.cell_proj(encoded).unsqueeze(0)
@@ -35,18 +35,17 @@ class SenderMessageDecoder(nn.Module):
         has_stopped = torch.zeros(encoded.size(0)).bool().to(DEVICE)
         has_stopped.requires_grad = False
 
-        # produce message
+        # produces message
         for i in range(MSG_LEN):
             output, state = self.lstm(input.unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
-            # select action for step
+            # selects action for step
             probs =  F.softmax(output, dim=-1)
             dist = Categorical(probs)
             action = dist.sample() if self.training else probs.argmax(dim=-1)
 
-
-            # ignore prediction for completed messages
+            # ignores prediction for completed messages
             ent = dist.entropy() * (~has_stopped).float()
             log_p = dist.log_prob(action) * (~has_stopped).float()
             log_probs.append(log_p)
@@ -54,17 +53,19 @@ class SenderMessageDecoder(nn.Module):
 
             action = action.masked_fill(has_stopped, PAD)
             message.append(action)
-            # early stopping
+
+            # If all messages are finished
             has_stopped = has_stopped | (action == EOS)
             if has_stopped.all():
                 break
             # next input
             input = self.embedding(action)
 
-        # convert output to tensor
+        # converts output to tensor
         message = torch.stack(message, dim=1)
         message_len = (message != PAD).cumsum(dim=1)[:,-1,None]
         log_probs = torch.stack(log_probs, dim=1)
+
         # average entropy over timesteps, hence ignore padding
         entropy = torch.stack(entropy, dim=1)
         entropy = entropy.sum(dim=1, keepdim=True)
