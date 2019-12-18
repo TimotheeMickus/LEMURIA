@@ -9,7 +9,7 @@ from datetime import datetime
 
 arg_parser = argparse.ArgumentParser()
 
-default_data_set = (os.path.join(this_path, os.pardir, os.pardir, 'data', 'coil', 'coil-100' ,'train'))
+default_data_set = os.path.join(this_path, os.pardir, os.pardir, 'data', 'coil', 'coil-100' ,'train')
 arg_parser.add_argument('--data_set', help='the path to the data set', default=default_data_set)
 
 default_summary = os.path.join(this_path, os.pardir, os.pardir, 'runs', 'laz18', ('[now]_' + socket.gethostname()))
