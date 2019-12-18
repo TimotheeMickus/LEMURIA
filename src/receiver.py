@@ -6,7 +6,6 @@ from torch.distributions.categorical import Categorical
 from config import *
 from utils import build_cnn_encoder, PolicyOutcome
 
-
 class ReceiverMessageEncoder(nn.Module):
     """
     Encodes a message of discrete symbols in a single embedding.
@@ -31,6 +30,7 @@ class ReceiverMessageEncoder(nn.Module):
         # select last step corresponding to message
         index = torch.arange(message.size(-1)).expand_as(message).to(DEVICE)
         output = embeddings.masked_select((index == (length-1)).unsqueeze(-1))
+
         return output.view(embeddings.size(0), embeddings.size(-1))
 
 class ReceiverPolicy(nn.Module):
@@ -76,4 +76,5 @@ class ReceiverPolicy(nn.Module):
             entropy=entropy,
             log_prob=log_prob,
             action=action)
+
         return outcome
