@@ -50,9 +50,9 @@ HIDDEN = 50
 CONV_LAYERS = 8
 FILTERS = 32
 STRIDES = (2, 2, 1, 2, 1, 2, 1, 2) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
-KERNEL_SIZE = args.batch
+KERNEL_SIZE = 3
 
-BATCH_SIZE = 32
+BATCH_SIZE = args.batch
 LR = .0001
 
 # BETA values for reweighting entropy penalty

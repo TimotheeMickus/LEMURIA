@@ -47,7 +47,7 @@ class CommunicationGame(nn.Module):
         #input(sender_inputs[0])
         sender_outcome = self.sender(sender_inputs)
 
-        receiver_inputs = inputs[:,1:]
+        receiver_inputs = inputs[:,1:].contiguous()
         #input(receiver_inputs.shape)
         receiver_outcome = self.receiver(receiver_inputs, *sender_outcome.action)
 
@@ -87,9 +87,9 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             `event_writer`: tensorboard writer to log evolution of values
     """
     model.train() # sets the model in training mode
-    
+
     def loop(callback=None):
-        total_reward = 0.0 # sum of the rewards since the beginning of the epoch 
+        total_reward = 0.0 # sum of the rewards since the beginning of the epoch
         total_items = 0 # number of training instances since the beginning of the epoch
         start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
         end_i = start_i + steps_per_epoch
