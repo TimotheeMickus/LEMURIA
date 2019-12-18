@@ -17,7 +17,7 @@ sys.path.append(parent_dir_path)
 
 from receiver import ReceiverPolicy
 from sender import SenderPolicy
-from utils import build_optimizer, show_img, show_imgs
+from utils import build_optimizer
 
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
@@ -37,9 +37,6 @@ class Model(nn.Module):
             `sender_outcome`, `PolicyOutcome` for sender
             `receiver_outcome`, `PolicyOutcome` for receiver
         """
-        
-        #show_img(batch.alice_input[0])
-        #show_imgs(batch.bob_input[0])
 
         sender_outcome = self.sender(batch.alice_input)
 
@@ -52,13 +49,13 @@ def compute_rewards(sender_action, receiver_action):
         returns the reward as well as the success for each element of a batch
     """
     successes = (receiver_action == 0).float() # by design, the first image is the target
-    
-    guess_rewards = successes
 
-    msg_lengths = torch.squeeze(sender_action[1], dim=1).float() # Il est très important de floater, sinon ça fait n'importe quoi
-    length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+    rewards = successes
 
-    rewards = (guess_rewards - length_penalties)
+    if args.penalty: # Avoid supplementary gradient computation when possible
+        msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; cf. https://github.com/pytorch/pytorch/issues/9515 (I believe)
+        length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+        rewards = (rewards - length_penalties)
 
     return (rewards, successes)
 
@@ -99,9 +96,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             sender_outcome, receiver_outcome = model(batch)
 
             (rewards, successes) = compute_rewards(sender_outcome.action, receiver_outcome.action)
-            log_prob = compute_log_prob(
-                sender_outcome.log_prob,
-                receiver_outcome.log_prob)
+            log_prob = compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
             loss = - (rewards * log_prob)
 
             loss = loss.mean()
@@ -115,14 +110,13 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
 
             avg_reward = rewards.mean().item() # average reward of the batch
             avg_success = successes.mean().item() # average success of the batch
-            msg_lengths = torch.squeeze(sender_outcome.action[1], dim=1).float() # Il est très important de floater, sinon ça fait n'importe quoi
-            avg_msg_length = msg_lengths.mean().item()
+            avg_msg_length = sender_outcome.action[1].float().mean().item() # average message length of the batch
 
             # updates running average reward
             total_reward += rewards.sum().item()
             total_items += batch.size
 
-            if(callback is not None): callback(total_reward / total_items)
+            if callback is not None: callback(total_reward / total_items)
 
             # logs some values
             if event_writer is not None:
@@ -131,7 +125,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
                 event_writer.add_scalar('train/loss', loss.item(), i)
                 event_writer.add_scalar('train/msg_length', avg_msg_length, i)
 
-    if(SIMPLE_DISPLAY):
+    if SIMPLE_DISPLAY:
         def callback(r):
             print('R: %f' % r)
 
@@ -147,7 +141,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     model.eval()
 
 if __name__ == "__main__":
-    if(not os.path.isdir(DATASET_PATH)):
+    if not os.path.isdir(DATASET_PATH):
         print("Directory '%s' not found." % DATASET_PATH)
         sys.exit()
 
@@ -157,8 +151,8 @@ if __name__ == "__main__":
         run_models_dir = os.path.join(MODELS_DIR, str(run))
         run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
 
-        if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
-        if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
+        if not os.path.isdir(run_summary_dir): os.makedirs(run_summary_dir)
+        if SAVE_MODEL and (not os.path.isdir(run_models_dir)): os.makedirs(run_models_dir)
 
         model = Model().to(DEVICE)
         optimizer = build_optimizer(model.parameters())
@@ -168,4 +162,4 @@ if __name__ == "__main__":
         print(datetime.now(), "training start...")
         for epoch in range(1, (EPOCHS + 1)):
             train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
-            if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
+            if SAVE_MODEL: torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))

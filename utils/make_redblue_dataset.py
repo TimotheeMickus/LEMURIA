@@ -4,7 +4,7 @@ from random import uniform
 
 scene = vp.canvas(width=128, height=128)
 
-NUMBER_IMGS = (2 ** 5) * 3
+NUMBER_IMGS = (2 ** 5) * 300
 
 SPHERE = vp.sphere(visible=False)
 CUBE = vp.box(visible=False)
@@ -91,7 +91,7 @@ while True:
                 for right in _right:
                     for big in _big:
                         hide_all()
-                        fname = "_%i_%s_%s_%s_%s_%s" % (i, obj, color, up, right, big)
+                        fname = "%i_%s_%s_%s_%s_%s" % (i, obj, color, up, right, big)
                         vp_obj = random_obj(_objs[obj], _up[up], _right[right], _big[big], _colors[color])
                         scene.background = vp.color.gray(uniform(0.3, 1.))
                         for l in scene.lights:
