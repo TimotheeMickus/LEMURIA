@@ -1,5 +1,4 @@
 import itertools as it
-import functools as ft
 import os
 from collections import namedtuple, defaultdict
 
@@ -32,10 +31,10 @@ class DistinctTargetClassDataLoader():
     def __init__(self):
         def analyse_filename(filename):
             name, ext = os.path.splitext(filename)
-            infos = name.split('_') # nothing, idx, shape, colour, vertical position, horizontal position, size
+            infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
 
-            idx = int(infos[1])
-            category = tuple(map(dict.__getitem__, self._concepts, infos[2:])) # equivalent to (self.shapes[infos[1]], self.colours[infos[2]], self.v_positions[infos[3]], self.h_positions[infos[4]], self.sizes[infos[5]])
+            idx = int(infos[0])
+            category = tuple(map(dict.__getitem__, self._concepts, infos[1:])) # equivalent to (self.shapes[infos[1]], self.colours[infos[2]], self.v_positions[infos[3]], self.h_positions[infos[4]], self.sizes[infos[5]])
 
             return (idx, category)
 
@@ -43,7 +42,7 @@ class DistinctTargetClassDataLoader():
         dataset = [] # Will end as a Numpy array of DataPoint·s
         for filename in os.listdir(DATASET_PATH):
             full_path = os.path.join(DATASET_PATH, filename)
-            if not os.path.isfile(full_path): continue # We are only interested in files (not directories)
+            if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
 
             idx, category = analyse_filename(filename)
 
@@ -73,18 +72,6 @@ class DistinctTargetClassDataLoader():
         distance = np.random.randint(self.nb_concepts) + 1
         return self._distance_to_category(category, distance)
 
-
-    def _get_img(self, row):
-        return torch.stack([e.img for e in row])
-
-    def _make_bob_examples(self, alice_data_row):  # TODO: this can probably be vectorized better, probably using indexing
-        alice_data_category = alice_data_row[0].category
-        return [
-            np.random.choice(self.categories[alice_data_category]),
-            np.random.choice(self.categories[self._distance_to_category(alice_data_category, 1)]),
-            np.random.choice(self.categories[self._different_category(alice_data_category)]),
-        ]
-
     def _get_batch(self):
         """Generates a batch as a Batch object.
         'alice_input' and 'bob_input' are both tensors of outer dimension of size BATCH_SIZE
@@ -93,14 +80,18 @@ class DistinctTargetClassDataLoader():
             - bob_input[0] is an image of the same category,
             - bob_input[1] is an image of a neighbouring category (distance = 1), and
             - bob_input[2] is an image of a different category (distance != 0)"""
-        alice_examples = np.random.choice(self.dataset, BATCH_SIZE)
-        bob_examples = np.apply_along_axis(self._make_bob_examples, 1, alice_examples[:,None])
+        batch = []
+        for _ in range(BATCH_SIZE):
+            alice_data = np.random.choice(self.dataset)
+            bob_a = np.random.choice(self.categories[alice_data.category]) # same category
+            bob_b = np.random.choice(self.categories[self._distance_to_category(alice_data.category, 1)]) # neighbouring category
+            bob_c = np.random.choice(self.categories[self._different_category(alice_data.category)]) # different category
 
-        alice_input = torch.from_numpy(np.apply_along_axis(self._get_img, 0, alice_examples))
-        bob_input = torch.from_numpy(np.apply_along_axis(self._get_img, 1, bob_examples))
-
+            l = [bob_a, bob_b, bob_c]
+            batch.append((alice_data.img, torch.stack([x.img for x in l])))
+        alice_input, bob_input = list(map((lambda l: torch.stack(l)), zip(*batch))) # Unzips the list of pairs (to a pair of lists) and then stacks
         # Adds noise if necessary (normal random noise + clamping)
-        if NOISE_STD_DEV > 0.0:
+        if(NOISE_STD_DEV > 0.0):
             alice_input = torch.clamp((alice_input + (NOISE_STD_DEV * torch.randn(size=alice_input.shape))), 0.0, 1.0)
             bob_input = torch.clamp((bob_input + (NOISE_STD_DEV * torch.randn(size=bob_input.shape))), 0.0, 1.0)
 
