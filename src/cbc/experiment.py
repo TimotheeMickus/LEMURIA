@@ -120,10 +120,11 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
 
             # logs some values
             if(event_writer is not None):
-                event_writer.add_scalar('train/reward', avg_reward, i)
-                event_writer.add_scalar('train/success', avg_success, i)
-                event_writer.add_scalar('train/loss', loss.item(), i)
-                event_writer.add_scalar('train/msg_length', avg_msg_length, i)
+                number_ex_seen = i * BATCH_SIZE
+                event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
+                event_writer.add_scalar('train/success', avg_success, number_ex_seen)
+                event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
+                event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
 
     if(SIMPLE_DISPLAY):
         def callback(r):

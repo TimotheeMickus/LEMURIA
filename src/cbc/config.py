@@ -32,7 +32,9 @@ arg_parser.add_argument('--noise', help='standard deviation of the normal random
 
 arg_parser.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
 
-arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=64, type=int) # There are 32 intuitive classes of images in the data set
+arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
+
+arg_parser.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
 
 arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
 
@@ -43,7 +45,7 @@ args = arg_parser.parse_args()
 
 ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
-MSG_LEN = 16 # Max length of a message
+MSG_LEN = args.max_len # Max length of a message
 
 K = 3 # size of pools of image for listener
 
