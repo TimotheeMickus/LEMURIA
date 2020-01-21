@@ -15,7 +15,7 @@ arg_parser.add_argument('--data_set', help='the path to the data set', default=d
 default_summary = os.path.join(this_path, os.pardir, os.pardir, 'runs', 'cbc', ('[now]_' + socket.gethostname()))
 arg_parser.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary)
 
-arg_parser.add_argument('-save_model', help='saves the model after each epoch', action='store_true')
+arg_parser.add_argument('--save_model', '-save_model', help='saves the model after each epoch', action='store_true')
 
 arg_parser.add_argument('-simple_display', help='displays the information in a simple way (not using tqdm)', action='store_true')
 
@@ -40,12 +40,22 @@ arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=i
 
 arg_parser.add_argument('--runs', help='number of runs', default=1, type=int)
 
+#clip
+arg_parser.add_argument('--clip', help='gradient clip value', default=None, type=float)
+
+arg_parser.add_argument('--norm_clip', help='clip gradient by norm', action="store_true")
+
+
 args = arg_parser.parse_args()
 
 
 ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
 MSG_LEN = args.max_len # Max length of a message
+
+CLIP_VALUE = args.clip
+CLIP_NORM = args.norm_clip
+
 
 K = 3 # size of pools of image for listener
 
@@ -81,3 +91,5 @@ EPOCHS = args.epochs
 RUNS = args.runs
 
 SIMPLE_DISPLAY = args.simple_display
+
+DEBUG_MODE = False

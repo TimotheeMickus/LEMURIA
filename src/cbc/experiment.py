@@ -106,6 +106,10 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
 
             # backprop
             loss.backward()
+            if CLIP_VALUE is not None:
+                clip = torch.nn.utils.clip_grad_norm_ if CLIP_NORM\
+                    else torch.nn.utils.clip_grad_value_
+                clip(model.parameters(), CLIP_VALUE)
             optim.step()
 
             avg_reward = rewards.mean().item() # average reward of the batch
@@ -125,6 +129,19 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
                 event_writer.add_scalar('train/success', avg_success, number_ex_seen)
                 event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
                 event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
+                if DEBUG_MODE:
+                    median_grad = torch.cat([p.grad.view(-1).detach() for p in model.parameters()]).abs().median().item()
+                    mean_grad = torch.cat([p.grad.view(-1).detach() for p in model.parameters()]).abs().mean().item()
+                    min_grad = torch.cat([p.grad.view(-1).detach() for p in model.parameters()]).abs().min().item()
+                    max_grad = torch.cat([p.grad.view(-1).detach() for p in model.parameters()]).abs().max().item()
+                    mean_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in model.parameters()]).mean().item()
+                    max_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in model.parameters()]).max().item()
+                    event_writer.add_scalar('train/median_grad', median_grad, number_ex_seen)
+                    event_writer.add_scalar('train/mean_grad', mean_grad, number_ex_seen)
+                    event_writer.add_scalar('train/min_grad', min_grad, number_ex_seen)
+                    event_writer.add_scalar('train/max_grad', max_grad, number_ex_seen)
+                    event_writer.add_scalar('train/mean_norm_grad', mean_norm_grad, number_ex_seen)
+                    event_writer.add_scalar('train/max_norm_grad', max_norm_grad, number_ex_seen)
 
     if(SIMPLE_DISPLAY):
         def callback(r):
