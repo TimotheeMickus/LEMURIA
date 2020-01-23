@@ -40,6 +40,7 @@ arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=i
 
 arg_parser.add_argument('--runs', help='number of runs', default=1, type=int)
 
+arg_parser.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
 #clip
 arg_parser.add_argument('--clip', help='gradient clip value', default=None, type=float)
 
@@ -67,7 +68,7 @@ STRIDES = (2, 2, 1, 2, 1, 2, 1, 2) # the original paper suggests 2,1,1,2,1,2,1,2
 KERNEL_SIZE = 3
 
 BATCH_SIZE = args.batch # Try with small values, such as 0.1
-LR = .0001
+LR = args.learning_rate
 
 # BETA values for reweighting entropy penalty
 BETA_SENDER = .01

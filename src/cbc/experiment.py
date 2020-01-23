@@ -44,7 +44,7 @@ class Model(nn.Module):
 
         return sender_outcome, receiver_outcome
 
-def compute_rewards(sender_action, receiver_action):
+def compute_rewards(sender_action, receiver_action, running_avg_reward):
     """
         returns the reward as well as the success for each element of a batch
     """
@@ -52,9 +52,12 @@ def compute_rewards(sender_action, receiver_action):
 
     rewards = successes
 
-    if(args.penalty != 0.0): # Avoid supplementary gradient computation when possible
+    running_avg_above_chance = running_avg_reward > (1/K)
+    if(args.penalty > 0.0) and running_avg_above_chance: # Avoid supplementary gradient computation when possible
         msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; cf. https://github.com/pytorch/pytorch/issues/9515 (I believe)
         length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+        improvement_factor = (running_avg_reward - (1/K)) / (1 - (1/K)) # min-max rule. Factor equals 0 when running average equals 1/K, reachs 1 when running average reaches 1
+        length_penalties = (length_penalties * improvement_factor)
         rewards = (rewards - length_penalties)
 
     return (rewards, successes)
@@ -88,6 +91,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     def loop(callback=None):
         total_reward = 0.0 # sum of the rewards since the beginning of the epoch
         total_items = 0 # number of training instances since the beginning of the epoch
+        running_avg_reward = 0.0
         start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
         end_i = start_i + steps_per_epoch
 
@@ -95,7 +99,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             optim.zero_grad()
             sender_outcome, receiver_outcome = model(batch)
 
-            (rewards, successes) = compute_rewards(sender_outcome.action, receiver_outcome.action)
+            (rewards, successes) = compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_reward)
             log_prob = compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
             loss = - (rewards * log_prob)
 
@@ -119,8 +123,9 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             # updates running average reward
             total_reward += rewards.sum().item()
             total_items += batch.size
+            running_avg_reward = total_reward / total_items
 
-            if(callback is not None): callback(total_reward / total_items)
+            if(callback is not None): callback(running_avg_reward)
 
             # logs some values
             if(event_writer is not None):
