@@ -88,7 +88,34 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     """
     model.train() # sets the model in training mode
 
-    def loop(callback=None):
+    if(SIMPLE_DISPLAY):
+        class Progress:
+            def __enter__(self):
+                self.i = 0
+
+                return self
+
+            def update(self, r):
+                print('%i/%i - R: %f' % (self.i, steps_per_epoch, r))
+                self.i += 1
+
+            def __exit__(self, type, value, traceback):
+                pass
+    else:
+        class Progress:
+            def __enter__(self):
+                self.pbar = tqdm.tqdm(total=steps_per_epoch, postfix={"R": 0.0}, unit="B", desc=("Epoch %i" % epoch)) # Do not forget to close it at the end
+
+                return self
+
+            def update(self, r):
+                self.pbar.set_postfix({"R" : r}, refresh=False)
+                self.pbar.update()
+
+            def __exit__(self, type, value, traceback):
+                self.pbar.close()
+    
+    with Progress() as pbar:
         total_reward = 0.0 # sum of the rewards since the beginning of the epoch
         total_items = 0 # number of training instances since the beginning of the epoch
         running_avg_reward = 0.0
@@ -101,7 +128,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
 
             (rewards, successes) = compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_reward)
             log_prob = compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
-            loss = - (rewards * log_prob)
+            loss = -(rewards * log_prob)
 
             loss = loss.mean()
             # entropy penalties
@@ -112,8 +139,8 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             loss.backward()
 
             # Gradient clipping and scaling
-            if CLIP_VALUE is not None: torch.nn.utils.clip_grad_value_(model.parameters(), CLIP_VALUE)
-            if SCALE_VALUE is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), SCALE_VALUE)
+            if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(model.parameters(), CLIP_VALUE)
+            if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(model.parameters(), SCALE_VALUE)
             
             optim.step()
 
@@ -126,7 +153,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             total_items += batch.size
             running_avg_reward = total_reward / total_items
 
-            if(callback is not None): callback(running_avg_reward)
+            pbar.update(running_avg_reward)
 
             # logs some values
             if(event_writer is not None):
@@ -148,20 +175,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
                     event_writer.add_scalar('train/max_grad', max_grad, number_ex_seen)
                     event_writer.add_scalar('train/mean_norm_grad', mean_norm_grad, number_ex_seen)
                     event_writer.add_scalar('train/max_norm_grad', max_norm_grad, number_ex_seen)
-
-    if(SIMPLE_DISPLAY):
-        def callback(r):
-            print('R: %f' % r)
-
-        loop(callback)
-    else:
-        with tqdm.tqdm(total=steps_per_epoch, postfix={"R": 0.0}, unit="B", desc=("Epoch %i" % epoch)) as pbar:
-            def callback(r):
-                pbar.set_postfix({"R" : r}, refresh=False)
-                pbar.update()
-
-            loop(callback)
-
+    
     model.eval()
 
 if(__name__ == "__main__"):
