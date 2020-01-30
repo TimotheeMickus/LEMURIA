@@ -45,6 +45,8 @@ arg_parser.add_argument("--learning_rate", help="learning rate", default=0.0001,
 arg_parser.add_argument('--grad_clipping', help='threshold for gradient clipping', default=None, type=float)
 arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
 
+arg_parser.add_argument('--debug', '-debug', help='log more stuff', action='store_true')
+
 args = arg_parser.parse_args()
 
 
@@ -91,4 +93,4 @@ RUNS = args.runs
 
 SIMPLE_DISPLAY = args.simple_display
 
-DEBUG_MODE = False
+DEBUG_MODE = args.debug
