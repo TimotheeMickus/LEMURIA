@@ -52,11 +52,12 @@ def compute_rewards(sender_action, receiver_action, running_avg_reward):
 
     rewards = successes
 
-    running_avg_above_chance = running_avg_reward > (1/K)
-    if(args.penalty > 0.0) and running_avg_above_chance:
+    chance_perf = (1.0 / K)
+    running_avg_above_chance = (running_avg_reward > chance_perf)
+    if((args.penalty > 0.0) and running_avg_above_chance):
         msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; cf. https://github.com/pytorch/pytorch/issues/9515 (I believe)
         length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
-        improvement_factor = (running_avg_reward - (1/K)) / (1 - (1/K)) # min-max rule. Factor equals 0 when running average equals 1/K, reachs 1 when running average reaches 1
+        improvement_factor = (running_avg_reward - chance_perf) / (1 - chance_perf) # min-max rule. Equals 0 when running average equals chance performance, reachs 1 when running average reaches 1
         length_penalties = (length_penalties * improvement_factor)
         rewards = (rewards - length_penalties)
 
