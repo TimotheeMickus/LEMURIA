@@ -31,6 +31,7 @@ arg_parser.add_argument('--batch', help='batch size', default=32, type=int)
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
 
 arg_parser.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
+arg_parser.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true')
 
 arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
 
@@ -45,7 +46,7 @@ arg_parser.add_argument("--learning_rate", help="learning rate", default=0.0001,
 arg_parser.add_argument('--grad_clipping', help='threshold for gradient clipping', default=None, type=float)
 arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
 
-arg_parser.add_argument('--debug', '-debug', help='log more stuff', action='store_true')
+arg_parser.add_argument('--debug', '-d', help='log more stuff', action='store_true')
 
 args = arg_parser.parse_args()
 
