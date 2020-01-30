@@ -67,7 +67,7 @@ class DistinctTargetClassDataLoader():
         """Returns a category that is at distance `distance` from category `category`"""
         changed_dim = np.random.choice(self.nb_concepts, distance, replace=False)
         changed_dim = set(changed_dim)
-        new_category = tuple(e if i not in changed_dim else not e for i,e in enumerate(category))
+        new_category = tuple(e if(i not in changed_dim) else not e for i,e in enumerate(category))
         return new_category
 
 
