@@ -38,6 +38,8 @@ class DistinctTargetClassDataLoader():
 
             return (idx, category)
 
+        print('Loading data from \'%s\'...' % DATASET_PATH)
+
         # Loads all images from DATASET_PATH as DataPoint
         dataset = [] # Will end as a Numpy array of DataPoint·s
         for filename in os.listdir(DATASET_PATH):
@@ -57,6 +59,8 @@ class DistinctTargetClassDataLoader():
         for img in self.dataset:
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
+        
+        print('Loading done')
 
 
     def _distance_to_category(self, category, distance):
