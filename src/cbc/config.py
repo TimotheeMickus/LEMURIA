@@ -41,11 +41,9 @@ arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=i
 arg_parser.add_argument('--runs', help='number of runs', default=1, type=int)
 
 arg_parser.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
-#clip
-arg_parser.add_argument('--clip', help='gradient clip value', default=None, type=float)
 
-arg_parser.add_argument('--norm_clip', help='clip gradient by norm', action="store_true")
-
+arg_parser.add_argument('--grad_clipping', help='threshold for gradient clipping', default=None, type=float)
+arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
 
 args = arg_parser.parse_args()
 
@@ -54,8 +52,8 @@ ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
 MSG_LEN = args.max_len # Max length of a message
 
-CLIP_VALUE = args.clip
-CLIP_NORM = args.norm_clip
+CLIP_VALUE = args.grad_clipping
+SCALE_VALUE = args.grad_scaling
 
 
 K = 3 # size of pools of image for listener

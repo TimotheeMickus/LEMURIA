@@ -110,10 +110,11 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
 
             # backprop
             loss.backward()
-            if CLIP_VALUE is not None:
-                clip = torch.nn.utils.clip_grad_norm_ if CLIP_NORM\
-                    else torch.nn.utils.clip_grad_value_
-                clip(model.parameters(), CLIP_VALUE)
+
+            # Gradient clipping and scaling
+            if CLIP_VALUE is not None: torch.nn.utils.clip_grad_value_(model.parameters(), CLIP_VALUE)
+            if SCALE_VALUE is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), SCALE_VALUE)
+            
             optim.step()
 
             avg_reward = rewards.mean().item() # average reward of the batch
