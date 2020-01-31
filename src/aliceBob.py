@@ -12,7 +12,7 @@ from config import *
 
 class AliceBob(nn.Module):
     def __init__(self, shared=False):
-        super(AliceBob, self).__init__()
+        nn.Module.__init__(self)
 
         if(shared):
             senderReceiver = SenderReceiver()
@@ -32,7 +32,6 @@ class AliceBob(nn.Module):
         """
 
         sender_outcome = self.sender(batch.alice_input)
-
         receiver_outcome = self.receiver(batch.bob_input, *sender_outcome.action)
 
         return sender_outcome, receiver_outcome

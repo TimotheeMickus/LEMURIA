@@ -17,6 +17,7 @@ parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
 sys.path.append(parent_dir_path)
 
 from aliceBob import AliceBob
+from aliceBobPopulation import AliceBobPopulation
 from utils import build_optimizer
 
 sys.path.remove(parent_dir_path)
@@ -36,7 +37,10 @@ if(__name__ == "__main__"):
         if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        model = AliceBob().to(DEVICE)
+        if(args.population > 1): model = AliceBobPopulation(args.population).to(DEVICE)
+        else: model = AliceBob().to(DEVICE)
+        print(model)
+
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader()
         event_writer = SummaryWriter(run_summary_dir)

@@ -93,7 +93,7 @@ class DistinctTargetClassDataLoader():
 
             l = [bob_a, bob_b, bob_c]
             batch.append((alice_data.img, torch.stack([x.img for x in l])))
-        alice_input, bob_input = list(map((lambda l: torch.stack(l)), zip(*batch))) # Unzips the list of pairs (to a pair of lists) and then stacks
+        alice_input, bob_input = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
         # Adds noise if necessary (normal random noise + clamping)
         if(NOISE_STD_DEV > 0.0):
             alice_input = torch.clamp((alice_input + (NOISE_STD_DEV * torch.randn(size=alice_input.shape))), 0.0, 1.0)

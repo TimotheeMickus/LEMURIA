@@ -33,8 +33,9 @@ arg_parser.add_argument('--noise', help='standard deviation of the normal random
 arg_parser.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
 arg_parser.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true')
 
-arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
+arg_parser.add_argument('--population', help='population size', default=1, type=int)
 
+arg_parser.add_argument('--alphabet', help='size of the alphabet (not including the EOS symbol)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
 arg_parser.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
 
 arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
