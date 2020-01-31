@@ -11,11 +11,16 @@ from utils import show_imgs
 from config import *
 
 class AliceBob(nn.Module):
-    def __init__(self):
+    def __init__(self, shared=False):
         super(AliceBob, self).__init__()
 
-        self.sender = Sender()
-        self.receiver = Receiver()
+        if(shared):
+            senderReceiver = SenderReceiver()
+            self.sender = senderReceiver.sender
+            self.receiver = senderReceiver.receiver
+        else:
+            self.sender = Sender()
+            self.receiver = Receiver()
 
     def forward(self, batch):
         """
