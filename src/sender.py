@@ -10,6 +10,7 @@ from utils import build_cnn_encoder
 # Structure for outcomes
 Outcome = namedtuple("Policy", ["entropy", "log_prob", "action"])
 
+# Vector -> message
 class SenderMessageDecoder(nn.Module):
     def __init__(self, symbol_embeddings=None):
         super(SenderMessageDecoder, self).__init__()
@@ -83,15 +84,15 @@ class SenderMessageDecoder(nn.Module):
             action=(message, message_len))
         return outcome
 
-
-class SenderPolicy(nn.Module):
-    def __init__(self, image_encoder=None):
-        super(SenderPolicy, self).__init__()
+# Image -(vector)-> message
+class Sender(nn.Module):
+    def __init__(self, image_encoder=None, symbol_embeddings=None):
+        super(Sender, self).__init__()
         
         if(image_encoder is None): image_encoder = build_cnn_encoder()
         self.image_encoder = image_encoder
         
-        self.message_decoder = SenderMessageDecoder()
+        self.message_decoder = SenderMessageDecoder(symbol_embeddings)
 
     def forward(self, image):
         """

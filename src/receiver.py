@@ -10,6 +10,7 @@ from utils import build_cnn_encoder
 # Structure for outcomes
 Outcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist", "scores"])
 
+# Message -> vector
 class ReceiverMessageEncoder(nn.Module):
     """
     Encodes a message of discrete symbols in a single vector.
@@ -40,18 +41,19 @@ class ReceiverMessageEncoder(nn.Module):
 
         return output.view(embeddings.size(0), embeddings.size(-1))
 
-class ReceiverPolicy(nn.Module):
+# Scores images according to a message
+class Receiver(nn.Module):
     """
     Defines a receiver policy.
     Based on K presented images and a given message, chooses which image the message refers to.
     """
-    def __init__(self, image_encoder=None):
-        super(ReceiverPolicy, self).__init__()
+    def __init__(self, image_encoder=None, symbol_embeddings=None):
+        super(Receiver, self).__init__()
 
         if(image_encoder is None): image_encoder = build_cnn_encoder()
         self.image_encoder = image_encoder
 
-        self.message_encoder = ReceiverMessageEncoder()
+        self.message_encoder = ReceiverMessageEncoder(symbol_embeddings)
 
     def forward(self, images, message, length):
         """
