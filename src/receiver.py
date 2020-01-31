@@ -53,21 +53,22 @@ class ReceiverPolicy(nn.Module):
             Output:
                 `PolicyOutcome` containing action taken, entropy and log prob.
         """
-        # encode images
+        # Encodes the images
         original_size = images.size()[:2] #dim 1 & 2 give batch size & K
         encoded_images = self.image_encoder(images.view(-1, *images.size()[2:]))
         encoded_images = encoded_images.view(*original_size, -1)
 
-        # encode message
+        # Encodes the message
         encoded_message = self.message_encoder(message, length).unsqueeze(-1)
 
-        # score targets
+        # Scores the targets
         scores = torch.bmm(encoded_images, encoded_message).squeeze(-1)
-        # compute distribution
+
+        # Computes the probability distribution
         probs = F.softmax(scores, dim=-1)
         dist = Categorical(probs)
 
-        # get outcome
+        # Generetates the outcome object
         action = dist.sample() if self.training else probs.argmax(dim=-1)
         entropy = dist.entropy()
         log_prob = dist.log_prob(action)
@@ -75,6 +76,7 @@ class ReceiverPolicy(nn.Module):
         outcome = PolicyOutcome(
             entropy=entropy,
             log_prob=log_prob,
-            action=action)
+            action=action,
+            dist=dist)
 
         return outcome
