@@ -5,6 +5,8 @@ from sender import Sender
 from receiver import Receiver
 from utils import build_cnn_encoder
 
+from config import *
+
 class SenderReceiver(nn.Module): 
     def __init__(self):
         image_encoder = build_cnn_encoder()
