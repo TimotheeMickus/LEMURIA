@@ -1,5 +1,9 @@
+import torch
+import torch.nn as nn
+
 from sender import Sender
 from receiver import Receiver
+from utils import build_cnn_encoder
 
 class SenderReceiver(nn.Module): 
     def __init__(self):
