@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
+from collections import namedtuple
 
 from config import *
 from utils import build_cnn_encoder
@@ -51,11 +52,12 @@ class ReceiverPolicy(nn.Module):
             Forward propagation.
             Input:
                 `images`, of shape [BATCH_SIZE x K x *IMG_SHAPE], where the first of each K image is the target
-                `message`, of shape [BATCH_SIZE x <=MSG_LEN], message produced by sender
+                `message`, of shape [BATCH_SIZE x (<=MSG_LEN)], message produced by sender
                 `length`, of shape [BATCH_SIZE x 1], length of message produced by sender
             Output:
                 `Outcome` containing action taken, entropy, log prob and dist.
         """
+
         # Encodes the images
         original_size = images.size()[:2] #dim 1 & 2 give batch size & K
         encoded_images = self.image_encoder(images.view(-1, *images.size()[2:]))
