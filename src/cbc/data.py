@@ -76,16 +76,16 @@ class DistinctTargetClassDataLoader():
         distance = np.random.randint(self.nb_concepts) + 1
         return self._distance_to_category(category, distance)
 
-    def _get_batch(self):
+    def get_batch(self, size):
         """Generates a batch as a Batch object.
-        'alice_input' and 'bob_input' are both tensors of outer dimension of size BATCH_SIZE
+        'alice_input' and 'bob_input' are both tensors of outer dimension of size `size`
         Each element of 'alice_input' is an image
         Each element of 'bob_input' is the stack of three images related to their counterpart in 'alice_input':
             - bob_input[0] is an image of the same category,
             - bob_input[1] is an image of a neighbouring category (distance = 1), and
             - bob_input[2] is an image of a different category (distance != 0)"""
         batch = []
-        for _ in range(BATCH_SIZE):
+        for _ in range(size):
             alice_data = np.random.choice(self.dataset)
             bob_a = np.random.choice(self.categories[alice_data.category]) # same category
             bob_b = np.random.choice(self.categories[self._distance_to_category(alice_data.category, 1)]) # neighbouring category
@@ -102,9 +102,9 @@ class DistinctTargetClassDataLoader():
         return Batch(size=BATCH_SIZE, alice_input=alice_input.to(DEVICE), bob_input=bob_input.to(DEVICE))
 
     def __iter__(self):
-        """Iterates over batches"""
+        """Iterates over batches of size `BATCH_SIZE`"""
         while True:
-            yield self._get_batch()
+            yield self.get_batch(BATCH_SIZE)
 
 def get_data_loader():
     return DistinctTargetClassDataLoader()

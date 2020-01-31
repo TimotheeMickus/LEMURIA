@@ -17,7 +17,7 @@ sys.path.append(parent_dir_path)
 
 from receiver import ReceiverPolicy
 from sender import SenderPolicy
-from utils import build_optimizer
+from utils import build_optimizer, show_img, show_imgs
 
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
@@ -76,8 +76,46 @@ def compute_log_prob(sender_log_prob, receiver_log_prob):
     log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
     return log_prob
 
+def test_visualize(model, data_iterator):
+    model.eval() # Sets the model in evaluation mode; good idea or not?
+    
+    batch_size = 2 # Maybe it would just be simpler to work with multiple batches of size 1
+    batch = data_iterator.get_batch(batch_size)
 
-def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
+    batch.alice_input.requires_grad = True
+    batch.bob_input.requires_grad = True
+
+    pseudo_optimizer = torch.optim.Optimizer(list(model.parameters()) + [batch.alice_input, batch.bob_input], {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
+
+    sender_outcome, receiver_outcome = model(batch)
+
+    pseudo_optimizer.zero_grad()
+    
+    # Alice's part
+    sender_outcome.log_prob.sum().backward()
+
+    batch.alice_input.grad *= 10
+    torch.clamp_(batch.alice_input.grad, 0.5)
+    batch.alice_input.grad += 0.5
+
+    # Bob's part
+    receiver_outcome.scores.sum().backward()
+
+    batch.bob_input.grad *= 10
+    torch.clamp_(batch.bob_input.grad, 0.5)
+    batch.bob_input.grad += 0.5
+
+    imgs = []
+    img_per_batch = batch.bob_input.shape[1]
+    for i in range(batch_size):
+        imgs.append(batch.alice_input[i].detach())
+        imgs.append(batch.alice_input.grad[i])
+        for j in range(img_per_batch):
+            imgs.append(batch.bob_input[i][j].detach())
+            imgs.append(batch.bob_input.grad[i][j])
+    show_imgs(imgs, nrow=(2 * (1 + img_per_batch)))
+
+def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=10, event_writer=None):
     """
         Model training function
         Input:
@@ -89,7 +127,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             `steps_per_epoch`: number of steps for epoch
             `event_writer`: tensorboard writer to log evolution of values
     """
-    model.train() # sets the model in training mode
+    model.train() # Sets the model in training mode
 
     if(SIMPLE_DISPLAY):
         class Progress:
@@ -131,7 +169,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             optim.zero_grad()
             sender_outcome, receiver_outcome = model(batch)
 
-            chance_perf = (1 / batch.bob_input.shape[1])
+            chance_perf = (1 / batch.bob_input.shape[1]) # The chance performance is 1 over the number of images shown to Bob
             (rewards, successes) = compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
             log_prob = compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
             loss = -(rewards * log_prob)
@@ -209,3 +247,4 @@ if(__name__ == "__main__"):
         for epoch in range(1, (EPOCHS + 1)):
             train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
             if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
+            #test_visualize(model, data_loader)

@@ -8,7 +8,7 @@ from config import *
 from utils import build_cnn_encoder
 
 # Structure for outcomes
-Outcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist"])
+Outcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist", "scores"])
 
 class ReceiverMessageEncoder(nn.Module):
     """
@@ -55,7 +55,7 @@ class ReceiverPolicy(nn.Module):
                 `message`, of shape [BATCH_SIZE x (<=MSG_LEN)], message produced by sender
                 `length`, of shape [BATCH_SIZE x 1], length of message produced by sender
             Output:
-                `Outcome` containing action taken, entropy, log prob and dist.
+                `Outcome` containing action taken, entropy, log prob, dist and scores.
         """
 
         # Encodes the images
@@ -82,6 +82,7 @@ class ReceiverPolicy(nn.Module):
             entropy=entropy,
             log_prob=log_prob,
             action=action,
-            dist=dist)
+            dist=dist,
+            scores=scores)
 
         return outcome

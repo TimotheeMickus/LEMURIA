@@ -49,7 +49,7 @@ arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling',
 arg_parser.add_argument('--debug', '-d', help='log more stuff', action='store_true')
 
 args = arg_parser.parse_args()
-
+print(args)
 
 ALPHABET_SIZE = args.alphabet + 1 # + 1 for EOS,
 EOS, PAD, BOS = 0, ALPHABET_SIZE, ALPHABET_SIZE + 1
@@ -59,7 +59,7 @@ CLIP_VALUE = args.grad_clipping
 SCALE_VALUE = args.grad_scaling
 
 
-K = 3 # size of pools of image for listener
+#K = 3 # size of pools of image for listener
 
 HIDDEN = 50
 

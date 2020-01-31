@@ -35,7 +35,7 @@ class SenderMessageDecoder(nn.Module):
         log_probs = []
         entropy = []
 
-        # stopping mechanism when EOS has been produced
+        # Used in the stopping mechanism (when EOS has been produced)
         has_stopped = torch.zeros(encoded.size(0)).bool().to(DEVICE)
         has_stopped.requires_grad = False
 
@@ -44,7 +44,7 @@ class SenderMessageDecoder(nn.Module):
             output, state = self.lstm(input.unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
-            # selects action for step
+            # selects action
             probs =  F.softmax(output, dim=-1)
             dist = Categorical(probs)
             action = dist.sample() if self.training else probs.argmax(dim=-1)

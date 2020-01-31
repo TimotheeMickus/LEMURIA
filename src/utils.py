@@ -17,8 +17,9 @@ def show_img(img):
 def simple_show_img(img):
     torchvision.transforms.functional.to_pil_image(img).show()
 
-def show_imgs(imgs):
-    show_img(torchvision.utils.make_grid(imgs))
+# `nrow` is the number of images to display in each row of the grid
+def show_imgs(imgs, nrow=8):
+    show_img(torchvision.utils.make_grid(imgs, nrow))
 
 def build_optimizer(θ):
     """
