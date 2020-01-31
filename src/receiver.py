@@ -4,7 +4,10 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from config import *
-from utils import build_cnn_encoder, PolicyOutcome
+from utils import build_cnn_encoder
+
+# Structure for outcomes
+Outcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist"])
 
 class ReceiverMessageEncoder(nn.Module):
     """
@@ -51,7 +54,7 @@ class ReceiverPolicy(nn.Module):
                 `message`, of shape [BATCH_SIZE x <=MSG_LEN], message produced by sender
                 `length`, of shape [BATCH_SIZE x 1], length of message produced by sender
             Output:
-                `PolicyOutcome` containing action taken, entropy and log prob.
+                `Outcome` containing action taken, entropy, log prob and dist.
         """
         # Encodes the images
         original_size = images.size()[:2] #dim 1 & 2 give batch size & K
@@ -73,7 +76,7 @@ class ReceiverPolicy(nn.Module):
         entropy = dist.entropy()
         log_prob = dist.log_prob(action)
 
-        outcome = PolicyOutcome(
+        outcome = Outcome(
             entropy=entropy,
             log_prob=log_prob,
             action=action,

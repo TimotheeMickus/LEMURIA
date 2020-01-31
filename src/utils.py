@@ -21,9 +21,6 @@ def simple_show_img(img):
 def show_imgs(imgs):
     show_img(torchvision.utils.make_grid(imgs))
 
-# Structure for policy outcomes
-PolicyOutcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist"])
-
 def build_optimizer(θ):
     """
     Factory for optimizer
