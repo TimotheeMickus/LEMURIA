@@ -11,9 +11,12 @@ from utils import build_cnn_encoder
 Outcome = namedtuple("Policy", ["entropy", "log_prob", "action"])
 
 class SenderMessageDecoder(nn.Module):
-    def __init__(self):
+    def __init__(self, symbol_embeddings=None):
         super(SenderMessageDecoder, self).__init__()
-        self.embedding = nn.Embedding(ALPHABET_SIZE + 2, HIDDEN, padding_idx=PAD)
+        
+        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((ALPHABET_SIZE + 2), HIDDEN, padding_idx=PAD) # +2: padding symbol, BOS symbol
+        self.symbol_embeddings = symbol_embeddings
+        
         self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1)
         # project encoded img onto cell
         self.cell_proj = nn.Linear(HIDDEN, HIDDEN)
@@ -23,9 +26,8 @@ class SenderMessageDecoder(nn.Module):
         self.action_space_proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
 
     def forward(self, encoded):
-        # initializes first input and state
-        input = torch.ones(encoded.size(0)).long().to(DEVICE) * BOS
-        input = self.embedding(input)
+        # Initialisation
+        last_symbol = torch.ones(encoded.size(0)).long().to(DEVICE) * BOS
         cell = self.cell_proj(encoded).unsqueeze(0)
         hidden = self.hidden_proj(encoded).unsqueeze(0)
         state = (cell, hidden)
@@ -41,7 +43,7 @@ class SenderMessageDecoder(nn.Module):
 
         # produces message
         for i in range(MSG_LEN):
-            output, state = self.lstm(input.unsqueeze(0), state)
+            output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
             # selects action
@@ -62,8 +64,8 @@ class SenderMessageDecoder(nn.Module):
             has_stopped = has_stopped | (action == EOS)
             if has_stopped.all():
                 break
-            # next input
-            input = self.embedding(action)
+
+            last_symbol = action
 
         # converts output to tensor
         message = torch.stack(message, dim=1)
@@ -83,9 +85,12 @@ class SenderMessageDecoder(nn.Module):
 
 
 class SenderPolicy(nn.Module):
-    def __init__(self):
+    def __init__(self, image_encoder=None):
         super(SenderPolicy, self).__init__()
-        self.image_encoder = build_cnn_encoder()
+        
+        if(image_encoder is None): image_encoder = build_cnn_encoder()
+        self.image_encoder = image_encoder
+        
         self.message_decoder = SenderMessageDecoder()
 
     def forward(self, image):

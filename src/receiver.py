@@ -12,11 +12,14 @@ Outcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist", "scores
 
 class ReceiverMessageEncoder(nn.Module):
     """
-    Encodes a message of discrete symbols in a single embedding.
+    Encodes a message of discrete symbols in a single vector.
     """
-    def __init__(self):
+    def __init__(self, symbol_embeddings=None):
         super(ReceiverMessageEncoder, self).__init__()
-        self.embedding = nn.Embedding(ALPHABET_SIZE + 1, HIDDEN, padding_idx=PAD)
+
+        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((ALPHABET_SIZE + 1), HIDDEN, padding_idx=PAD) # +1: padding symbol
+        self.symbol_embeddings = symbol_embeddings
+        
         self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1, batch_first=True)
 
     def forward(self, message, length):
@@ -29,7 +32,7 @@ class ReceiverMessageEncoder(nn.Module):
             encoded message, of shape [BATCH_SIZE x HIDDEN]
         """
         # encode
-        embeddings = self.embedding(message)
+        embeddings = self.symbol_embeddings(message)
         embeddings = self.lstm(embeddings)[0]
         # select last step corresponding to message
         index = torch.arange(message.size(-1)).expand_as(message).to(DEVICE)
@@ -42,9 +45,12 @@ class ReceiverPolicy(nn.Module):
     Defines a receiver policy.
     Based on K presented images and a given message, chooses which image the message refers to.
     """
-    def __init__(self):
+    def __init__(self, image_encoder=None):
         super(ReceiverPolicy, self).__init__()
-        self.image_encoder = build_cnn_encoder()
+
+        if(image_encoder is None): image_encoder = build_cnn_encoder()
+        self.image_encoder = image_encoder
+
         self.message_encoder = ReceiverMessageEncoder()
 
     def forward(self, images, message, length):
