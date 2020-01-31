@@ -12,19 +12,29 @@ class AliceBobPopulation(AliceBob):
         nn.Module.__init__(self)
 
         if(shared):
-            agents = [SenderReceiver() for _ in range(size)]
+            self._agents = [SenderReceiver() for _ in range(size)]
 
-            self.senders, self.receivers = zip(*[(agent.sender, agent.receiver) for agent in agents])
+            self.senders, self.receivers = zip(*[(agent.sender, agent.receiver) for agent in self._agents])
         else:
             self.senders = [Sender() for _ in range(size)]
             self.receivers = [Receiver() for _ in range(size)]
             
-            agents = (self.senders + self.receivers)
+            self._agents = (self.senders + self.receivers)
         
         # PyTorch cannot find the parameters of objects that are in a list (like `self.senders` or `self.receivers`)
         parameters = []
-        for agent in agents: parameters += list(agent.parameters())
+        for agent in self._agents: parameters += list(agent.parameters())
         self.agent_parameters = nn.ParameterList(parameters)
+
+    def to(self, *args, **kwargs):
+        self = super().to(*args, **kwargs)
+        
+        #for agent in self._agents: agent.to(*args, **kwargs) # Would that be enough? I'm not sure how `.to` works
+
+        self.senders = [sender.to(*args, **kwargs) for sender in self.senders]
+        self.receivers = [receiver.to(*args, **kwargs) for receiver in self.receivers]
+        
+        return self
 
     def forward(self, batch):
         """

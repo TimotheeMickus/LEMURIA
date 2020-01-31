@@ -39,7 +39,7 @@ if(__name__ == "__main__"):
 
         if(args.population > 1): model = AliceBobPopulation(args.population).to(DEVICE)
         else: model = AliceBob().to(DEVICE)
-        print(model)
+        #print(model)
 
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader()
