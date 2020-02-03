@@ -7,6 +7,39 @@ import numpy as np
 
 from config import *
 
+def max_tensor(t, dim, abs_val=True, unsqueeze=True):
+    x = t.abs() if(abs_val) else t
+
+    for i in range(dim, t.dim()):
+        x = x.max(-1).values
+
+    if(not unsqueeze): return x
+
+    for i in range(dim, t.dim()):
+        x = x.unsqueeze(-1)
+
+    return x
+
+# Transforms a tensor of black and white images to colour images
+def to_color(t, dim):
+    y = t.unsqueeze(dim)
+    
+    tmp = torch.ones(y.dim(), dtype=torch.int32)
+    tmp[dim] = 3
+
+    return y.repeat(tmp.tolist())
+
+#
+def max_normalize(t, dim, abs_val=True):
+    x = max_tensor(t, dim, abs_val, unsqueeze=True)
+
+    return (t / x)
+
+def max_normalize_(t, dim, abs_val=True):
+    x = max_tensor(t, dim, abs_val, unsqueeze=True)
+    
+    return t.div_(x)
+
 # Displays a tensor as an image (channels as the first dimension)
 def show_img(img):
     plt.imshow(np.transpose(img, (1,2,0)), interpolation='nearest')

@@ -6,7 +6,7 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import show_imgs
+from utils import show_imgs, max_normalize_, to_color
 
 from config import *
 
@@ -109,28 +109,42 @@ class AliceBob(nn.Module):
 
         pseudo_optimizer.zero_grad()
         
+        _COLOR, _INTENSITY = range(2)
+        def process(t, dim, mode):
+            if(mode == _COLOR):
+                t = max_normalize(t, dim=dim, abs_val=True) # Normalises each image
+                t *= 0.5
+                t += 0.5
+                
+                return t
+            elif(mode == _INTENSITY):
+                t = t.abs()
+                t = t.max(dim).values # Max over the colour channel
+                max_normalize_(t, dim=dim, abs_val=False) # Normalises each image
+                return to_color(t, dim)
+
+        mode = _INTENSITY
+
         # Alice's part
         sender_outcome.log_prob.sum().backward()
+        sender_part = batch.alice_input.grad.detach()
 
-        #batch.alice_input.grad *= 10
-        torch.clamp_(batch.alice_input.grad, 0.5)
-        batch.alice_input.grad += 0.5
+        sender_part = process(sender_part, 1, mode)
 
         # Bob's part
         receiver_outcome.scores.sum().backward()
+        receiver_part = batch.bob_input.grad.detach()
 
-        #batch.bob_input.grad *= 10
-        torch.clamp_(batch.bob_input.grad, 0.5)
-        batch.bob_input.grad += 0.5
+        receiver_part = process(receiver_part, 2, mode)
 
         imgs = []
         img_per_batch = batch.bob_input.shape[1]
         for i in range(batch_size):
             imgs.append(batch.alice_input[i].detach())
-            imgs.append(batch.alice_input.grad[i])
+            imgs.append(sender_part[i])
             for j in range(img_per_batch):
                 imgs.append(batch.bob_input[i][j].detach())
-                imgs.append(batch.bob_input.grad[i][j])
+                imgs.append(receiver_part[i][j])
         show_imgs(imgs, nrow=(2 * (1 + img_per_batch)))
 
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
