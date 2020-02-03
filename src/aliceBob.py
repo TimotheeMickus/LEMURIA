@@ -22,6 +22,13 @@ class AliceBob(nn.Module):
             self.sender = Sender()
             self.receiver = Receiver()
 
+    @staticmethod
+    def _forward(batch, sender, receiver):
+        sender_outcome = sender(batch.alice_input)
+        receiver_outcome = receiver(batch.bob_input, *sender_outcome.action)
+
+        return sender_outcome, receiver_outcome
+
     def forward(self, batch):
         """
         Input:
@@ -30,11 +37,7 @@ class AliceBob(nn.Module):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-
-        sender_outcome = self.sender(batch.alice_input)
-        receiver_outcome = self.receiver(batch.bob_input, *sender_outcome.action)
-
-        return sender_outcome, receiver_outcome
+        return self._forward(batch, self.sender, self.receiver)
 
     def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
         """

@@ -47,8 +47,5 @@ class AliceBobPopulation(AliceBob):
 
         sender = random.choice(self.senders)
         receiver = random.choice(self.receivers)
-        
-        sender_outcome = sender(batch.alice_input)
-        receiver_outcome = receiver(batch.bob_input, *sender_outcome.action)
 
-        return sender_outcome, receiver_outcome
+        return self._forward(batch, self.sender, self.receiver)
