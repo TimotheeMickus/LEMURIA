@@ -49,6 +49,10 @@ arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling',
 
 arg_parser.add_argument('--debug', '-d', help='log more stuff', action='store_true')
 
+# For visualize.py
+arg_parser.add_argument('--load_model', help='the path to the model to load')
+
+
 args = arg_parser.parse_args()
 print(args)
 
