@@ -10,6 +10,29 @@ from utils import show_imgs
 
 from config import *
 
+class Progress:
+    def __init__(self, simple_display, steps_per_epoch, epoch):
+        self.simple_display = simple_display
+        self.steps_per_epoch = steps_per_epoch
+        self.epoch = epoch
+        
+    def __enter__(self):
+        if(self.simple_display): self.i = 0
+        else: self.pbar = tqdm.tqdm(total=self.steps_per_epoch, postfix={"R": 0.0}, unit="B", desc=("Epoch %i" % self.epoch)) # Do not forget to close it at the end
+
+        return self
+
+    def update(self, r):
+        if(self.simple_display):
+            print('%i/%i - R: %f' % (self.i, self.steps_per_epoch, r))
+            self.i += 1
+        else:
+            self.pbar.set_postfix({"R" : r}, refresh=False)
+            self.pbar.update()
+            
+    def __exit__(self, type, value, traceback):
+        if(not self.simple_display): self.pbar.close()
+        
 class AliceBob(nn.Module):
     def __init__(self, shared=False):
         nn.Module.__init__(self)
@@ -123,34 +146,7 @@ class AliceBob(nn.Module):
         """
         self.train() # Sets the model in training mode
 
-        if(SIMPLE_DISPLAY):
-            class Progress:
-                def __enter__(self):
-                    self.i = 0
-
-                    return self
-
-                def update(self, r):
-                    print('%i/%i - R: %f' % (self.i, steps_per_epoch, r))
-                    self.i += 1
-
-                def __exit__(self, type, value, traceback):
-                    pass
-        else:
-            class Progress:
-                def __enter__(self):
-                    self.pbar = tqdm.tqdm(total=steps_per_epoch, postfix={"R": 0.0}, unit="B", desc=("Epoch %i" % epoch)) # Do not forget to close it at the end
-
-                    return self
-
-                def update(self, r):
-                    self.pbar.set_postfix({"R" : r}, refresh=False)
-                    self.pbar.update()
-
-                def __exit__(self, type, value, traceback):
-                    self.pbar.close()
-        
-        with Progress() as pbar:
+        with Progress(SIMPLE_DISPLAY, steps_per_epoch, epoch) as pbar:
             total_reward = 0.0 # sum of the rewards since the beginning of the epoch
             total_success = 0.0 # sum of the successes since the beginning of the epoch
             total_items = 0 # number of training instances since the beginning of the epoch
