@@ -37,8 +37,9 @@ if(__name__ == "__main__"):
         if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        if(args.population > 1): model = AliceBobPopulation(args.population).to(DEVICE)
-        else: model = AliceBob().to(DEVICE)
+        if(args.population > 1): model = AliceBobPopulation(args.population)
+        else: model = AliceBob()
+        model = model.to(DEVICE)
         #print(model)
 
         optimizer = build_optimizer(model.parameters())
