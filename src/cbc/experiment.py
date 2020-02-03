@@ -43,7 +43,7 @@ if(__name__ == "__main__"):
         #print(model)
 
         optimizer = build_optimizer(model.parameters())
-        data_loader = get_data_loader()
+        data_loader = get_data_loader(args.same_img)
         event_writer = SummaryWriter(run_summary_dir)
 
         print(datetime.now(), "training start...")

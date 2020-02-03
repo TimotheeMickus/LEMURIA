@@ -28,7 +28,9 @@ class DistinctTargetClassDataLoader():
     sizes = {'big': True, 'small': False}
     _concepts = [shapes, colours, v_positions, h_positions, sizes]
 
-    def __init__(self):
+    def __init__(self, same_img=False):
+        self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
+
         def analyse_filename(filename):
             name, ext = os.path.splitext(filename)
             infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
@@ -87,7 +89,7 @@ class DistinctTargetClassDataLoader():
         batch = []
         for _ in range(size):
             alice_data = np.random.choice(self.dataset)
-            bob_a = np.random.choice(self.categories[alice_data.category]) # same category
+            bob_a = alice_data if(self.same_img) else np.random.choice(self.categories[alice_data.category]) # same category
             bob_b = np.random.choice(self.categories[self._distance_to_category(alice_data.category, 1)]) # neighbouring category
             bob_c = np.random.choice(self.categories[self._different_category(alice_data.category)]) # different category
 
@@ -106,5 +108,5 @@ class DistinctTargetClassDataLoader():
         while True:
             yield self.get_batch(BATCH_SIZE)
 
-def get_data_loader():
-    return DistinctTargetClassDataLoader()
+def get_data_loader(same_img=False):
+    return DistinctTargetClassDataLoader(same_img)

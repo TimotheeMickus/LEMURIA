@@ -35,7 +35,7 @@ if(__name__ == "__main__"):
     model = model.to(DEVICE)
     #print(model)
 
-    data_loader = get_data_loader()
+    data_loader = get_data_loader(args.same_img)
    
     while(True):
         model.test_visualize(data_loader)

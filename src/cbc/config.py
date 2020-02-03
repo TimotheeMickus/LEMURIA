@@ -17,7 +17,7 @@ arg_parser.add_argument('--summary', help='the path to the TensorBoard summary f
 
 arg_parser.add_argument('--save_model', '-save_model', help='saves the model after each epoch', action='store_true')
 
-arg_parser.add_argument('-simple_display', help='displays the information in a simple way (not using tqdm)', action='store_true')
+arg_parser.add_argument('--simple_display', '-simple_display', help='displays the information in a simple way (not using tqdm)', action='store_true')
 
 #default_models = os.path.join(default_summary, 'models')
 default_models = os.path.join('[summary]', 'models')
@@ -29,6 +29,8 @@ arg_parser.add_argument('--device', help='what to run PyTorch on (potentially av
 arg_parser.add_argument('--batch', help='batch size', default=32, type=int)
 
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
+
+arg_parser.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
 
 arg_parser.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
 arg_parser.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true')
