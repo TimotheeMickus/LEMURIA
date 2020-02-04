@@ -48,4 +48,4 @@ class AliceBobPopulation(AliceBob):
         sender = random.choice(self.senders)
         receiver = random.choice(self.receivers)
 
-        return self._forward(batch, self.sender, self.receiver)
+        return self._forward(batch, sender, receiver)
