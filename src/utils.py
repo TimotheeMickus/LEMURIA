@@ -1,11 +1,44 @@
 import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 import torchvision
 import matplotlib.pyplot as plt
 import numpy as np
 
 from config import *
+
+class AverageSummaryWriter:
+    def __init__(self, writer=None, log_dir=None, default_period=1, specific_periods={}, prefix=None):
+        if(writer is None): writer = SummaryWriter(log_dir)
+        else: assert log_dir is None
+
+        self.writer = writer
+        self.default_period = default_period
+        self.specific_periods = specific_periods
+        self.prefix = prefix # If not None, will be add (with ':') before all tags
+
+        self._values = {};
+
+    def reset_values(self):
+        self._values = {}
+
+    def add_scalar(self, tag, scalar_value, global_step=None):
+        values = self._values.setdefault(tag, [])
+        values.append(scalar_value)
+
+        period = self.specific_periods.get(tag, self.default_period)
+        if(len(values) == period): # If the buffer is full, prints the average and clears the buffer
+            _tag = tag if(self.prefix is None) else (self.prefix + ':' +  tag)
+            self.writer.add_scalar(tag=_tag, scalar_value=np.mean(values), global_step=global_step)
+
+            values.clear()
+
+    # `l` is a list of pairs (key, value)
+    def add_scalar_list(self, l, global_step=None):
+        add = False
+        for key, value in l:
+            self.add_scalar(key, value, global_step)
 
 def max_tensor(t, dim, abs_val=True, unsqueeze=True):
     x = t.abs() if(abs_val) else t

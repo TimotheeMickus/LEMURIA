@@ -18,7 +18,7 @@ sys.path.append(parent_dir_path)
 
 from aliceBob import AliceBob
 from aliceBobPopulation import AliceBobPopulation
-from utils import build_optimizer
+from utils import build_optimizer, AverageSummaryWriter
 
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
@@ -44,7 +44,9 @@ if(__name__ == "__main__"):
 
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader(args.same_img)
-        event_writer = SummaryWriter(run_summary_dir)
+        
+        tmp_writer = SummaryWriter(run_summary_dir)
+        event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
 
         print(datetime.now(), "training start...")
         for epoch in range(1, (EPOCHS + 1)):
