@@ -56,7 +56,7 @@ def max_tensor(t, dim, abs_val=True, unsqueeze=True):
 # Transforms a tensor of black and white images to colour images
 def to_color(t, dim):
     y = t.unsqueeze(dim)
-    
+
     tmp = torch.ones(y.dim(), dtype=torch.int32)
     tmp[dim] = 3
 
@@ -70,7 +70,7 @@ def max_normalize(t, dim, abs_val=True):
 
 def max_normalize_(t, dim, abs_val=True):
     x = max_tensor(t, dim, abs_val, unsqueeze=True)
-    
+
     return t.div_(x)
 
 # Displays a tensor as an image (channels as the first dimension)
@@ -95,25 +95,38 @@ def build_optimizer(θ):
     return optim.RMSprop(θ, lr=LR)
 
 
-def build_cnn_encoder():
+def build_cnn_encoder(
+    layer_classes = (["conv"] * len(STRIDES)),
+    input_channels=([IMG_SHAPE[0]] + [FILTERS] * (len(STRIDES) - 1)),
+    output_channels=([FILTERS] * (len(STRIDES) - 1) + [HIDDEN]),
+    strides=STRIDES, kernel_size=KERNEL_SIZE):
     """
     Factory for convolutionnal encoders
     """
     layers = []
-    strides = STRIDES
-    inputs = [IMG_SHAPE[0]] + [FILTERS] * (len(STRIDES) - 1)
-    outputs = [FILTERS] * (len(STRIDES) - 1) + [HIDDEN]
-    norms = [nn.BatchNorm2d] * (len(STRIDES) - 1) + [lambda _ : nn.Flatten()]
-    for s,i,o,n in zip(strides, inputs, outputs, norms):
-        layers.append(
-            nn.Sequential(
+    norms = [nn.BatchNorm2d] * (len(strides) - 1) + [lambda _ : nn.Flatten()]
+    for s,i,o,n,l in zip(strides, input_channels, output_channels, norms, layer_classes):
+        if l == "conv":
+            core_layer = nn.Sequential(
                 nn.Conv2d(
                     in_channels=i,
                     out_channels=o,
-                    kernel_size=KERNEL_SIZE,
-                    stride=s,
-                    dilation=1),
-                nn.ReLU(),
+                    kernel_size=kernel_size,
+                    stride=s),
+                nn.ReLU())
+        elif l == "maxpool":
+            core_layer = nn.MaxPool2d(
+                kernel_size=kernel_size,
+                stride=s,)
+        elif l == "avgpool":
+            core_layer = nn.AvgPool2d(
+                kernel_size=kernel_size,
+                stride=s,)
+        else:
+            raise ValueError("layer of type %s is not supported.")
+        layers.append(
+            nn.Sequential(
+                core_layer,
                 n(o),
         ))
     cnn = nn.Sequential(*layers)
