@@ -101,8 +101,26 @@ def build_cnn_encoder(
     output_channels=([FILTERS] * (len(STRIDES) - 1) + [HIDDEN]),
     strides=STRIDES, kernel_size=KERNEL_SIZE):
     """
-    Factory for convolutionnal encoders
+    Factory for convolutionnal encoders.
+    Input:
+        `layer_classes`: a list of classes to stack, taken from `{"conv", "maxpool", "avgpool"}`
+        `input_channels`: a list of expected input channels per layer
+        `output_channels`: a list of expected output channels per layer
+        `strides`: a list of strides per layer each layer
+        `kernel_size`: a valid kernel size used throughout the convolutionnal network encoder
+    Output:
+        `cnn`: a convolutionnal network
+    Raises:
+        `AssertionError` if the provided lists `layer_classes`, `input_channels`, `output_channels`, and `strides` have different lengths
+        `ValueError` if a given layer class is not "conv", "maxpool", or "avgpool"
     """
+
+    lengths = [
+        len(item)
+        for item in (layer_classes, input_channels, output_channels, strides)
+    ]
+    assert len(set(lengths)) == 1, "provided parameters have different lengths!"
+
     layers = []
     norms = [nn.BatchNorm2d] * (len(strides) - 1) + [lambda _ : nn.Flatten()]
     for s,i,o,n,l in zip(strides, input_channels, output_channels, norms, layer_classes):
