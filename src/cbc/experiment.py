@@ -25,11 +25,11 @@ sys.path.remove(parent_dir_path)
 
 if(__name__ == "__main__"):
     if(not os.path.isdir(DATASET_PATH)):
-        print("Directory '%s' not found." % DATASET_PATH)
+        print(("Directory '%s' not found." % DATASET_PATH), flush=True)
         sys.exit()
 
     for run in range(RUNS):
-        print('Run %i' % run)
+        print(('Run %i' % run), flush=True)
 
         run_models_dir = os.path.join(MODELS_DIR, str(run))
         run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
@@ -50,7 +50,7 @@ if(__name__ == "__main__"):
             tmp_writer = SummaryWriter(run_summary_dir)
             event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
 
-        print(datetime.now(), "training start...")
+        print(("[%s] training start..." % datetime.now()), flush=True)
         for epoch in range(1, (EPOCHS + 1)):
             model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer)
             if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))

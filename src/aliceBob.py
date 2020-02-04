@@ -24,7 +24,7 @@ class Progress:
 
     def update(self, r):
         if(self.simple_display):
-            print('%i/%i - R: %f' % (self.i, self.steps_per_epoch, r))
+            print(('%i/%i - R: %f' % (self.i, self.steps_per_epoch, r)), flush=True)
             self.i += 1
         else:
             self.pbar.set_postfix({"R" : r}, refresh=False)
