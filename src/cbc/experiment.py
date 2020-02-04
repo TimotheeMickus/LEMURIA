@@ -34,7 +34,7 @@ if(__name__ == "__main__"):
         run_models_dir = os.path.join(MODELS_DIR, str(run))
         run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
 
-        if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
+        if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         if(args.population > 1): model = AliceBobPopulation(args.population)
@@ -45,8 +45,10 @@ if(__name__ == "__main__"):
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader(args.same_img)
         
-        tmp_writer = SummaryWriter(run_summary_dir)
-        event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
+        if(args.no_summary): event_writer = None
+        else:
+            tmp_writer = SummaryWriter(run_summary_dir)
+            event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
 
         print(datetime.now(), "training start...")
         for epoch in range(1, (EPOCHS + 1)):

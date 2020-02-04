@@ -50,6 +50,7 @@ arg_parser.add_argument('--grad_clipping', help='threshold for gradient clipping
 arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
 
 arg_parser.add_argument('--debug', '-d', help='log more stuff', action='store_true')
+arg_parser.add_argument('--no_summary', '-ns', help='do not write summarys', action='store_true')
 
 # For visualize.py
 arg_parser.add_argument('--load_model', help='the path to the model to load')
