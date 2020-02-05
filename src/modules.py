@@ -223,13 +223,13 @@ def build_cnn_decoder():
     strides = STRIDES[::-1]
     inputs = [HIDDEN] + ([FILTERS] * (len(STRIDES) - 1))
     outputs = ([FILTERS] * (len(STRIDES) - 1)) + [IMG_SHAPE[0]]
-    padding = [0, 0, 1, 0, 0, 0, 0, 1] # guessworking it out
+    paddings = [0, 0, 1, 0, 0, 0, 0, 1] # guessworking it out
     return build_cnn(
         layer_classes=layer_classes,
         input_channels=inputs,
         output_channels=outputs,
         strides=strides,
-        padding=padding,
+        paddings=paddings,
         kernel_size=KERNEL_SIZE,
         flatten_last=False,
         sigmoid_after=True,)

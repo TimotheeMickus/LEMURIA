@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from datetime import datetime
+from itertools import chain
 import os
 
 import torch
@@ -17,6 +18,7 @@ parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
 sys.path.append(parent_dir_path)
 
 from aliceBob import AliceBob
+from aliceBobCharlie import AliceBobCharlie
 from aliceBobPopulation import AliceBobPopulation
 from utils import build_optimizer, AverageSummaryWriter
 
@@ -38,13 +40,19 @@ if(__name__ == "__main__"):
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         if(args.population > 1): model = AliceBobPopulation(args.population)
+        elif args.charlie: model = AliceBobCharlie()
         else: model = AliceBob()
         model = model.to(DEVICE)
         #print(model)
 
-        optimizer = build_optimizer(model.parameters())
+        if args.charlie:
+            optimizer = (
+                build_optimizer(chain(model.sender.parameters(), model.receiver.parameters())),
+                build_optimizer(model.drawer.parameters()))
+        else:
+            optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader(args.same_img)
-        
+
         if(args.no_summary): event_writer = None
         else:
             tmp_writer = SummaryWriter(run_summary_dir)

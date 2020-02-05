@@ -1,11 +1,13 @@
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
 from sender import Sender
 from receiver import Receiver
-from senderReceiver import SenderReceiver
+from drawer import Drawer
 from utils import show_imgs, max_normalize_, to_color
 
 from config import *
@@ -24,7 +26,7 @@ class Progress:
 
     def update(self, r):
         if(self.simple_display):
-            print(('%i/%i - R: %f' % (self.i, self.steps_per_epoch, r)), flush=True)
+            print('%i/%i - R: %f' % (self.i, self.steps_per_epoch, r))
             self.i += 1
         else:
             self.pbar.set_postfix({"R" : r}, refresh=False)
@@ -33,26 +35,31 @@ class Progress:
     def __exit__(self, type, value, traceback):
         if(not self.simple_display): self.pbar.close()
 
-class AliceBob(nn.Module):
-    def __init__(self, shared=False):
+class AliceBobCharlie(nn.Module):
+    def __init__(self):
         nn.Module.__init__(self)
-
-        if(shared):
-            senderReceiver = SenderReceiver()
-            self.sender = senderReceiver.sender
-            self.receiver = senderReceiver.receiver
-        else:
-            self.sender = Sender()
-            self.receiver = Receiver()
+        self.sender = Sender()
+        self.receiver = Receiver()
+        self.drawer = Drawer()
 
     @staticmethod
-    def _forward(batch, sender, receiver):
+    def _forward(batch, sender, drawer, receiver, generator_step=False):
+
         sender_outcome = sender(batch.alice_input)
-        receiver_outcome = receiver(batch.bob_input, *sender_outcome.action)
+        if generator_step:
+            for item in sender_outcome.action:
+                item.detach()
 
-        return sender_outcome, receiver_outcome
+        drawer_outcome = drawer(*sender_outcome.action)
+        if not generator_step:
+            drawer_outcome.action.detach()
+        bob_input = torch.cat([batch.bob_input, drawer_outcome.action.unsqueeze(1)], dim=1)
 
-    def forward(self, batch):
+        receiver_outcome = receiver(bob_input, *sender_outcome.action)
+
+        return sender_outcome, drawer_outcome, receiver_outcome
+
+    def forward(self, batch, generator_step=False):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'alice_input' is a tensor of shape [BATCH_SIZE, *IMG_SHAPE] and 'bob_input' is a tensor of shape [BATCH_SIZE, K, *IMG_SHAPE]
@@ -60,7 +67,7 @@ class AliceBob(nn.Module):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self._forward(batch, self.sender, self.receiver)
+        return self._forward(batch, self.sender, self.drawer, self.receiver, generator_step=generator_step)
 
     def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
         """
@@ -147,17 +154,72 @@ class AliceBob(nn.Module):
                 imgs.append(receiver_part[i][j])
         show_imgs(imgs, nrow=(2 * (1 + img_per_batch)))
 
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
+    def train_step_alice_bob(self, batch, optim, running_avg_success):
+        optim.zero_grad()
+        sender_outcome, drawer_outcome, receiver_outcome = self(batch, generator_step=False)
+        chance_perf = (1 / (batch.bob_input.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
+        (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
+        log_prob = self.compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
+        loss = -(rewards * log_prob)
+
+        loss = loss.mean()
+        # entropy penalties
+        loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
+        loss = loss - (BETA_RECEIVER * receiver_outcome.entropy.mean())
+
+        # backprop
+        loss.backward()
+
+        # Gradient clipping and scaling
+        if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
+        if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
+
+        optim.step()
+
+        message_length = sender_outcome.action[1]
+
+        charlie_acc = (receiver_outcome.action == batch.bob_input.size(1)).float().sum() / receiver_outcome.action.numel()
+
+        return rewards, successes, message_length, loss, charlie_acc
+
+    def train_step_charlie(self, batch, optim, running_avg_success):
+        optim.zero_grad()
+        sender_outcome, drawer_outcome, receiver_outcome = self(batch, generator_step=True)
+
+
+        target = torch.ones_like(receiver_outcome.action) * batch.bob_input.size(1)
+        loss = F.nll_loss(F.log_softmax(receiver_outcome.scores, dim=1), target)
+
+        # backprop
+        loss.backward()
+
+        # Gradient clipping and scaling
+        if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
+        if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
+
+        optim.step()
+
+        message_length = sender_outcome.action[1]
+
+        charlie_acc = (receiver_outcome.action == batch.bob_input.size(1)).float().sum() / receiver_outcome.action.numel()
+        chance_perf = (1 / (batch.bob_input.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
+        (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
+
+        return rewards, successes, message_length, loss, charlie_acc
+
+
+    def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None):
         """
             Model training function
             Input:
                 `data_iterator`, an infinite iterator over (batched) data
-                `optim`, the optimizer
+                `optim_alice_bob`, the optimizer
             Optional arguments:
                 `epoch`: epoch number to display in progressbar
                 `steps_per_epoch`: number of steps for epoch
                 `event_writer`: tensorboard writer to log evolution of values
         """
+        optim_alice_bob, optim_charlie = optimizers
         self.train() # Sets the model in training mode
 
         with Progress(SIMPLE_DISPLAY, steps_per_epoch, epoch) as pbar:
@@ -170,31 +232,15 @@ class AliceBob(nn.Module):
             end_i = start_i + steps_per_epoch
 
             for i, batch in zip(range(start_i, end_i), data_iterator):
-                optim.zero_grad()
-                sender_outcome, receiver_outcome = self(batch)
-
-                chance_perf = (1 / batch.bob_input.shape[1]) # The chance performance is 1 over the number of images shown to Bob
-                (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
-                log_prob = self.compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
-                loss = -(rewards * log_prob)
-
-                loss = loss.mean()
-                # entropy penalties
-                loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
-                loss = loss - (BETA_RECEIVER * receiver_outcome.entropy.mean())
-
-                # backprop
-                loss.backward()
-
-                # Gradient clipping and scaling
-                if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
-                if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
-
-                optim.step()
+                generator_step = (i%2 == 0)
+                if generator_step:
+                    rewards, successes, message_length, loss, charlie_acc = self.train_step_alice_bob(batch, optim_alice_bob, running_avg_success)
+                else:
+                    rewards, successes, message_length, loss, charlie_acc = self.train_step_charlie(batch, optim_charlie, running_avg_success)
 
                 avg_reward = rewards.mean().item() # average reward of the batch
                 avg_success = successes.mean().item() # average success of the batch
-                avg_msg_length = sender_outcome.action[1].float().mean().item() # average message length of the batch
+                avg_msg_length = message_length.float().mean().item() # average message length of the batch
 
                 # updates running average reward
                 total_reward += rewards.sum().item()
@@ -210,8 +256,12 @@ class AliceBob(nn.Module):
                     number_ex_seen = i * BATCH_SIZE
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                     event_writer.add_scalar('train/success', avg_success, number_ex_seen)
-                    event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
+                    if generator_step:
+                        event_writer.add_scalar('train/loss_charlie', loss.item(), number_ex_seen)
+                    else:
+                        event_writer.add_scalar('train/loss_alice_bob', loss.item(), number_ex_seen)
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
+                    event_writer.add_scalar('train/charlie_acc', charlie_acc.item(), number_ex_seen)
                     if DEBUG_MODE:
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
