@@ -51,7 +51,7 @@ class AliceBobCharlie(nn.Module):
         with torch.autograd.set_grad_enabled(generator_step):
             drawer_outcome = drawer(*sender_outcome.action)
 
-        bob_input = torch.cat([batch.bob_input, drawer_outcome.action.unsqueeze(1)], dim=1)
+        bob_input = torch.cat([batch.bob_input, drawer_outcome.image.unsqueeze(1)], dim=1)
 
         receiver_outcome = receiver(bob_input, *sender_outcome.action)
 

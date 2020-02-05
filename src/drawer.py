@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from modules import MessageEncoder, build_cnn_decoder
 
-Outcome = namedtuple("Outcome", ["action"])
+Outcome = namedtuple("Outcome", ["image"])
 
 class Drawer(nn.Module):
     def __init__(self, message_encoder=None):
@@ -21,5 +21,5 @@ class Drawer(nn.Module):
         deconv_input = encoded_message[:,:,None,None]
         image = self.image_decoder(deconv_input)
         
-        outcome = Outcome(action=image)
+        outcome = Outcome(image=image)
         return outcome
