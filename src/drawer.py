@@ -16,6 +16,10 @@ class Drawer(nn.Module):
 
     def forward(self, message, length):
         encoded_message = self.message_encoder(message, length)
-        image = self.image_decoder(encoded_message[:,:,None,None])
+
+        # the deconvolution expects a 1 by 1 image with D channels, hence the unsqueezing
+        deconv_input = encoded_message[:,:,None,None]
+        image = self.image_decoder(deconv_input)
+        
         outcome = Outcome(action=image)
         return outcome
