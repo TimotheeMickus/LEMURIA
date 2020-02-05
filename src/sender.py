@@ -31,5 +31,5 @@ class Sender(nn.Module):
         outcome = Outcome(
             entropy=outputs["entropy"],
             log_prob=outputs["log_probs"],
-            action=(outputs["message"],outputs["message_len"]))
+            action=(outputs["message"], outputs["message_len"]))
         return outcome
