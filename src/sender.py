@@ -1,99 +1,22 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions.categorical import Categorical
 from collections import namedtuple
 
-from utils import build_cnn_encoder
+from modules import MessageDecoder, build_cnn_encoder
 
 from config import *
 
 # Structure for outcomes
-Outcome = namedtuple("Policy", ["entropy", "log_prob", "action"])
-
-# Vector -> message
-class SenderMessageDecoder(nn.Module):
-    def __init__(self, symbol_embeddings=None):
-        super(SenderMessageDecoder, self).__init__()
-        
-        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((ALPHABET_SIZE + 2), HIDDEN, padding_idx=PAD) # +2: padding symbol, BOS symbol
-        self.symbol_embeddings = symbol_embeddings
-        
-        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1)
-        # project encoded img onto cell
-        self.cell_proj = nn.Linear(HIDDEN, HIDDEN)
-        # project encoded img onto hidden
-        self.hidden_proj = nn.Linear(HIDDEN, HIDDEN)
-        # project lstm output onto action space
-        self.action_space_proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
-
-    def forward(self, encoded):
-        # Initialisation
-        last_symbol = torch.ones(encoded.size(0)).long().to(DEVICE) * BOS
-        cell = self.cell_proj(encoded).unsqueeze(0)
-        hidden = self.hidden_proj(encoded).unsqueeze(0)
-        state = (cell, hidden)
-
-        # outputs
-        message = []
-        log_probs = []
-        entropy = []
-
-        # Used in the stopping mechanism (when EOS has been produced)
-        has_stopped = torch.zeros(encoded.size(0)).bool().to(DEVICE)
-        has_stopped.requires_grad = False
-
-        # produces message
-        for i in range(MSG_LEN):
-            output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
-            output = self.action_space_proj(output).squeeze(0)
-
-            # selects action
-            probs =  F.softmax(output, dim=-1)
-            dist = Categorical(probs)
-            action = dist.sample() if self.training else probs.argmax(dim=-1)
-
-            # ignores prediction for completed messages
-            ent = dist.entropy() * (~has_stopped).float()
-            log_p = dist.log_prob(action) * (~has_stopped).float()
-            log_probs.append(log_p)
-            entropy.append(ent)
-
-            action = action.masked_fill(has_stopped, PAD)
-            message.append(action)
-
-            # If all messages are finished
-            has_stopped = has_stopped | (action == EOS)
-            if has_stopped.all():
-                break
-
-            last_symbol = action
-
-        # converts output to tensor
-        message = torch.stack(message, dim=1)
-        message_len = (message != PAD).cumsum(dim=1)[:,-1,None]
-        log_probs = torch.stack(log_probs, dim=1)
-
-        # average entropy over timesteps, hence ignore padding
-        entropy = torch.stack(entropy, dim=1)
-        entropy = entropy.sum(dim=1, keepdim=True)
-        entropy = entropy / message_len.float()
-
-        outcome = Outcome(
-            entropy=entropy,
-            log_prob=log_probs,
-            action=(message, message_len))
-        return outcome
+Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 
 # Image -(vector)-> message
 class Sender(nn.Module):
     def __init__(self, image_encoder=None, symbol_embeddings=None):
         super(Sender, self).__init__()
-        
+
         if(image_encoder is None): image_encoder = build_cnn_encoder()
         self.image_encoder = image_encoder
-        
-        self.message_decoder = SenderMessageDecoder(symbol_embeddings)
+        self.message_decoder = MessageDecoder(symbol_embeddings)
 
     def forward(self, image):
         """
@@ -104,5 +27,9 @@ class Sender(nn.Module):
                 `Outcome`, where `action` is the produced message
         """
         encoded_image = self.image_encoder(image)
-        outcome = self.message_decoder(encoded_image)
+        outputs = self.message_decoder(encoded_image)
+        outcome = Outcome(
+            entropy=outputs["entropy"],
+            log_prob=outputs["log_probs"],
+            action=(outputs["message"],outputs["message_len"]))
         return outcome

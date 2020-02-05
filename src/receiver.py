@@ -1,46 +1,15 @@
+from collections import namedtuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
-from collections import namedtuple
 
-from utils import build_cnn_encoder
-
+from modules import MessageEncoder, build_cnn_encoder
 from config import *
 
 # Structure for outcomes
-Outcome = namedtuple("Policy", ["entropy", "log_prob", "action", "dist", "scores"])
-
-# Message -> vector
-class ReceiverMessageEncoder(nn.Module):
-    """
-    Encodes a message of discrete symbols in a single vector.
-    """
-    def __init__(self, symbol_embeddings=None):
-        super(ReceiverMessageEncoder, self).__init__()
-
-        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((ALPHABET_SIZE + 1), HIDDEN, padding_idx=PAD) # +1: padding symbol
-        self.symbol_embeddings = symbol_embeddings
-        
-        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1, batch_first=True)
-
-    def forward(self, message, length):
-        """
-        Forward propagation.
-        Input:
-            `message`, of shape [BATCH_SIZE x <=MSG_LEN], message produced by sender
-            `length`, of shape [BATCH_SIZE x 1], length of message produced by sender
-        Output:
-            encoded message, of shape [BATCH_SIZE x HIDDEN]
-        """
-        # encode
-        embeddings = self.symbol_embeddings(message)
-        embeddings = self.lstm(embeddings)[0]
-        # select last step corresponding to message
-        index = torch.arange(message.size(-1)).expand_as(message).to(DEVICE)
-        output = embeddings.masked_select((index == (length-1)).unsqueeze(-1))
-
-        return output.view(embeddings.size(0), embeddings.size(-1))
+Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action", "dist", "scores"])
 
 # Scores images according to a message
 class Receiver(nn.Module):
@@ -54,7 +23,7 @@ class Receiver(nn.Module):
         if(image_encoder is None): image_encoder = build_cnn_encoder()
         self.image_encoder = image_encoder
 
-        self.message_encoder = ReceiverMessageEncoder(symbol_embeddings)
+        self.message_encoder = MessageEncoder(symbol_embeddings)
 
     def forward(self, images, message, length):
         """
