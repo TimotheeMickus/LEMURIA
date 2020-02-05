@@ -12,6 +12,7 @@ from utils import show_imgs, max_normalize_, to_color
 
 from config import *
 
+# TODO Mettre aussi le succès de Charlie
 class Progress:
     def __init__(self, simple_display, steps_per_epoch, epoch):
         self.simple_display = simple_display
@@ -43,21 +44,20 @@ class AliceBobCharlie(nn.Module):
         self.drawer = Drawer()
 
     @staticmethod
-    def _forward(batch, sender, drawer, receiver, generator_step=False):
-
-        with torch.autograd.set_grad_enabled(not generator_step):
+    def _forward(batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
+        with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
             sender_outcome = sender(batch.alice_input)
 
-        with torch.autograd.set_grad_enabled(generator_step):
+        with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not drawer_no_grad)):
             drawer_outcome = drawer(*sender_outcome.action)
 
-        bob_input = torch.cat([batch.bob_input, drawer_outcome.image.unsqueeze(1)], dim=1)
+        bob_input = torch.cat([batch.bob_input, drawer_outcome.image.unsqueeze(1)], dim=1) # TODO j'ai bien peur qu'on doive renommer la propriété `bob_input` (et `alice_input`)
 
         receiver_outcome = receiver(bob_input, *sender_outcome.action)
 
         return sender_outcome, drawer_outcome, receiver_outcome
 
-    def forward(self, batch, generator_step=False):
+    def forward(self, batch):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'alice_input' is a tensor of shape [BATCH_SIZE, *IMG_SHAPE] and 'bob_input' is a tensor of shape [BATCH_SIZE, K, *IMG_SHAPE]
@@ -65,7 +65,7 @@ class AliceBobCharlie(nn.Module):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self._forward(batch, self.sender, self.drawer, self.receiver, generator_step=generator_step)
+        return self._forward(batch, self.sender, self.drawer, self.receiver)
 
     def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
         """
@@ -99,6 +99,7 @@ class AliceBobCharlie(nn.Module):
         log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
         return log_prob
 
+    # TODO à mettre à jour
     def test_visualize(self, data_iterator):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
@@ -154,9 +155,10 @@ class AliceBobCharlie(nn.Module):
 
     def train_step_alice_bob(self, batch, optim, running_avg_success):
         optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self(batch, generator_step=False)
+        sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
         chance_perf = (1 / (batch.bob_input.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
         (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
+        # TODO On doit séparer Alice et Bob. Comme on en a discuté longement fut un temps, on a de bonnes raisons de ne pas vouloir faire entrer en compte l'image de Charlie pour la reward d'Alice. (je sais comment faire)
         log_prob = self.compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
         loss = -(rewards * log_prob)
 
@@ -182,9 +184,9 @@ class AliceBobCharlie(nn.Module):
 
     def train_step_charlie(self, batch, optim, running_avg_success):
         optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self(batch, generator_step=True)
+        sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
 
-
+        # TODO: Je ne suis pas convaincu qu'il faille considérer toutes les images. Plutôt seulement l'originale et celle de Charlie. (Éventuellement ajouter un flag pour décider entre ces deux options.)
         target = torch.ones_like(receiver_outcome.action) * batch.bob_input.size(1)
         loss = F.nll_loss(F.log_softmax(receiver_outcome.scores, dim=1), target)
 
@@ -230,7 +232,7 @@ class AliceBobCharlie(nn.Module):
             end_i = start_i + steps_per_epoch
 
             for i, batch in zip(range(start_i, end_i), data_iterator):
-                generator_step = (i%2 == 0)
+                generator_step = (i%2 == 0) # TODO Il faudrait un paramètre à la place du 2
                 if generator_step:
                     rewards, successes, message_length, loss, charlie_acc = self.train_step_alice_bob(batch, optim_alice_bob, running_avg_success)
                 else:
@@ -261,6 +263,7 @@ class AliceBobCharlie(nn.Module):
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
                     event_writer.add_scalar('train/charlie_acc', charlie_acc.item(), number_ex_seen)
                     if DEBUG_MODE:
+                        # TODO À quoi servent les appels à `detach` ?
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
                         #min_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().min().item()
