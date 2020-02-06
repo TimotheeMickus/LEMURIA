@@ -9,6 +9,15 @@ import tqdm
 
 from config import *
 
+def add_normal_noise(t, std_dev, clamp_values=None):
+    tmp = (t + (std_dev * torch.randn(size=t.shape)))
+
+    if(clam_values is not None):
+        clamp_min, clamp_max = clamp_values
+        tmp = torch.clamp(tmp, clamp_min, clamp_max)
+
+    return tmp
+
 class AverageSummaryWriter:
     def __init__(self, writer=None, log_dir=None, default_period=1, specific_periods={}, prefix=None):
         if(writer is None): writer = SummaryWriter(log_dir)

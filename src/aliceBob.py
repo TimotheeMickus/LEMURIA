@@ -22,17 +22,19 @@ class AliceBob(nn.Module):
             self.sender = Sender()
             self.receiver = Receiver()
 
-    @staticmethod
-    def _forward(batch, sender, receiver):
-        sender_outcome = sender(batch.alice_input)
-        receiver_outcome = receiver(batch.bob_input, *sender_outcome.action)
+    def _bob_input(self, batch):
+        return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors], dim=1)
+        
+    def _forward(self, batch, sender, receiver):
+        sender_outcome = sender(batch.original_img)
+        receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
 
     def forward(self, batch):
         """
         Input:
-            `batch` is a Batch (a kind of named tuple); 'alice_input' is a tensor of shape [BATCH_SIZE, *IMG_SHAPE] and 'bob_input' is a tensor of shape [BATCH_SIZE, K, *IMG_SHAPE]
+            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [BATCH_SIZE, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [BATCH_SIZE, 2, *IMG_SHAPE]
         Output:
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
@@ -77,10 +79,11 @@ class AliceBob(nn.Module):
         batch_size = 2 # Maybe it would just be simpler to work with multiple batches of size 1
         batch = data_iterator.get_batch(batch_size)
 
-        batch.alice_input.requires_grad = True
-        batch.bob_input.requires_grad = True
+        batch.original_img.requires_grad = True
+        batch.target_img.requires_grad = True
+        batch.base_distractors.requires_grad = True
 
-        pseudo_optimizer = torch.optim.Optimizer(list(self.parameters()) + [batch.alice_input, batch.bob_input], {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
+        pseudo_optimizer = torch.optim.Optimizer(list(self.parameters()) + [batch.original_img, batch.target_img, batch.base_distractors], {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
 
         sender_outcome, receiver_outcome = self(batch)
 
@@ -104,24 +107,30 @@ class AliceBob(nn.Module):
 
         # Alice's part
         sender_outcome.log_prob.sum().backward()
-        sender_part = batch.alice_input.grad.detach()
 
+        sender_part = batch.original_img.grad.detach()
         sender_part = process(sender_part, 1, mode)
 
         # Bob's part
         receiver_outcome.scores.sum().backward()
-        receiver_part = batch.bob_input.grad.detach()
 
-        receiver_part = process(receiver_part, 2, mode)
+        receiver_part_target_img = batch.target_img.grad.detach()
+        receiver_part_target_img = process(receiver_part_target_img, 2, mode)
+
+        receiver_part_base_distractors = batch.base_distractors.grad.detach()
+        receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
 
         imgs = []
-        img_per_batch = batch.bob_input.shape[1]
         for i in range(batch_size):
-            imgs.append(batch.alice_input[i].detach())
+            imgs.append(batch.original_img[i].detach())
             imgs.append(sender_part[i])
-            for j in range(img_per_batch):
-                imgs.append(batch.bob_input[i][j].detach())
-                imgs.append(receiver_part[i][j])
+
+            imgs.append(batch.target_img[i].detach())
+            imgs.append(receiver_part_target_img[i])
+            
+            for j in range(batch.base_distractors.size(1)):
+                imgs.append(batch.base_distractors[i][j].detach())
+                imgs.append(receiver_part_base_distractors[i][j])
         show_imgs(imgs, nrow=(2 * (1 + img_per_batch)))
 
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
@@ -150,7 +159,7 @@ class AliceBob(nn.Module):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
 
-                chance_perf = (1 / batch.bob_input.shape[1]) # The chance performance is 1 over the number of images shown to Bob
+                chance_perf = (1.0 / (1 + batch.base_distractors.size(1))) # The chance performance is 1 over the number of images shown to Bob
                 (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
                 log_prob = self.compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
                 loss = -(rewards * log_prob)
