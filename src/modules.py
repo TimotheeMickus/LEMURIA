@@ -10,13 +10,18 @@ class MessageEncoder(nn.Module):
     """
     Encodes a message of discrete symbols in a single vector.
     """
-    def __init__(self, symbol_embeddings=None):
+    def __init__(self,
+        symbol_embeddings=None,
+        alphabet_size=ALPHABET_SIZE,
+        embedding_dim=HIDDEN,
+        padding_idx=PAD,
+        output_dim=HIDDEN):
         super(MessageEncoder, self).__init__()
 
-        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((ALPHABET_SIZE + 1), HIDDEN, padding_idx=PAD) # +1: padding symbol
+        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((alphabet_size + 1), embedding_dim, padding_idx=padding_idx) # +1: padding symbol
         self.symbol_embeddings = symbol_embeddings
 
-        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1, batch_first=True)
+        self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
 
     def forward(self, message, length):
         """
@@ -25,7 +30,7 @@ class MessageEncoder(nn.Module):
             `message`, of shape [BATCH_SIZE x <=MSG_LEN], message produced by sender
             `length`, of shape [BATCH_SIZE x 1], length of message produced by sender
         Output:
-            encoded message, of shape [BATCH_SIZE x HIDDEN]
+            encoded message, of shape [BATCH_SIZE x output_dim]
         """
         # encode
         embeddings = self.symbol_embeddings(message)
@@ -38,23 +43,37 @@ class MessageEncoder(nn.Module):
 
 # Vector -> message
 class MessageDecoder(nn.Module):
-    def __init__(self, symbol_embeddings=None):
+    def __init__(self,
+        symbol_embeddings=None,
+        alphabet_size=ALPHABET_SIZE,
+        embedding_dim=HIDDEN,
+        padding_idx=PAD,
+        output_dim=HIDDEN,
+        max_msg_len=MSG_LEN,
+        bos_index=BOS,
+        eos_index=EOS,
+        ):
         super(MessageDecoder, self).__init__()
 
-        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((ALPHABET_SIZE + 2), HIDDEN, padding_idx=PAD) # +2: padding symbol, BOS symbol
+        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((alphabet_size + 2), embedding_dim, padding_idx=padding_idx) # +2: padding symbol, BOS symbol
         self.symbol_embeddings = symbol_embeddings
 
-        self.lstm = nn.LSTM(HIDDEN, HIDDEN, 1)
+        self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
         # project encoded img onto cell
-        self.cell_proj = nn.Linear(HIDDEN, HIDDEN)
+        self.cell_proj = nn.Linear(embedding_dim, embedding_dim)
         # project encoded img onto hidden
-        self.hidden_proj = nn.Linear(HIDDEN, HIDDEN)
+        self.hidden_proj = nn.Linear(embedding_dim, embedding_dim)
         # project lstm output onto action space
-        self.action_space_proj = nn.Linear(HIDDEN, ALPHABET_SIZE)
+        self.action_space_proj = nn.Linear(embedding_dim, alphabet_size)
+
+        self.max_msg_len = max_msg_len
+        self.bos_index = bos_index
+        self.eos_index = eos_index
+        self.padding_idx = padding_idx
 
     def forward(self, encoded):
         # Initialisation
-        last_symbol = torch.ones(encoded.size(0)).long().to(DEVICE) * BOS
+        last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
         cell = self.cell_proj(encoded).unsqueeze(0)
         hidden = self.hidden_proj(encoded).unsqueeze(0)
         state = (cell, hidden)
@@ -65,11 +84,11 @@ class MessageDecoder(nn.Module):
         entropy = []
 
         # Used in the stopping mechanism (when EOS has been produced)
-        has_stopped = torch.zeros(encoded.size(0)).bool().to(DEVICE)
+        has_stopped = torch.zeros(encoded.size(0)).bool().to(encoded.device)
         has_stopped.requires_grad = False
 
         # produces message
-        for i in range(MSG_LEN):
+        for i in range(self.max_msg_len):
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
@@ -84,11 +103,11 @@ class MessageDecoder(nn.Module):
             log_probs.append(log_p)
             entropy.append(ent)
 
-            action = action.masked_fill(has_stopped, PAD)
+            action = action.masked_fill(has_stopped, self.padding_idx)
             message.append(action)
 
             # If all messages are finished
-            has_stopped = has_stopped | (action == EOS)
+            has_stopped = has_stopped | (action == self.eos_index)
             if has_stopped.all():
                 break
 
@@ -96,7 +115,7 @@ class MessageDecoder(nn.Module):
 
         # converts output to tensor
         message = torch.stack(message, dim=1)
-        message_len = (message != PAD).cumsum(dim=1)[:,-1,None]
+        message_len = (message != self.padding_idx).cumsum(dim=1)[:,-1,None]
         log_probs = torch.stack(log_probs, dim=1)
 
         # average entropy over timesteps, hence ignore padding
@@ -110,6 +129,24 @@ class MessageDecoder(nn.Module):
             "message":message,
             "message_len":message_len}
         return outputs
+
+# vector -> vector + random noise
+class Randomizer(nn.Module):
+    def __init__(self, input_dim=HIDDEN, random_dim=HIDDEN):
+        super(Randomizer, self).__init__()
+        self.merging_projection = nn.Linear(input_dim + random_dim, input_dim)
+        self.random_dim = random_dim
+        self.input_dim = input_dim
+
+    def forward(self, input_vector):
+        """
+        Input:
+            `input_vector` of dimension [BATCH x self.input_dim]
+        """
+        noise = torch.randn(input_vector.size(0), self.random_dim, device=input_vector.device)
+        input_with_noise = torch.cat([input_vector, noise], dim=1)
+        merged_input = self.merging_projection(input_with_noise)
+        return merged_input
 
 
 def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
