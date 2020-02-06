@@ -3,38 +3,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-import tqdm
 
 from sender import Sender
 from receiver import Receiver
 from drawer import Drawer
-from utils import show_imgs, max_normalize_, to_color
+from utils import show_imgs, max_normalize_, to_color, Progress
 
 from config import *
-
-# TODO Mettre aussi le succès de Charlie
-class Progress:
-    def __init__(self, simple_display, steps_per_epoch, epoch):
-        self.simple_display = simple_display
-        self.steps_per_epoch = steps_per_epoch
-        self.epoch = epoch
-
-    def __enter__(self):
-        if(self.simple_display): self.i = 0
-        else: self.pbar = tqdm.tqdm(total=self.steps_per_epoch, postfix={"R": 0.0}, unit="B", desc=("Epoch %i" % self.epoch)) # Do not forget to close it at the end
-
-        return self
-
-    def update(self, r):
-        if(self.simple_display):
-            print('%i/%i - R: %f' % (self.i, self.steps_per_epoch, r))
-            self.i += 1
-        else:
-            self.pbar.set_postfix({"R" : r}, refresh=False)
-            self.pbar.update()
-
-    def __exit__(self, type, value, traceback):
-        if(not self.simple_display): self.pbar.close()
 
 class AliceBobCharlie(nn.Module):
     def __init__(self):
@@ -249,7 +224,7 @@ class AliceBobCharlie(nn.Module):
                 running_avg_reward = total_reward / total_items
                 running_avg_success = total_success / total_items
 
-                pbar.update(running_avg_success)
+                pbar.update(R=running_avg_success)
 
                 # logs some values
                 if(event_writer is not None):

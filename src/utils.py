@@ -1,10 +1,11 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 import torchvision
-import matplotlib.pyplot as plt
-import numpy as np
+import tqdm
 
 from config import *
 
@@ -39,6 +40,31 @@ class AverageSummaryWriter:
         add = False
         for key, value in l:
             self.add_scalar(key, value, global_step)
+
+class Progress:
+    def __init__(self, simple_display, steps_per_epoch, epoch, logged_items={"R"}):
+        self.simple_display = simple_display
+        self.steps_per_epoch = steps_per_epoch
+        self.epoch = epoch
+        self._logged_items = logged_items
+
+    def __enter__(self):
+        if(self.simple_display): self.i = 0
+        else: self.pbar = tqdm.tqdm(total=self.steps_per_epoch, postfix={i: 0.0 for i in self._logged_items}, unit="B", desc=("Epoch %i" % self.epoch)) # Do not forget to close it at the end
+
+        return self
+
+    def update(self, **logged_items):
+        if(self.simple_display):
+            postfix = " ".join(k + ": %f" % logged_items[k] for k in sorted(logged_items))
+            print('%i/%i - %s' % (self.i, self.steps_per_epoch, postfix))
+            self.i += 1
+        else:
+            self.pbar.set_postfix(logged_items, refresh=False)
+            self.pbar.update()
+
+    def __exit__(self, type, value, traceback):
+        if(not self.simple_display): self.pbar.close()
 
 def max_tensor(t, dim, abs_val=True, unsqueeze=True):
     x = t.abs() if(abs_val) else t
