@@ -2,12 +2,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 import torchvision
 import tqdm
 
 from config import *
+
+def pointing(scores):
+    probs = F.softmax(scores, dim=-1)
+    dist = Categorical(probs)
+    action = dist.sample()
+
+    return {'dist': dist, 'action': action}
 
 def add_normal_noise(t, std_dev, clamp_values=None):
     tmp = (t + (std_dev * torch.randn(size=t.shape)))

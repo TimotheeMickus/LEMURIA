@@ -9,7 +9,7 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import Progress, show_imgs, max_normalize_, to_color
+from utils import Progress, show_imgs, max_normalize_, to_color, pointing
 
 from config import *
 
@@ -43,38 +43,6 @@ class AliceBob(nn.Module):
             `receiver_outcome`, receiver.Outcome
         """
         return self._forward(batch, self.sender, self.receiver)
-
-    def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
-        """
-            returns the reward as well as the success for each element of a batch
-        """
-        successes = (receiver_action == 0).float() # by design, the first image is the target
-
-        rewards = successes
-
-        if(args.penalty > 0.0):
-            msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; cf. https://github.com/pytorch/pytorch/issues/9515 (I believe)
-            length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
-
-            # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
-            if(args.adaptative_penalty):
-                improvement_factor = (running_avg_success - chance_perf) / (1 - chance_perf) # Equals 0 when running average equals chance performance, reaches 1 when running average reaches 1
-                length_penalties = (length_penalties * min(0.0, improvement_factor))
-
-            rewards = (rewards - length_penalties)
-
-        return (rewards, successes)
-
-    def compute_log_prob(self, sender_log_prob, receiver_log_prob):
-        """
-        Input:
-            `sender_log_prob`, log probs for sender policy
-            `receiver_log_prob`, log prob for receiver policy
-        Output:
-            \bigg(\sum \limits_{l=1}^L \log p_{\pi^s}(m^l_t|m^{<l}_t, u) + \log p_{\pi^L}(u_{t'}|z, U) \bigg)
-        """
-        log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
-        return log_prob
 
     def test_visualize(self, data_iterator):
         self.eval() # Sets the model in evaluation mode; good idea or not?
@@ -136,6 +104,56 @@ class AliceBob(nn.Module):
                 imgs.append(receiver_part_base_distractors[i][j])
         show_imgs(imgs, nrow=(2 * (1 + img_per_batch)))
 
+    def sender_rewards(self, sender_action, receiver_scores, running_avg_success):
+        """
+            returns the reward as well as the success for each element of a batch
+        """
+        # Generates a probability distribution from the scores and sample an action
+        receiver_pointing = pointing(receiver_scores)
+
+        successes = (receiver_pointing['action'] == 0).float() # By design, the target is the first image
+
+        rewards = successes # We could use something along the lines of receiver_pointing['dist'].probs[:,0] instead
+
+        if(args.penalty > 0.0):
+            msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; see https://github.com/pytorch/pytorch/issues/9515 (I believe)
+            length_penalties = 1.0 - (1.0 / (1.0 + args.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+
+            # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
+            if(args.adaptative_penalty):
+                chance_perf = (1 / receiver_scores.size(1))
+                improvement_factor = (running_avg_success - chance_perf) / (1 - chance_perf) # Equals 0 when running average equals chance performance, reaches 1 when running average reaches 1
+                length_penalties = (length_penalties * min(0.0, improvement_factor))
+
+            rewards = (rewards - length_penalties)
+
+        return (rewards, successes)
+
+    def sender_loss(self, sender_outcome, receiver_scores, running_avg_success):
+        (rewards, successes) = self.sender_rewards(sender_outcome.action, receiver_scores, running_avg_success)
+        log_prob = sender_outcome.log_prob.sum(dim=1)
+
+        loss = -(rewards * log_prob).mean()
+
+        loss = loss - (BETA_SENDER * sender_outcome.entropy.mean()) # Entropy penalty
+        
+        return (loss, successes, rewards)
+
+    def receiver_loss(self, receiver_scores):
+        receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it does not matter
+
+        successes = (receiver_pointing['action'] == 0).float() # By design, the target is the first image
+
+        rewards = successes # We could use something along the lines of receiver_pointing['dist'].probs[:,0] instead
+
+        log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
+
+        loss = -(rewards * log_prob).mean()
+
+        loss = loss - (BETA_RECEIVER * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
+        
+        return loss
+
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
         """
             Model training function
@@ -162,31 +180,24 @@ class AliceBob(nn.Module):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
 
-                bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
-                bob_dist = Categorical(bob_probs)
-                bob_action = bob_dist.sample()
-                bob_entropy = bob_dist.entropy()
-                bob_log_prob = bob_dist.log_prob(bob_action)
+                # Alice's part
+                (sender_loss, sender_successes, sender_rewards) = self.sender_loss(sender_outcome, receiver_outcome.scores, running_avg_success)
 
-                chance_perf = (1.0 / self._bob_input(batch).size(1))
-                #chance_perf = (1.0 / (1 + batch.base_distractors.size(1))) # The chance performance is 1 over the number of images shown to Bob
-                (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
-                log_prob = self.compute_log_prob(sender_outcome.log_prob, bob_log_prob)
-                loss = -(rewards * log_prob)
+                # Bob's part
+                receiver_loss = self.receiver_loss(receiver_outcome.scores)
 
-                loss = loss.mean()
-                # entropy penalties
-                loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
-                loss = loss - (BETA_RECEIVER * bob_entropy.mean())
+                loss = sender_loss + receiver_loss
 
-                # backprop
-                loss.backward()
+                loss.backward() # Backpropagation
 
                 # Gradient clipping and scaling
                 if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
                 if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
 
                 optim.step()
+
+                rewards = sender_rewards
+                successes = sender_successes
 
                 avg_reward = rewards.mean().item() # average reward of the batch
                 avg_success = successes.mean().item() # average success of the batch
