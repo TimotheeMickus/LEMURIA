@@ -9,7 +9,7 @@ from modules import MessageEncoder, build_cnn_encoder
 from config import *
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action", "dist", "scores"])
+Outcome = namedtuple("Outcome", ["scores"])
 
 # Scores images according to a message
 class Receiver(nn.Module):
@@ -37,7 +37,7 @@ class Receiver(nn.Module):
         """
 
         # Encodes the images
-        original_size = images.size()[:2] #dim 1 & 2 give batch size & K
+        original_size = images.size()[:2] #dim 1 & 2 give batch size & K (TODO Je ne comprends pas ce commentaire.)
         encoded_images = self.image_encoder(images.view(-1, *images.size()[2:]))
         encoded_images = encoded_images.view(*original_size, -1)
 
@@ -47,20 +47,5 @@ class Receiver(nn.Module):
         # Scores the targets
         scores = torch.bmm(encoded_images, encoded_message).squeeze(-1)
 
-        # Computes the probability distribution
-        probs = F.softmax(scores, dim=-1)
-        dist = Categorical(probs)
-
-        # Generetates the outcome object
-        action = dist.sample() if self.training else probs.argmax(dim=-1)
-        entropy = dist.entropy()
-        log_prob = dist.log_prob(action)
-
-        outcome = Outcome(
-            entropy=entropy,
-            log_prob=log_prob,
-            action=action,
-            dist=dist,
-            scores=scores)
-
+        outcome = Outcome(scores=scores)
         return outcome

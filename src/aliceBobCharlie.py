@@ -1,7 +1,7 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from sender import Sender
@@ -77,16 +77,24 @@ class AliceBobCharlie(nn.Module):
     def train_step_alice_bob(self, batch, optim, running_avg_success):
         optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
-        chance_perf = (1 / (1 + batch.base_distractors.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
-        (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
+
+        bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
+        bob_dist = Categorical(bob_probs)
+        bob_action = bob_dist.sample()
+        bob_entropy = bob_dist.entropy()
+        bob_log_prob = bob_dist.log_prob(bob_action)
+
+        chance_perf = (1.0 / self._bob_input(batch).size(1))
+        #chance_perf = (1 / (1 + batch.base_distractors.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
+        (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
         # TODO On doit séparer Alice et Bob. Comme on en a discuté longement fut un temps, on a de bonnes raisons de ne pas vouloir faire entrer en compte l'image de Charlie pour la reward d'Alice. (je sais comment faire)
-        log_prob = self.compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
+        log_prob = self.compute_log_prob(sender_outcome.log_prob, bob_log_prob)
         loss = -(rewards * log_prob)
 
         loss = loss.mean()
         # entropy penalties
         loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
-        loss = loss - (BETA_RECEIVER * receiver_outcome.entropy.mean())
+        loss = loss - (BETA_RECEIVER * bob_entropy.mean())
 
         # backprop
         loss.backward()
@@ -99,7 +107,7 @@ class AliceBobCharlie(nn.Module):
 
         message_length = sender_outcome.action[1]
 
-        charlie_acc = (receiver_outcome.action == (1 + batch.base_distractors.size(1))).float().sum() / receiver_outcome.action.numel()
+        charlie_acc = (bob_action == (1 + batch.base_distractors.size(1))).float().sum() / bob_action.numel()
 
         return rewards, successes, message_length, loss, charlie_acc
 
@@ -107,9 +115,15 @@ class AliceBobCharlie(nn.Module):
         optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
 
+        bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
+        bob_dist = Categorical(bob_probs)
+        bob_action = bob_dist.sample()
+        bob_entropy = bob_dist.entropy()
+        bob_log_prob = bob_dist.log_prob(action)
+
         # TODO: Je ne suis pas convaincu qu'il faille considérer toutes les images. Plutôt seulement l'originale et celle de Charlie. (Éventuellement ajouter un flag pour décider entre ces deux options.)
-        target = torch.ones_like(receiver_outcome.action) * (1 + batch.base_distractors.size(1))
-        loss = F.nll_loss(F.log_softmax(receiver_outcome.scores, dim=1), target)
+        target = torch.ones_like(bob_action) * (1 + batch.base_distractors.size(1))
+        loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
 
         # backprop
         loss.backward()
@@ -122,9 +136,9 @@ class AliceBobCharlie(nn.Module):
 
         message_length = sender_outcome.action[1]
 
-        charlie_acc = (receiver_outcome.action == (1 + batch.base_distractors.size(1))).float().sum() / receiver_outcome.action.numel()
+        charlie_acc = (bob_action == (1 + batch.base_distractors.size(1))).float().sum() / bob_action.numel()
         chance_perf = (1 / (batch.base_distractors.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
-        (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
+        (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
 
         return rewards, successes, message_length, loss, charlie_acc
 

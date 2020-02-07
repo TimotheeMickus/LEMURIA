@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions.categorical import Categorical
+
 import tqdm
 
 from sender import Sender
@@ -159,15 +162,22 @@ class AliceBob(nn.Module):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
 
-                chance_perf = (1.0 / (1 + batch.base_distractors.size(1))) # The chance performance is 1 over the number of images shown to Bob
-                (rewards, successes) = self.compute_rewards(sender_outcome.action, receiver_outcome.action, running_avg_success, chance_perf)
-                log_prob = self.compute_log_prob(sender_outcome.log_prob, receiver_outcome.log_prob)
+                bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
+                bob_dist = Categorical(bob_probs)
+                bob_action = bob_dist.sample()
+                bob_entropy = bob_dist.entropy()
+                bob_log_prob = bob_dist.log_prob(bob_action)
+
+                chance_perf = (1.0 / self._bob_input(batch).size(1))
+                #chance_perf = (1.0 / (1 + batch.base_distractors.size(1))) # The chance performance is 1 over the number of images shown to Bob
+                (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
+                log_prob = self.compute_log_prob(sender_outcome.log_prob, bob_log_prob)
                 loss = -(rewards * log_prob)
 
                 loss = loss.mean()
                 # entropy penalties
                 loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
-                loss = loss - (BETA_RECEIVER * receiver_outcome.entropy.mean())
+                loss = loss - (BETA_RECEIVER * bob_entropy.mean())
 
                 # backprop
                 loss.backward()
@@ -199,16 +209,13 @@ class AliceBob(nn.Module):
                     event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
                     if DEBUG_MODE:
-                        # TODO À quoi servent les appels à `detach` ?
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
-                        #min_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().min().item()
                         max_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().max().item()
                         mean_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).mean().item()
                         max_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).max().item()
                         event_writer.add_scalar('train/median_grad', median_grad, number_ex_seen)
                         event_writer.add_scalar('train/mean_grad', mean_grad, number_ex_seen)
-                        #event_writer.add_scalar('train/min_grad', min_grad, number_ex_seen)
                         event_writer.add_scalar('train/max_grad', max_grad, number_ex_seen)
                         event_writer.add_scalar('train/mean_norm_grad', mean_norm_grad, number_ex_seen)
                         event_writer.add_scalar('train/max_norm_grad', max_norm_grad, number_ex_seen)
