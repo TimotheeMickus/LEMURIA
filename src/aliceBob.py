@@ -111,9 +111,11 @@ class AliceBob(nn.Module):
         # Generates a probability distribution from the scores and sample an action
         receiver_pointing = pointing(receiver_scores)
 
-        successes = (receiver_pointing['action'] == 0).float() # By design, the target is the first image
+        # By design, the target is the first image
+        if(args.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
+        else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
 
-        rewards = successes # We could use something along the lines of receiver_pointing['dist'].probs[:,0] instead
+        rewards = successes
 
         if(args.penalty > 0.0):
             msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; see https://github.com/pytorch/pytorch/issues/9515 (I believe)
@@ -140,11 +142,13 @@ class AliceBob(nn.Module):
         return (loss, successes, rewards)
 
     def receiver_loss(self, receiver_scores):
-        receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it does not matter
+        receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
 
-        successes = (receiver_pointing['action'] == 0).float() # By design, the target is the first image
+        # By design, the target is the first image
+        if(args.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
+        else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
 
-        rewards = successes # We could use something along the lines of receiver_pointing['dist'].probs[:,0] instead
+        rewards = successes
 
         log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
 
