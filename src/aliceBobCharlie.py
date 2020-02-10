@@ -17,9 +17,9 @@ class AliceBobCharlie(nn.Module):
         self.sender = Sender()
         self.receiver = Receiver()
         self.drawer = Drawer()
-    
-    def _bob_input(self, batch):
-        return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors, drawer_outcome.image.unsqueeze(1)], dim=1) 
+
+    def _bob_input(self, batch, drawer_outcome):
+        return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors, drawer_outcome.image.unsqueeze(1)], dim=1)
 
     def _forward(self, batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
         with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
@@ -28,7 +28,7 @@ class AliceBobCharlie(nn.Module):
         with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not drawer_no_grad)):
             drawer_outcome = drawer(*sender_outcome.action)
 
-        receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
+        receiver_outcome = receiver(self._bob_input(batch, drawer_outcome), *sender_outcome.action)
 
         return sender_outcome, drawer_outcome, receiver_outcome
 
@@ -84,7 +84,7 @@ class AliceBobCharlie(nn.Module):
         bob_entropy = bob_dist.entropy()
         bob_log_prob = bob_dist.log_prob(bob_action)
 
-        chance_perf = (1.0 / self._bob_input(batch).size(1))
+        chance_perf = (1.0 / self._bob_input(batch, drawer_outcome).size(1))
         #chance_perf = (1 / (1 + batch.base_distractors.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
         (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
         # TODO On doit séparer Alice et Bob. Comme on en a discuté longement fut un temps, on a de bonnes raisons de ne pas vouloir faire entrer en compte l'image de Charlie pour la reward d'Alice. (je sais comment faire)
@@ -111,7 +111,7 @@ class AliceBobCharlie(nn.Module):
 
         return rewards, successes, message_length, loss, charlie_acc
 
-    def train_step_charlie(self, batch, optim, running_avg_success):
+    def train_step_charlie(self, batch, optim, running_avg_success, default_adv_train=True):
         optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
 
@@ -119,9 +119,8 @@ class AliceBobCharlie(nn.Module):
         bob_dist = Categorical(bob_probs)
         bob_action = bob_dist.sample()
         bob_entropy = bob_dist.entropy()
-        bob_log_prob = bob_dist.log_prob(action)
+        bob_log_prob = bob_dist.log_prob(bob_action)
 
-        # TODO: Je ne suis pas convaincu qu'il faille considérer toutes les images. Plutôt seulement l'originale et celle de Charlie. (Éventuellement ajouter un flag pour décider entre ces deux options.)
         target = torch.ones_like(bob_action) * (1 + batch.base_distractors.size(1))
         loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
 
