@@ -125,6 +125,7 @@ class AliceBobCharlie(nn.Module):
             fake_image_score = receiver_outcome.scores[:,1 + batch.base_distractors.size(1)]
             target = torch.ones_like(fake_image_score)
             loss = F.binary_cross_entropy(torch.sigmoid(fake_image_score), target)
+            # Or, more simply in our case: loss = torch.log(fake_image_score)
         else:
             target = torch.ones_like(bob_action) * (1 + batch.base_distractors.size(1))
             loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
