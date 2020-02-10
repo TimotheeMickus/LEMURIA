@@ -145,12 +145,14 @@ class AliceBob(nn.Module):
         receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
 
         # By design, the target is the first image
-        if(args.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
-        else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
+        if(args.use_expectation):
+            successes = receiver_pointing['dist'].probs[:, 0].detach()
+            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0))
+        else: # Plays dice
+            successes = (receiver_pointing['action'] == 0).float()
+            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
 
         rewards = successes
-
-        log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
 
         loss = -(rewards * log_prob).mean()
 
