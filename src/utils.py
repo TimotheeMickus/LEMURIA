@@ -47,7 +47,7 @@ class AverageSummaryWriter:
         values.append(scalar_value)
 
         period = self.specific_periods.get(tag, self.default_period)
-        if(len(values) == period): # If the buffer is full, prints the average and clears the buffer
+        if(len(values) == period): # If the buffer is full, logs the average and clears the buffer
             _tag = tag if(self.prefix is None) else (self.prefix + ':' +  tag)
             self.writer.add_scalar(tag=_tag, scalar_value=np.mean(values), global_step=global_step)
 
@@ -74,8 +74,8 @@ class Progress:
 
     def update(self, **logged_items):
         if(self.simple_display):
-            postfix = " ".join(k + ": %f" % logged_items[k] for k in sorted(logged_items))
-            print('%i/%i - %s' % (self.i, self.steps_per_epoch, postfix))
+            postfix = " ".join(("%s: %f" % (k, logged_items[k])) for k in sorted(logged_items))
+            print(('%i/%i - %s' % (self.i, self.steps_per_epoch, postfix)), flush=True)
             self.i += 1
         else:
             self.pbar.set_postfix(logged_items, refresh=False)
