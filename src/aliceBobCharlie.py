@@ -121,8 +121,13 @@ class AliceBobCharlie(nn.Module):
         bob_entropy = bob_dist.entropy()
         bob_log_prob = bob_dist.log_prob(bob_action)
 
-        target = torch.ones_like(bob_action) * (1 + batch.base_distractors.size(1))
-        loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
+        if default_adv_train:
+            fake_image_score = receiver_outcome.scores[:,1 + batch.base_distractors.size(1)]
+            target = torch.ones_like(fake_image_score)
+            loss = F.binary_cross_entropy(torch.sigmoid(fake_image_score), target)
+        else:
+            target = torch.ones_like(bob_action) * (1 + batch.base_distractors.size(1))
+            loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
 
         # backprop
         loss.backward()
