@@ -70,7 +70,7 @@ class DistinctTargetClassDataLoader():
         for img in self.dataset:
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
-        
+
         print('Loading done')
 
 
@@ -113,7 +113,7 @@ class DistinctTargetClassDataLoader():
             target_img = add_normal_noise(target_img, std_dev=NOISE_STD_DEV, clamp_values=(0.0, 1.0))
             base_distractors = add_normal_noise(base_distractors, std_dev=NOISE_STD_DEV, clamp_values=(0.0, 1.0))
 
-        return Batch(size=BATCH_SIZE, original_img=original_img.to(DEVICE), target_img=target_img.to(DEVICE), base_distractors=base_distractors)
+        return Batch(size=BATCH_SIZE, original_img=original_img.to(DEVICE), target_img=target_img.to(DEVICE), base_distractors=base_distractors.to(DEVICE))
 
     def __iter__(self):
         """Iterates over batches of size `BATCH_SIZE`"""
