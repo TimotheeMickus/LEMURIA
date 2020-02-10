@@ -203,7 +203,6 @@ class AliceBobCharlie(nn.Module):
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
                     event_writer.add_scalar('train/charlie_acc', charlie_acc.item(), number_ex_seen)
                     if DEBUG_MODE:
-                        # TODO À quoi servent les appels à `detach` ?
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
                         #min_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().min().item()
