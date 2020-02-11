@@ -301,7 +301,7 @@ class AliceBob(nn.Module):
 
         return loss
 
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug):
+    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug, log_lang_progress=True):
         """
             Model training function
             Input:
@@ -322,7 +322,8 @@ class AliceBob(nn.Module):
             running_avg_success = 0.0
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
-
+            past_dist, current_dist = None, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE) # size of embeddings
+            batch_msg_manyhot = torch.zeros((BATCH_SIZE, ALPHABET_SIZE + 1), dtype=torch.float).to(DEVICE) # size of embeddings + EOS + PAD
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
@@ -357,6 +358,13 @@ class AliceBob(nn.Module):
                 running_avg_reward = total_reward / total_items
                 running_avg_success = total_success / total_items
 
+                if log_lang_progress:
+                    batch_msg_manyhot.zero_()
+                    # message -> many-hot
+                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,ALPHABET_SIZE-1).float()
+                    # summation along batch dimension,  and add to counts
+                    current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(DEVICE)).detach().float()
+
                 pbar.update(R=running_avg_success)
 
                 # logs some values
@@ -372,10 +380,24 @@ class AliceBob(nn.Module):
                         max_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().max().item()
                         mean_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).mean().item()
                         max_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).max().item()
-                        event_writer.add_scalar('train/median_grad', median_grad, number_ex_seen)
-                        event_writer.add_scalar('train/mean_grad', mean_grad, number_ex_seen)
-                        event_writer.add_scalar('train/max_grad', max_grad, number_ex_seen)
-                        event_writer.add_scalar('train/mean_norm_grad', mean_norm_grad, number_ex_seen)
-                        event_writer.add_scalar('train/max_norm_grad', max_norm_grad, number_ex_seen)
+                        event_writer.add_scalar('grad/median_grad', median_grad, number_ex_seen)
+                        event_writer.add_scalar('grad/mean_grad', mean_grad, number_ex_seen)
+                        event_writer.add_scalar('grad/max_grad', max_grad, number_ex_seen)
+                        event_writer.add_scalar('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
+                        event_writer.add_scalar('grad/max_norm_grad', max_norm_grad, number_ex_seen)
+
+                    if i%10 == 0:
+                        if past_dist is None:
+                            past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
+                            continue
+                        else:
+                            logit_c = (current_dist.view(-1) / current_dist.sum()).log()
+                            prev_p = (past_dist.view(-1) / past_dist.sum())
+                            kl = F.kl_div(logit_c, prev_p, reduction='mean').item()
+                            event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
+                            past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
+
+
+
 
         self.eval()

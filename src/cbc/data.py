@@ -23,7 +23,7 @@ from utils import add_normal_noise
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
-Batch = namedtuple("Batch", ["size", "original_img", "target_img", "base_distractors"])
+Batch = namedtuple("Batch", ["size", "original_img", "target_img", "base_distractors", "original_category"])
 
 class DataPoint():
     def __init__(self, idx, category, img):
@@ -171,9 +171,9 @@ class DistinctTargetClassDataLoader():
             distractor_2 = np.random.choice(self.categories[self._different_category(_original_img.category, no_evaluation)]) # different category
 
             _base_distractors = [distractor_1, distractor_2]
-            batch.append((_original_img.img, _target_img.img, torch.stack([x.img for x in _base_distractors])))
+            batch.append((_original_img.img, _target_img.img, torch.stack([x.img for x in _base_distractors]), torch.IntTensor(_original_img.category)))
 
-        original_img, target_img, base_distractors = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
+        original_img, target_img, base_distractors, categories = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
 
         # Adds noise if necessary (normal random noise + clamping)
         if(noise > 0.0):
@@ -181,7 +181,7 @@ class DistinctTargetClassDataLoader():
             target_img = add_normal_noise(target_img, std_dev=noise, clamp_values=(0.0, 1.0))
             base_distractors = add_normal_noise(base_distractors, std_dev=noise, clamp_values=(0.0, 1.0))
 
-        return Batch(size=batch_size, original_img=original_img.to(device), target_img=target_img.to(device), base_distractors=base_distractors.to(device))
+        return Batch(size=batch_size, original_img=original_img.to(device), target_img=target_img.to(device), base_distractors=base_distractors.to(device), original_category=categories)
 
     def __iter__(self, batch=args.batch_size):
         """Iterates over batches of size `args.batch_size`"""
