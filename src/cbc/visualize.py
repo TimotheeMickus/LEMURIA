@@ -28,7 +28,7 @@ if(__name__ == "__main__"):
         print("Directory '%s' not found." % DATASET_PATH)
         sys.exit()
 
-
+    # Loads the model
     if(args.population > 1): model = AliceBobPopulation(args.population)
     else: model = AliceBob()
     model.load_state_dict(torch.load(args.load_model, map_location=DEVICE))
