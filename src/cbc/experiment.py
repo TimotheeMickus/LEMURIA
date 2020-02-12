@@ -62,4 +62,3 @@ if(__name__ == "__main__"):
         for epoch in range(1, (EPOCHS + 1)):
             model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer)
             if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
-            #model.test_visualize(data_loader)
