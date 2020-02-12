@@ -373,7 +373,7 @@ class AliceBob(nn.Module):
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                     event_writer.add_scalar('train/success', avg_success, number_ex_seen)
                     event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
-                    event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
+                    event_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
                     if debug:
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
@@ -386,15 +386,15 @@ class AliceBob(nn.Module):
                         event_writer.add_scalar('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
                         event_writer.add_scalar('grad/max_norm_grad', max_norm_grad, number_ex_seen)
 
-                    if i%10 == 0:
+                    if log_lang_progress and i%10 == 0:
                         if past_dist is None:
                             past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
                             continue
                         else:
-                            logit_c = (current_dist.view(-1) / current_dist.sum()).log()
-                            prev_p = (past_dist.view(-1) / past_dist.sum())
+                            logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
+                            prev_p = (past_dist.view(1, -1) / past_dist.sum())
                             kl = F.kl_div(logit_c, prev_p, reduction='mean').item()
-                            event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
+                            event_writer.add_scalar('llp/kl_div', kl, number_ex_seen)
                             past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
 
 

@@ -26,7 +26,7 @@ arg_parser.add_argument('--models', help='the path to the saved models (\'[summa
 arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
 
-arg_parser.add_argument('--batch_size', help='batch size', default=32, type=int)
+arg_parser.add_argument('--batch_size', help='batch size', default=128, type=int)
 
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
 
@@ -59,7 +59,7 @@ arg_parser.add_argument('--debug', '-d', help='log more stuff', action='store_tr
 arg_parser.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
 arg_parser.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
 
-# For visualize.py
+# For visualize.py / evaluate_language.py
 arg_parser.add_argument('--load_model', help='the path to the model to load')
 
 # misc hyper parameters
