@@ -9,7 +9,7 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import Progress, show_imgs, max_normalize_, to_color, pointing
+from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise
 
 from config import *
 
@@ -47,17 +47,17 @@ class AliceBob(nn.Module):
     def test_visualize(self, data_iterator):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
-        batch_size = 2 # Maybe it would just be simpler to work with multiple batches of size 1
+        batch_size = 4
         batch = data_iterator.get_batch(batch_size)
 
         batch.original_img.requires_grad = True
         batch.target_img.requires_grad = True
         batch.base_distractors.requires_grad = True
 
-        pseudo_optimizer = torch.optim.Optimizer(list(self.parameters()) + [batch.original_img, batch.target_img, batch.base_distractors], {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
-
         sender_outcome, receiver_outcome = self(batch)
 
+        # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
+        pseudo_optimizer = torch.optim.Optimizer([batch.original_img, batch.target_img, batch.base_distractors], {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
         pseudo_optimizer.zero_grad()
 
         _COLOR, _INTENSITY = range(2)
@@ -86,11 +86,44 @@ class AliceBob(nn.Module):
         receiver_outcome.scores.sum().backward()
 
         receiver_part_target_img = batch.target_img.grad.detach()
-        receiver_part_target_img = process(receiver_part_target_img, 2, mode)
+        receiver_part_target_img = process(receiver_part_target_img.unsqueeze(axis=1), 2, mode).squeeze(axis=1)
 
         receiver_part_base_distractors = batch.base_distractors.grad.detach()
         receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
 
+        # Message Bob-model visualisation (inspired by Simonyan et al. 2013)
+        receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
+        receiver_dream = receiver_dream.unsqueeze(axis=1)
+        receiver_dream.requires_grad = True
+
+        encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
+
+        #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*LR)
+        optimizer = torch.optim.SGD([receiver_dream], lr=0.5*LR, momentum=0.9)
+        #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*LR)
+        nb_iter = 100000
+        j = 0
+        for i in range(nb_iter):
+            if(i >= (j + (nb_iter / 10))):
+                print(i)
+                j = i
+
+            optimizer.zero_grad()
+
+            tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_message)
+            loss = -tmp_outcome.scores[:, 0].sum()
+            
+            regularisation_loss = 0.01 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
+            regularisation_loss += 0.1 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
+            loss += regularisation_loss
+            
+            loss.backward()
+
+            optimizer.step()
+        receiver_dream = receiver_dream.squeeze(axis=1)
+        receiver_dream = torch.clamp(receiver_dream, 0, 1)
+
+        # Displays the visualisations
         imgs = []
         for i in range(batch_size):
             imgs.append(batch.original_img[i].detach())
@@ -102,7 +135,10 @@ class AliceBob(nn.Module):
             for j in range(batch.base_distractors.size(1)):
                 imgs.append(batch.base_distractors[i][j].detach())
                 imgs.append(receiver_part_base_distractors[i][j])
-        show_imgs(imgs, nrow=(2 * (1 + img_per_batch)))
+
+            imgs.append(receiver_dream[i].detach())
+        #for img in imgs: print(img.shape)
+        show_imgs(imgs, nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
 
     def sender_rewards(self, sender_action, receiver_scores, running_avg_success):
         """

@@ -25,7 +25,13 @@ class Receiver(nn.Module):
 
         self.message_encoder = MessageEncoder(symbol_embeddings)
 
+    def encode_message(self, message, length):
+        return self.message_encoder(message, length).unsqueeze(-1)
+
     def forward(self, images, message, length):
+        return self.aux_forward(images, self.encode_message(message, length))
+
+    def aux_forward(self, images, encoded_message):
         """
             Forward propagation.
             Input:
@@ -40,9 +46,6 @@ class Receiver(nn.Module):
         original_size = images.size()[:2] #dim 1 & 2 give batch size & K (TODO Je ne comprends pas ce commentaire.)
         encoded_images = self.image_encoder(images.view(-1, *images.size()[2:]))
         encoded_images = encoded_images.view(*original_size, -1)
-
-        # Encodes the message
-        encoded_message = self.message_encoder(message, length).unsqueeze(-1)
 
         # Scores the targets
         scores = torch.bmm(encoded_images, encoded_message).squeeze(-1)

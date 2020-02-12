@@ -29,6 +29,10 @@ if(__name__ == "__main__"):
         sys.exit()
 
     # Loads the model
+    if(args.load_model is None):
+        print("'load_model' must be indicated")
+        sys.exit()
+
     if(args.population > 1): model = AliceBobPopulation(args.population)
     else: model = AliceBob()
     model.load_state_dict(torch.load(args.load_model, map_location=DEVICE))
