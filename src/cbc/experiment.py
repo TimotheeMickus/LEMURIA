@@ -39,7 +39,7 @@ if(__name__ == "__main__"):
         if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
         if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        if(args.population > 1): model = AliceBobPopulation(args.population)
+        if(args.population is not None): model = AliceBobPopulation(args.population)
         elif args.charlie: model = AliceBobCharlie()
         else: model = AliceBob()
         model = model.to(DEVICE)

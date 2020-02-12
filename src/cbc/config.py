@@ -37,7 +37,7 @@ arg_parser.add_argument('--adaptative_penalty', '-ap', help='use an adaptative p
 
 arg_parser.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
 
-arg_parser.add_argument('--population', help='population size', default=1, type=int)
+arg_parser.add_argument('--population', help='population size', default=None, type=int)
 
 arg_parser.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
 
