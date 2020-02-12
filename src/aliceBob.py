@@ -101,7 +101,7 @@ class AliceBob(nn.Module):
         #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*LR)
         optimizer = torch.optim.SGD([receiver_dream], lr=0.5*LR, momentum=0.9)
         #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*LR)
-        nb_iter = 100000
+        nb_iter = 10000
         j = 0
         for i in range(nb_iter):
             if(i >= (j + (nb_iter / 10))):
