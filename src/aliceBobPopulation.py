@@ -22,7 +22,6 @@ class AliceBobPopulation(AliceBob):
             self._agents = (self.senders + self.receivers)
         
         # PyTorch cannot find the parameters of objects that are in a list (like `self.senders` or `self.receivers`)
-        # TODO Maybe it is safer to use __setattr__ And be careful about parameters appearing multiple times… I'm not sure what would happen
         parameters = []
         for agent in self._agents: parameters += list(agent.parameters())
         self.agent_parameters = nn.ParameterList(parameters)

@@ -51,6 +51,7 @@ if(__name__ == "__main__"):
                 build_optimizer(model.drawer.parameters()))
         else:
             optimizer = build_optimizer(model.parameters())
+
         data_loader = get_data_loader(args.same_img)
 
         if(args.no_summary): event_writer = None
