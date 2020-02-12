@@ -14,7 +14,7 @@ from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_n
 from config import *
 
 class AliceBob(nn.Module):
-    def __init__(self, shared=False):
+    def __init__(self, shared):
         nn.Module.__init__(self)
 
         if(shared):

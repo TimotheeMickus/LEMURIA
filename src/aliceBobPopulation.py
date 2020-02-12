@@ -8,7 +8,7 @@ from receiver import Receiver
 from senderReceiver import SenderReceiver
 
 class AliceBobPopulation(AliceBob):
-    def __init__(self, size, shared=True):
+    def __init__(self, size, shared):
         nn.Module.__init__(self)
 
         if(shared):
