@@ -61,6 +61,12 @@ arg_parser.add_argument('--log_lang_progress', '-llp', help='log metrics to eval
 
 # For visualize.py / evaluate_language.py
 arg_parser.add_argument('--load_model', help='the path to the model to load')
+# For evaluate_language.py
+arg_parser.add_argument('--load_other_model', help='path to a second model to load')
+arg_parser.add_argument('--message_dump_file', help='output file for messages produced by model')
+
+arg_parser.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
+
 
 # misc hyper parameters
 arg_parser.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)

@@ -9,7 +9,7 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise
+from utils import Progress, show_imgs, max_normalize_, to_color, pointing, compute_entropy, add_normal_noise
 
 from config import *
 
@@ -324,6 +324,10 @@ class AliceBob(nn.Module):
             end_i = start_i + steps_per_epoch
             past_dist, current_dist = None, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE) # size of embeddings
             batch_msg_manyhot = torch.zeros((BATCH_SIZE, ALPHABET_SIZE + 1), dtype=torch.float).to(DEVICE) # size of embeddings + EOS + PAD
+
+            if event_writer is not None and args.log_entropy:
+                    symbol_counts = torch.zeros(ALPHABET_SIZE - 1, dtype=torch.float).to(DEVICE)
+
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
@@ -396,7 +400,14 @@ class AliceBob(nn.Module):
                             kl = F.kl_div(logit_c, prev_p, reduction='mean').item()
                             event_writer.add_scalar('llp/kl_div', kl, number_ex_seen)
                             past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
+                    if args.log_entropy:
+                        new_messages = sender_outcome.action[0].view(-1)
+                        valid_indices = torch.arange(ALPHABET_SIZE - 1).expand(new_messages.size(0), ALPHABET_SIZE - 1).to(DEVICE)
+                        selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
+                        symbol_counts += selected_symbols.sum(dim=0)
 
+        if args.log_entropy and (event_writer is not None):
+            event_writer.writer.add_scalar('llp/H', compute_entropy(symbol_counts), number_ex_seen)
 
 
 

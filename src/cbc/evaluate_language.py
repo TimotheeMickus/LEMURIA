@@ -5,6 +5,7 @@ import os
 
 import torch
 import torch.nn as nn
+from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
@@ -27,6 +28,7 @@ if(__name__ == "__main__"):
         print("Directory '%s' not found." % DATASET_PATH)
         sys.exit()
     assert args.load_model is not None, "a valid path to a trained model is required."
+    assert args.message_dump_file is not None, "a valid output file is required."
 
     if(args.population > 1): model = AliceBobPopulation(args.population)
     else: model = AliceBob()
@@ -37,10 +39,19 @@ if(__name__ == "__main__"):
     data_loader = get_data_loader(args.same_img)
 
     model.eval()
+    counts = torch.zeros(ALPHABET_SIZE - 1, dtype=torch.float)
 
-    with open('messages.txt', 'w') as ostr:
+    with open(args.message_dump_file, 'w') as ostr:
         for datapoint in tqdm.tqdm(data_loader.dataset):
             sender_outcome = model.sender(datapoint.img.unsqueeze(0))
-            message_str = ' '.join(map(str, sender_outcome.action[0].view(-1).tolist()))
+            message = sender_outcome.action[0].view(-1)
+            message_str = ' '.join(map(str, message.tolist()))
             category_str = ' '.join(map(str, datapoint.category))
+            counts += (torch.arange(ALPHABET_SIZE - 1).expand(message.size(0), ALPHABET_SIZE - 1) == message.unsqueeze(1)).float().sum(dim=0)
             print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
+
+uniform = torch.ones_like(counts)
+
+def entropy(counts): return Categorical(counts / counts.sum()).entropy().item()
+
+print('entropy', entropy(counts), 'ref uniform', entropy(uniform) )
