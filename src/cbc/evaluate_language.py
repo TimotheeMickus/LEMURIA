@@ -19,7 +19,7 @@ sys.path.append(parent_dir_path)
 
 from aliceBob import AliceBob
 from aliceBobPopulation import AliceBobPopulation
-from utils import build_optimizer
+from utils import build_optimizer, compute_entropy
 
 sys.path.remove(parent_dir_path)
 
@@ -39,19 +39,30 @@ if(__name__ == "__main__"):
     data_loader = get_data_loader(args.same_img)
 
     model.eval()
-    counts = torch.zeros(ALPHABET_SIZE - 1, dtype=torch.float)
+    counts = torch.zeros(ALPHABET_SIZE - 1, dtype=torch.float).to(DEVICE)
+
+    if args.load_other_model is not None:
+        other_model = type(model)()
+        other_model.load_state_dict(torch.load(args.load_other_model, map_location=DEVICE))
+        other_model.to(DEVICE)
+        counts_other_model == torch.zeros(ALPHABET_SIZE - 1, dtype=torch.float).to(DEVICE)
 
     with open(args.message_dump_file, 'w') as ostr:
         for datapoint in tqdm.tqdm(data_loader.dataset):
-            sender_outcome = model.sender(datapoint.img.unsqueeze(0))
+            sender_outcome = model.sender(datapoint.img.unsqueeze(0).to(DEVICE))
             message = sender_outcome.action[0].view(-1)
             message_str = ' '.join(map(str, message.tolist()))
             category_str = ' '.join(map(str, datapoint.category))
             counts += (torch.arange(ALPHABET_SIZE - 1).expand(message.size(0), ALPHABET_SIZE - 1) == message.unsqueeze(1)).float().sum(dim=0)
+            if args.load_other_model is not None:
+                other_sender_outcome = other_model.sender(datapoint.img.unsqueeze(0).to(DEVICE))
+                other_message = other_sender_outcome.action[0].view(-1)
+                counts_other_model += (torch.arange(ALPHABET_SIZE - 1).expand(other_message.size(0), ALPHABET_SIZE - 1) == other_message.unsqueeze(1)).float().sum(dim=0)
             print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
 
 uniform = torch.ones_like(counts)
 
-def entropy(counts): return Categorical(counts / counts.sum()).entropy().item()
-
-print('entropy', entropy(counts), 'ref uniform', entropy(uniform) )
+if args.load_other_model is not None:
+    print('entropy:', compute_entropy(counts), 'compared model:', compute_entropy(counts_other_model), 'ref uniform:', compute_entropy(uniform))
+else:
+    print('entropy:', compute_entropy(counts), 'ref uniform:', compute_entropy(uniform))
