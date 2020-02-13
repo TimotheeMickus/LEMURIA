@@ -92,16 +92,19 @@ class AliceBob(nn.Module):
         receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
 
         # Message Bob-model visualisation (inspired by Simonyan et al. 2013)
-        receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
-        receiver_dream = receiver_dream.unsqueeze(axis=1)
+        #receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
+        receiver_dream = torch.stack([data_iterator.average_image() for _ in range(batch_size)]) # Starts with the average of the dataset
+        #show_imgs([data_iterator.average_image()], 1)
+        receiver_dream = receiver_dream.unsqueeze(axis=1) # Because the receiver expect a 1D array of images per batch instance
         receiver_dream.requires_grad = True
+
 
         encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
 
         #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*LR)
-        optimizer = torch.optim.SGD([receiver_dream], lr=0.5*LR, momentum=0.9)
+        optimizer = torch.optim.SGD([receiver_dream], lr=2*LR, momentum=0.9)
         #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*LR)
-        nb_iter = 10000
+        nb_iter = 1000
         j = 0
         for i in range(nb_iter):
             if(i >= (j + (nb_iter / 10))):
@@ -113,8 +116,8 @@ class AliceBob(nn.Module):
             tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_message)
             loss = -tmp_outcome.scores[:, 0].sum()
             
-            regularisation_loss = 0.01 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
-            regularisation_loss += 0.1 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
+            regularisation_loss = 0.05 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
+            regularisation_loss += 0.05 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
             loss += regularisation_loss
             
             loss.backward()

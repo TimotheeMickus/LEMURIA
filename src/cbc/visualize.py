@@ -33,8 +33,8 @@ if(__name__ == "__main__"):
         print("'load_model' must be indicated")
         sys.exit()
 
-    if(args.population > 1): model = AliceBobPopulation(args.population)
-    else: model = AliceBob()
+    if(args.population is not None): model = AliceBobPopulation(size=args.population, shared=args.shared)
+    else: model = AliceBob(shared=args.shared)
     model.load_state_dict(torch.load(args.load_model, map_location=DEVICE))
     model = model.to(DEVICE)
     #print(model)

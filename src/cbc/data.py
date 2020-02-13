@@ -97,6 +97,14 @@ class DistinctTargetClassDataLoader():
 
         print('Loading done')
 
+    _average_image = None 
+    def average_image(self):
+        if(self._average_image is None):
+            tmp = torch.stack([x.img for x in self.dataset])
+            self._average_image = tmp.mean(axis=0)
+
+        return self._average_image
+
     def _distance_to_categories(self, category, distance, no_evaluation):
         """Returns the list of all categories at distance `distance` from category `category`."""
         categories = []
