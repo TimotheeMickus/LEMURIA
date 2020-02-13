@@ -44,6 +44,93 @@ class AliceBob(nn.Module):
         """
         return self._forward(batch, self.sender, self.receiver)
 
+    def decision_tree(self, data_iterator):
+        self.eval()
+
+        print("Generating the messages…")
+        messages = []
+        with torch.no_grad():
+            for datapoint in tqdm.tqdm(data_iterator.dataset):
+                sender_outcome = self.sender(datapoint.img.unsqueeze(0))
+                message = sender_outcome.action[0].view(-1).tolist()
+                messages.append(message)
+                #print((datapoint.category, message))
+
+        # As features, we will use the presence of n-grams
+        import numpy as np
+        
+        n = 2
+        nb_ngrams = int(ALPHABET_SIZE * (ALPHABET_SIZE**n - 1) / (ALPHABET_SIZE - 1))
+        print('Number of possible %i-grams: %i' % (n, nb_ngrams))
+
+        ngrams = [()] * nb_ngrams
+        def ngram_to_idx(ngram): # `ngram` is a list of integers
+            idx = 0
+            for i, k in enumerate(ngram): # We read the n-grams as numbers in base ALPHABET_SIZE written in reversed and with '0' used as the unit, instead of '1' (because message (0, 0) is different from (0))
+                idx += (k + 1) * (ALPHABET_SIZE**i) # '+1' because symbol '0' is used as the unit
+
+            idx -= 1 # Because the 0-gram is not taken into account
+
+            ngrams[idx] = ngram
+
+            return idx
+
+        feature_vectors = []
+        for message in messages:
+            # We could consider adding the BOM symbol
+            v = np.zeros(nb_ngrams, dtype=int)
+            s = set()
+            for l in range(1, (n + 1)):
+                for i in range(len(message) - l + 1):
+                    ngram = tuple(message[i:(i + l)])
+                    s.add(ngram)
+                    idx = ngram_to_idx(ngram)
+                    v[idx] = 1
+                    #print((ngram, idx))
+            #input((message, v, s))
+            feature_vectors.append(v)
+
+        import sklearn.tree
+        import matplotlib.pyplot as plt
+        import itertools
+
+        # TODO Do this also for conjunctions of dimensions
+        max_conjunctions = 2 # data_iterator.nb_concepts
+        for size_conjunctions in range(1, (max_conjunctions + 1)):
+            for concept_indices in itertools.combinations(range(data_iterator.nb_concepts), size_conjunctions): # Iterates over all subsets of [|0, `data_iterator.nb_concepts`|[ of size `size_conjunctions`
+                print([data_iterator.concept_names[idx] for idx in concept_indices])
+
+                # For each selected concept, we pick a value
+                conjunctions = itertools.product(*[data_iterator._concepts[idx].keys() for idx in concept_indices])
+
+                for conjunction in conjunctions:
+                    print('\t class: %s' % str(conjunction))
+
+                    def in_class(category):
+                        for i, idx in enumerate(concept_indices):
+                            if(category[idx] != data_iterator._concepts[idx][conjunction[i]]): return False
+
+                        return True
+                    
+                    X = feature_vectors
+                    Y = [in_class(datapoint.category) for datapoint in data_iterator.dataset] # TODO HERE check this
+
+        for concept_idx in range(data_iterator.nb_concepts):
+            print(list(data_iterator._concepts[concept_idx].keys())) 
+            X = feature_vectors
+            Y = [datapoint.category[concept_idx] for datapoint in data_iterator.dataset]
+
+            # See https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html for the different options
+            classifier = sklearn.tree.DecisionTreeClassifier().fit(X, Y)
+            precision = classifier.score(X, Y) # Precision on the 'training set'
+            print('precision: %s' % precision)
+            print('leaves: %i; depth: %i' % (classifier.get_n_leaves(), classifier.get_depth()))
+            if(precision > 0.75):
+                plt.figure(figsize=(12,12))
+                sklearn.tree.plot_tree(classifier, filled=True)
+                plt.show()
+                print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
+
     def test_visualize(self, data_iterator):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 

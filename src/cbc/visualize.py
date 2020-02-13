@@ -41,5 +41,6 @@ if(__name__ == "__main__"):
 
     data_loader = get_data_loader(args.same_img)
    
+    model.decision_tree(data_loader)
     while(True):
         model.test_visualize(data_loader)

@@ -4,6 +4,8 @@ from collections import namedtuple, defaultdict
 import itertools
 import random
 
+import tqdm
+
 import torch, torchvision
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
@@ -37,6 +39,7 @@ class DistinctTargetClassDataLoader():
     h_positions = {'right': True, 'left': False}
     sizes = {'big': True, 'small': False}
     _concepts = [shapes, colours, v_positions, h_positions, sizes]
+    concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
     nb_concepts = len(_concepts)
 
     def __init__(self, same_img=False, evaluation_categories=None):
@@ -77,7 +80,10 @@ class DistinctTargetClassDataLoader():
 
         # Loads all images from DATASET_PATH as DataPoint
         dataset = [] # Will end as a Numpy array of DataPoint·s
-        for filename in os.listdir(DATASET_PATH):
+        #for filename in os.listdir(DATASET_PATH):
+        tmp_data = os.listdir(DATASET_PATH)
+        if(not SIMPLE_DISPLAY): tmp_data = tqdm.tqdm(tmp_data)
+        for filename in tmp_data:
             full_path = os.path.join(DATASET_PATH, filename)
             if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
 
@@ -95,7 +101,7 @@ class DistinctTargetClassDataLoader():
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
 
-        print('Loading done')
+        if(SIMPLE_DISPLAY): print('Loading done')
 
     _average_image = None 
     def average_image(self):
