@@ -95,11 +95,19 @@ class AliceBob(nn.Module):
         #receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
         receiver_dream = torch.stack([data_iterator.average_image() for _ in range(batch_size)]) # Starts with the average of the dataset
         #show_imgs([data_iterator.average_image()], 1)
-        receiver_dream = receiver_dream.unsqueeze(axis=1) # Because the receiver expect a 1D array of images per batch instance
+        receiver_dream = receiver_dream.unsqueeze(axis=1) # Because the receiver expect a 1D array of images per batch instance; shape: [batch_size, 1, 3, height, width]
         receiver_dream.requires_grad = True
 
-
         encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
+
+        # Defines a filter for checking smoothness
+        channels = 3
+        filter_weight = torch.tensor([[1.2, 2, 1.2], [2, -12.8, 2], [1.2, 2, 1.2]]) # -12.8 (at the center) is equal to the opposite of sum of the other coefficient
+        filter_weight = filter_weight.view(1, 1, 3, 3)
+        filter_weight = filter_weight.repeat(channels, 1, 1, 1) # Shape: [channel, 1, 3, 3]
+        filter_layer = torch.nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, groups=channels, bias=False)
+        filter_layer.weight.data = filter_weight
+        filter_layer.weight.requires_grad = False
 
         #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*LR)
         optimizer = torch.optim.SGD([receiver_dream], lr=2*LR, momentum=0.9)
@@ -119,8 +127,12 @@ class AliceBob(nn.Module):
             regularisation_loss = 0.0
             #regularisation_loss += 0.05 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
             regularisation_loss += 0.01 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
-            regularisation_loss += -0.01 * torch.log(1.0 - 0.999 * (torch.abs(receiver_dream - 0.5) + 0.5)).sum() # "Wall" at 0 and 1
+            #regularisation_loss += -0.1 * torch.log(1.0 - (2 * torch.abs(receiver_dream - 0.5))).sum() # "Wall" at 0 and 1
             loss += regularisation_loss
+
+            #smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).sum()
+            smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).norm(1)
+            loss += smoothness_loss
             
             loss.backward()
 
