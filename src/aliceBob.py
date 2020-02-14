@@ -9,7 +9,7 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import Progress, show_imgs, max_normalize_, to_color, pointing, compute_entropy, add_normal_noise
+from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise
 
 from config import *
 
@@ -322,12 +322,8 @@ class AliceBob(nn.Module):
             running_avg_success = 0.0
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
-            past_dist, current_dist = None, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE) # size of embeddings
-            batch_msg_manyhot = torch.zeros((BATCH_SIZE, ALPHABET_SIZE + 1), dtype=torch.float).to(DEVICE) # size of embeddings + EOS + PAD
-
-            if event_writer is not None and args.log_entropy:
-                    symbol_counts = torch.zeros(ALPHABET_SIZE - 1, dtype=torch.float).to(DEVICE)
-
+            past_dist, current_dist = None, torch.zeros((args.alphabet, 5), dtype=torch.float).to(args.device) # size of embeddings
+            batch_msg_manyhot = torch.zeros((args.batch_size, args.alphabet + 2), dtype=torch.float).to(args.device) # size of embeddings + EOS + PAD
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
@@ -365,9 +361,9 @@ class AliceBob(nn.Module):
                 if log_lang_progress:
                     batch_msg_manyhot.zero_()
                     # message -> many-hot
-                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,ALPHABET_SIZE-1).float()
+                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,args.alphabet).float()
                     # summation along batch dimension,  and add to counts
-                    current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(DEVICE)).detach().float()
+                    current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(args.device)).detach().float()
 
                 pbar.update(R=running_avg_success)
 
@@ -392,22 +388,15 @@ class AliceBob(nn.Module):
 
                     if log_lang_progress and i%10 == 0:
                         if past_dist is None:
-                            past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
+                            past_dist, current_dist = current_dist, torch.zeros((args.alphabet, 5), dtype=torch.float).to(args.device)
                             continue
                         else:
                             logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
                             prev_p = (past_dist.view(1, -1) / past_dist.sum())
-                            kl = F.kl_div(logit_c, prev_p, reduction='mean').item()
+                            kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
                             event_writer.add_scalar('llp/kl_div', kl, number_ex_seen)
-                            past_dist, current_dist = current_dist, torch.zeros((ALPHABET_SIZE - 1, 5), dtype=torch.float).to(DEVICE)
-                    if args.log_entropy:
-                        new_messages = sender_outcome.action[0].view(-1)
-                        valid_indices = torch.arange(ALPHABET_SIZE - 1).expand(new_messages.size(0), ALPHABET_SIZE - 1).to(DEVICE)
-                        selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
-                        symbol_counts += selected_symbols.sum(dim=0)
+                            past_dist, current_dist = current_dist, torch.zeros((args.alphabet, 5), dtype=torch.float).to(args.device)
 
-        if args.log_entropy and (event_writer is not None):
-            event_writer.writer.add_scalar('llp/H', compute_entropy(symbol_counts), number_ex_seen)
 
 
 
