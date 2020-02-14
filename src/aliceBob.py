@@ -96,6 +96,7 @@ class AliceBob(nn.Module):
         import itertools
 
         # TODO Do this also for conjunctions of dimensions
+        max_depth = None
         max_conjunctions = 2 # data_iterator.nb_concepts
         for size_conjunctions in range(1, (max_conjunctions + 1)):
             for concept_indices in itertools.combinations(range(data_iterator.nb_concepts), size_conjunctions): # Iterates over all subsets of [|0, `data_iterator.nb_concepts`|[ of size `size_conjunctions`
@@ -122,12 +123,12 @@ class AliceBob(nn.Module):
             Y = [datapoint.category[concept_idx] for datapoint in data_iterator.dataset]
 
             # See https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html for the different options
-            classifier = sklearn.tree.DecisionTreeClassifier().fit(X, Y)
+            classifier = sklearn.tree.DecisionTreeClassifier(max_depth=max_depth).fit(X, Y)
             precision = classifier.score(X, Y) # Precision on the 'training set'
             print('precision: %s' % precision)
             print('leaves: %i; depth: %i' % (classifier.get_n_leaves(), classifier.get_depth()))
             if(precision > 0.75):
-                plt.figure(figsize=(12,12))
+                plt.figure(figsize=(12, 12))
                 sklearn.tree.plot_tree(classifier, filled=True)
                 plt.show()
                 print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
