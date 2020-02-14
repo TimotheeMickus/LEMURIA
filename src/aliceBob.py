@@ -60,14 +60,15 @@ class AliceBob(nn.Module):
         import numpy as np
 
         n = 2
-        nb_ngrams = int(ALPHABET_SIZE * (ALPHABET_SIZE**n - 1) / (ALPHABET_SIZE - 1))
+        alphabet_size = args.alphabet + 1
+        nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
         print('Number of possible %i-grams: %i' % (n, nb_ngrams))
 
         ngrams = [()] * nb_ngrams
         def ngram_to_idx(ngram): # `ngram` is a list of integers
             idx = 0
             for i, k in enumerate(ngram): # We read the n-grams as numbers in base ALPHABET_SIZE written in reversed and with '0' used as the unit, instead of '1' (because message (0, 0) is different from (0))
-                idx += (k + 1) * (ALPHABET_SIZE**i) # '+1' because symbol '0' is used as the unit
+                idx += (k + 1) * (alphabet_size**i) # '+1' because symbol '0' is used as the unit
 
             idx -= 1 # Because the 0-gram is not taken into account
 

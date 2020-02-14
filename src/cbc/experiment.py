@@ -30,11 +30,14 @@ if(__name__ == "__main__"):
         print(("Directory '%s' not found." % args.data_set), flush=True)
         sys.exit()
 
+    summary_dir = args.summary.replace('[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+    models_dir = args.models.replace('[summary]', summary_dir)
+
     for run in range(args.runs):
         print(('Run %i' % run), flush=True)
 
-        run_models_dir = os.path.join(MODELS_DIR, str(run))
-        run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
+        run_summary_dir = os.path.join(summary_dir, str(run))
+        run_models_dir = os.path.join(models_dir, str(run))
 
         if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
         if(args.save_model and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
