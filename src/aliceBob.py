@@ -59,7 +59,7 @@ class AliceBob(nn.Module):
         # As features, we will use the presence of n-grams
         import numpy as np
 
-        n = 2
+        n = 3
         alphabet_size = base_alphabet_size + 1
         nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
         print('Number of possible %i-grams: %i' % (n, nb_ngrams))
@@ -72,6 +72,8 @@ class AliceBob(nn.Module):
 
             idx -= 1 # Because the 0-gram is not taken into account
 
+            assert (ngrams[idx] == () or ngrams[idx] == ngram)
+
             ngrams[idx] = ngram
 
             return idx
@@ -79,34 +81,38 @@ class AliceBob(nn.Module):
         feature_vectors = []
         for message in messages:
             # We could consider adding the BOM symbol
-            v = np.zeros(nb_ngrams, dtype=int)
+            v = np.zeros(nb_ngrams, dtype=bool)
             s = set()
             for l in range(1, (n + 1)):
                 for i in range(len(message) - l + 1):
                     ngram = tuple(message[i:(i + l)])
                     s.add(ngram)
                     idx = ngram_to_idx(ngram)
-                    v[idx] = 1
+                    v[idx] = True
                     #print((ngram, idx))
             #input((message, v, s))
             feature_vectors.append(v)
+
+        feature_vectors = np.array(feature_vectors)
 
         import sklearn.tree
         import matplotlib.pyplot as plt
         import itertools
 
-        # TODO Do this also for conjunctions of dimensions
-        max_depth = None
-        max_conjunctions = 2 # data_iterator.nb_concepts
+        # TODO Pour une utilisation avec max_depth = 1, il y a surement beaucoup plus simple
+
+        results = []
+        max_depth = 2 # None # We could successively try with increasing depth
+        max_conjunctions = 3 # data_iterator.nb_concepts
         for size_conjunctions in range(1, (max_conjunctions + 1)):
             for concept_indices in itertools.combinations(range(data_iterator.nb_concepts), size_conjunctions): # Iterates over all subsets of [|0, `data_iterator.nb_concepts`|[ of size `size_conjunctions`
-                print([data_iterator.concept_names[idx] for idx in concept_indices])
+                #print([data_iterator.concept_names[idx] for idx in concept_indices])
 
                 # For each selected concept, we pick a value
                 conjunctions = itertools.product(*[data_iterator._concepts[idx].keys() for idx in concept_indices])
 
                 for conjunction in conjunctions:
-                    print('\t class: %s' % str(conjunction))
+                    #print('\t class: %s' % str(conjunction))
 
                     def in_class(category):
                         for i, idx in enumerate(concept_indices):
@@ -114,24 +120,83 @@ class AliceBob(nn.Module):
 
                         return True
 
+                    in_class_aux = np.vectorize(lambda datapoint: in_class(datapoint.category))
+
+                    # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
+                    gold = in_class_aux(data_iterator.dataset)
+                    for feature_idx in range(nb_ngrams):
+                        if(ngrams[feature_idx] == ()): continue
+
+                        # TODO compute baseline_accuracy
+                        ratio = gold.mean()
+                        baseline_accuracy = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
+
+                        feature_type = 'presence'
+                        prediction = feature_vectors[:, feature_idx]
+                    
+                        matches = (gold == prediction)
+
+                        accuracy = matches.mean()
+                        accuracy = matches.mean()    
+
+                        precision = gold[prediction].mean()
+                        recall = prediction[gold].mean()
+                        f1 = 2 * precision * recall / (precision + recall)
+
+                        if(accuracy > 0.9 or f1 > 0.9): print((accuracy, baseline_accuracy, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type))
+                        
+                        feature_type = 'absence'
+                        prediction ^= True
+                       
+                        matches = (gold == prediction)
+                        
+                        accuracy = matches.mean()    
+
+                        precision = gold[prediction].mean()
+                        recall = prediction[gold].mean()
+                        f1 = 2 * precision * recall / (precision + recall)
+
+                        if(accuracy > 0.9 or f1 > 0.9): print((accuracy, baseline_accuracy, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type))
+                        
+
+                    if(True): continue
+
+                    # Decision trees
                     X = feature_vectors
-                    Y = [in_class(datapoint.category) for datapoint in data_iterator.dataset] # TODO HERE check this
+                    Y = gold # in_class_aux(data_iterator.dataset) # [in_class(datapoint.category) for datapoint in data_iterator.dataset]
 
-        for concept_idx in range(data_iterator.nb_concepts):
-            print(list(data_iterator._concepts[concept_idx].keys()))
-            X = feature_vectors
-            Y = [datapoint.category[concept_idx] for datapoint in data_iterator.dataset]
+                    classifier = sklearn.tree.DecisionTreeClassifier(max_depth=max_depth).fit(X, Y)
 
-            # See https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html for the different options
-            classifier = sklearn.tree.DecisionTreeClassifier(max_depth=max_depth).fit(X, Y)
-            precision = classifier.score(X, Y) # Precision on the 'training set'
-            print('precision: %s' % precision)
-            print('leaves: %i; depth: %i' % (classifier.get_n_leaves(), classifier.get_depth()))
-            if(precision > 0.75):
-                plt.figure(figsize=(12, 12))
-                sklearn.tree.plot_tree(classifier, filled=True)
-                plt.show()
-                print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
+                    n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
+                    precision = classifier.score(X, Y) # Precision on the 'training set'
+                    ratio = (np.sum(Y) / Y.size)
+                    baseline_precision = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
+
+                    item = (
+                        precision, 
+                        baseline_precision, 
+                        (precision / baseline_precision), 
+                        ((1 - baseline_precision) / (1 - precision)), 
+                        conjunction, 
+                        n_leaves, 
+                        depth, 
+                        classifier
+                    )
+
+                    results.append(item)
+
+                    #if(precision > 0.9):
+                    if(item[3] > 2.0):
+                        print(item)
+                        print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
+
+                        plt.figure(figsize=(12, 12))
+                        sklearn.tree.plot_tree(classifier, filled=True)
+                        plt.show()
+
+        results.sort(reverse=True, key=(lambda e: e[3]))
+        for e in results[:10]:
+            print(e)
 
     def test_visualize(self, data_iterator, learning_rate=args.learning_rate):
         self.eval() # Sets the model in evaluation mode; good idea or not?
