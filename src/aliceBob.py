@@ -44,7 +44,7 @@ class AliceBob(nn.Module):
         """
         return self._forward(batch, self.sender, self.receiver)
 
-    def decision_tree(self, data_iterator):
+    def decision_tree(self, data_iterator, base_alphabet_size=args.alphabet):
         self.eval()
 
         print("Generating the messages…")
@@ -60,7 +60,7 @@ class AliceBob(nn.Module):
         import numpy as np
 
         n = 2
-        alphabet_size = args.alphabet + 1
+        alphabet_size = base_alphabet_size + 1
         nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
         print('Number of possible %i-grams: %i' % (n, nb_ngrams))
 
@@ -301,7 +301,7 @@ class AliceBob(nn.Module):
 
         return loss
 
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug, log_lang_progress=True):
+    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug, log_lang_progress=True, alphabet_size=args.alphabet, device=args.device):
         """
             Model training function
             Input:
@@ -322,8 +322,8 @@ class AliceBob(nn.Module):
             running_avg_success = 0.0
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
-            past_dist, current_dist = None, torch.zeros((args.alphabet, 5), dtype=torch.float).to(args.device) # size of embeddings
-            batch_msg_manyhot = torch.zeros((args.batch_size, args.alphabet + 2), dtype=torch.float).to(args.device) # size of embeddings + EOS + PAD
+            past_dist, current_dist = None, torch.zeros((alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings
+            batch_msg_manyhot = torch.zeros((batch_size, alphabet_size + 2), dtype=torch.float).to(device) # size of embeddings + EOS + PAD
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
@@ -361,9 +361,9 @@ class AliceBob(nn.Module):
                 if log_lang_progress:
                     batch_msg_manyhot.zero_()
                     # message -> many-hot
-                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,args.alphabet).float()
+                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,alphabet_size).float()
                     # summation along batch dimension,  and add to counts
-                    current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(args.device)).detach().float()
+                    current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(device)).detach().float()
 
                 pbar.update(R=running_avg_success)
 
@@ -386,16 +386,16 @@ class AliceBob(nn.Module):
                         event_writer.add_scalar('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
                         event_writer.add_scalar('grad/max_norm_grad', max_norm_grad, number_ex_seen)
 
-                    if log_lang_progress and i%10 == 0:
+                    if log_lang_progress and i%100 == 0:
                         if past_dist is None:
-                            past_dist, current_dist = current_dist, torch.zeros((args.alphabet, 5), dtype=torch.float).to(args.device)
+                            past_dist, current_dist = current_dist, torch.zeros((alphabet_size, 5), dtype=torch.float).to(device)
                             continue
                         else:
                             logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
                             prev_p = (past_dist.view(1, -1) / past_dist.sum())
                             kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
-                            event_writer.add_scalar('llp/kl_div', kl, number_ex_seen)
-                            past_dist, current_dist = current_dist, torch.zeros((args.alphabet, 5), dtype=torch.float).to(args.device)
+                            event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
+                            past_dist, current_dist = current_dist, torch.zeros((alphabet_size, 5), dtype=torch.float).to(device)
 
 
 
