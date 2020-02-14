@@ -39,13 +39,13 @@ if(__name__ == "__main__"):
     data_loader = get_data_loader(args.same_img)
 
     model.eval()
-    counts = torch.zeros(args.alphabet, dtype=torch.float).to(args.device)
+    counts = torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     if args.load_other_model is not None:
         other_model = type(model)()
         other_model.load_state_dict(torch.load(args.load_other_model, map_location=args.device))
         other_model.to(args.device)
-        counts_other_model == torch.zeros(args.alphabet, dtype=torch.float).to(args.device)
+        counts_other_model == torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     with open(args.message_dump_file, 'w') as ostr:
         for datapoint in tqdm.tqdm(data_loader.dataset):
@@ -53,11 +53,11 @@ if(__name__ == "__main__"):
             message = sender_outcome.action[0].view(-1)
             message_str = ' '.join(map(str, message.tolist()))
             category_str = ' '.join(map(str, datapoint.category))
-            counts += (torch.arange(args.alphabet_size).expand(message.size(0), args.alphabet_size) == message.unsqueeze(1)).float().sum(dim=0)
+            counts += (torch.arange(args.base_alphabet_size).expand(message.size(0), args.base_alphabet_size) == message.unsqueeze(1)).float().sum(dim=0)
             if args.load_other_model is not None:
                 other_sender_outcome = other_model.sender(datapoint.img.unsqueeze(0).to(args.device))
                 other_message = other_sender_outcome.action[0].view(-1)
-                counts_other_model += (torch.arange(args.alphabet).expand(other_message.size(0), args.alphabet) == other_message.unsqueeze(1)).float().sum(dim=0)
+                counts_other_model += (torch.arange(args.base_alphabet_size).expand(other_message.size(0), args.base_alphabet_size) == other_message.unsqueeze(1)).float().sum(dim=0)
             print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
 
 uniform = torch.ones_like(counts)

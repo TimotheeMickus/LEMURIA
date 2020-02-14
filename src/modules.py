@@ -9,7 +9,7 @@ class MessageEncoder(nn.Module):
     Encodes a message of discrete symbols in a single vector.
     """
     def __init__(self,
-        alphabet_size,
+        base_alphabet_size,
         embedding_dim,
         output_dim,
         symbol_embeddings):
@@ -39,13 +39,13 @@ class MessageEncoder(nn.Module):
 
     @classmethod
     def from_args(cls, args, symbol_embeddings=None):
-        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.alphabet, args.hidden_size, use_bos=False)# nn.Embedding((alphabet_size + 1), embedding_dim, padding_idx=padding_idx) # +1: padding symbol
-        return cls(args.alphabet, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings)
+        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=False)
+        return cls(args.base_alphabet_size, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings)
 
 # Vector -> message
 class MessageDecoder(nn.Module):
     def __init__(self,
-        alphabet_size,
+        base_alphabet_size,
         embedding_dim,
         output_dim,
         max_msg_len,
@@ -61,12 +61,12 @@ class MessageDecoder(nn.Module):
         # project encoded img onto hidden
         self.hidden_proj = nn.Linear(embedding_dim, embedding_dim)
         # project lstm output onto action space
-        self.action_space_proj = nn.Linear(embedding_dim, alphabet_size)
+        self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size)
 
         self.max_msg_len = max_msg_len
-        self.bos_index = alphabet_size + 2
+        self.bos_index = base_alphabet_size + 2
         self.eos_index = 0
-        self.padding_idx = alphabet_size + 1
+        self.padding_idx = base_alphabet_size + 1
 
     def forward(self, encoded):
         # Initialisation
@@ -129,9 +129,9 @@ class MessageDecoder(nn.Module):
 
     @classmethod
     def from_args(cls, args, symbol_embeddings=None):
-        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.alphabet, args.hidden_size, use_bos=True)# nn.Embedding((alphabet_size + 2), embedding_dim, padding_idx=padding_idx) # +2: padding symbol, BOS symbol
+        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True)
         return cls(
-            alphabet_size=args.alphabet,
+            base_alphabet_size=args.base_alphabet_size,
             embedding_dim=args.hidden_size,
             output_dim=args.hidden_size,
             max_msg_len=args.max_len,
@@ -282,6 +282,6 @@ def build_cnn_decoder_from_args(args):
         flatten_last=False,
         sigmoid_after=True,)
 
-def build_embeddings(alphabet_size, dim, use_bos=False):
-    vocab_size = (alphabet_size + 3) if use_bos else (alphabet_size + 2)
-    return nn.Embedding(vocab_size, dim, padding_idx=alphabet_size + 1)
+def build_embeddings(base_alphabet_size, dim, use_bos=False):
+    vocab_size = (base_alphabet_size + 3) if use_bos else (base_alphabet_size + 2) # +3: EOS symbol, padding symbol, BOS symbol; +2: EOS symbol, padding symbol
+    return nn.Embedding(vocab_size, dim, padding_idx=base_alphabet_size + 1)

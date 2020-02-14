@@ -9,7 +9,7 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise
+from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
 
 from config import *
 
@@ -44,7 +44,7 @@ class AliceBob(nn.Module):
         """
         return self._forward(batch, self.sender, self.receiver)
 
-    def decision_tree(self, data_iterator, base_alphabet_size=args.alphabet):
+    def decision_tree(self, data_iterator, base_alphabet_size=args.base_alphabet_size):
         self.eval()
 
         print("Generating the messages…")
@@ -301,7 +301,7 @@ class AliceBob(nn.Module):
 
         return loss
 
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug, log_lang_progress=True, alphabet_size=args.alphabet, device=args.device):
+    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug, log_lang_progress=True, base_alphabet_size=args.base_alphabet_size, device=args.device):
         """
             Model training function
             Input:
@@ -322,8 +322,10 @@ class AliceBob(nn.Module):
             running_avg_success = 0.0
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
-            past_dist, current_dist = None, torch.zeros((alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings
-            batch_msg_manyhot = torch.zeros((batch_size, alphabet_size + 2), dtype=torch.float).to(device) # size of embeddings + EOS + PAD
+            past_dist, current_dist = None, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings
+            batch_msg_manyhot = torch.zeros((batch_size, base_alphabet_size + 2), dtype=torch.float).to(device) # size of embeddings + EOS + PAD
+            if event_writer is not None and args.log_entropy:
+                symbol_counts = torch.zeros(base_alphabet_size, dtype=torch.float).to(device)
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
@@ -361,7 +363,7 @@ class AliceBob(nn.Module):
                 if log_lang_progress:
                     batch_msg_manyhot.zero_()
                     # message -> many-hot
-                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,alphabet_size).float()
+                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,base_alphabet_size).float()
                     # summation along batch dimension,  and add to counts
                     current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(device)).detach().float()
 
@@ -388,14 +390,22 @@ class AliceBob(nn.Module):
 
                     if log_lang_progress and i%100 == 0:
                         if past_dist is None:
-                            past_dist, current_dist = current_dist, torch.zeros((alphabet_size, 5), dtype=torch.float).to(device)
+                            past_dist, current_dist = current_dist, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device)
                             continue
                         else:
                             logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
                             prev_p = (past_dist.view(1, -1) / past_dist.sum())
                             kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
                             event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
-                            past_dist, current_dist = current_dist, torch.zeros((alphabet_size, 5), dtype=torch.float).to(device)
+                            past_dist, current_dist = current_dist, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device)
+                    if args.log_entropy:
+                        new_messages = sender_outcome.action[0].view(-1)
+                        valid_indices = torch.arange(base_alphabet_size).expand(new_messages.size(0), base_alphabet_size).to(device)
+                        selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
+                        symbol_counts += selected_symbols.sum(dim=0)
+
+        if args.log_entropy and (event_writer is not None):
+            event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
 
 
 
