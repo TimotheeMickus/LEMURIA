@@ -61,7 +61,7 @@ class MessageDecoder(nn.Module):
         # project encoded img onto hidden
         self.hidden_proj = nn.Linear(embedding_dim, embedding_dim)
         # project lstm output onto action space
-        self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size)
+        self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size + 1)
 
         self.max_msg_len = max_msg_len
         self.bos_index = base_alphabet_size + 2
