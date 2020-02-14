@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
-from modules import MessageEncoder, build_cnn_encoder
+from modules import MessageEncoder, build_cnn_encoder_from_args
 from config import *
 
 # Structure for outcomes
@@ -20,7 +20,7 @@ class Receiver(nn.Module):
     def __init__(self, image_encoder=None, symbol_embeddings=None):
         super(Receiver, self).__init__()
 
-        if(image_encoder is None): image_encoder = build_cnn_encoder()
+        if(image_encoder is None): image_encoder = build_cnn_encoder_from_args()
         self.image_encoder = image_encoder
 
         self.message_encoder = MessageEncoder(symbol_embeddings)

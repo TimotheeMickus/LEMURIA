@@ -13,9 +13,9 @@ class MessageEncoder(nn.Module):
     def __init__(self,
         symbol_embeddings=None,
         alphabet_size=ALPHABET_SIZE,
-        embedding_dim=HIDDEN,
+        embedding_dim=args.hidden_size,
         padding_idx=PAD,
-        output_dim=HIDDEN):
+        output_dim=args.hidden_size):
         super(MessageEncoder, self).__init__()
 
         if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((alphabet_size + 1), embedding_dim, padding_idx=padding_idx) # +1: padding symbol
@@ -46,9 +46,9 @@ class MessageDecoder(nn.Module):
     def __init__(self,
         symbol_embeddings=None,
         alphabet_size=ALPHABET_SIZE,
-        embedding_dim=HIDDEN,
+        embedding_dim=args.hidden_size,
         padding_idx=PAD,
-        output_dim=HIDDEN,
+        output_dim=args.hidden_size,
         max_msg_len=args.max_len,
         bos_index=BOS,
         eos_index=EOS,
@@ -132,7 +132,7 @@ class MessageDecoder(nn.Module):
 
 # vector -> vector + random noise
 class Randomizer(nn.Module):
-    def __init__(self, input_dim=HIDDEN, random_dim=HIDDEN):
+    def __init__(self, input_dim=args.hidden_size, random_dim=args.hidden_size):
         super(Randomizer, self).__init__()
         self.merging_projection = nn.Linear(input_dim + random_dim, input_dim)
         self.random_dim = random_dim
@@ -237,29 +237,29 @@ def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
     cnn = nn.Sequential(*layers)
     return cnn
 
-def build_cnn_encoder():
+def build_cnn_encoder_from_args(args=args):
     """
     Factory for convolutionnal networks
     """
-    layer_classes = (["conv"] * len(STRIDES))
-    input_channels = ([IMG_SHAPE[0]] + [FILTERS] * (len(STRIDES) - 1))
-    output_channels = ([FILTERS] * (len(STRIDES) - 1) + [HIDDEN])
+    layer_classes = (["conv"] * args.conv_layers)
+    input_channels = ([args.img_channel] + [args.filters] * (args.conv_layers - 1))
+    output_channels = ([args.filters] * (args.conv_layers - 1) + [args.hidden_size])
     return build_cnn(
         layer_classes=layer_classes,
         input_channels=input_channels,
         output_channels=output_channels,
-        strides=STRIDES,
-        kernel_size=KERNEL_SIZE,
+        strides=args.strides,
+        kernel_size=args.kernel_size,
         paddings=None,)
 
-def build_cnn_decoder():
+def build_cnn_decoder_from_args(args=args):
     """
     Factory for deconvolutionnal networks
     """
-    layer_classes = (["convTranspose"] * len(STRIDES))
-    strides = STRIDES[::-1]
-    inputs = [HIDDEN] + ([FILTERS] * (len(STRIDES) - 1))
-    outputs = ([FILTERS] * (len(STRIDES) - 1)) + [IMG_SHAPE[0]]
+    layer_classes = (["convTranspose"] * args.conv_layers)
+    strides = args.strides[::-1]
+    inputs = [args.hidden_size] + ([args.filters] * (args.conv_layers - 1))
+    outputs = ([args.filters] * (args.conv_layers - 1)) + [args.img_channel]
     paddings = [0, 0, 1, 0, 0, 0, 0, 1] # guessworking it out
     return build_cnn(
         layer_classes=layer_classes,
@@ -267,6 +267,6 @@ def build_cnn_decoder():
         output_channels=outputs,
         strides=strides,
         paddings=paddings,
-        kernel_size=KERNEL_SIZE,
+        kernel_size=args.kernel_size,
         flatten_last=False,
         sigmoid_after=True,)

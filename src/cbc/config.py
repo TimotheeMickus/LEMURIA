@@ -61,6 +61,17 @@ arg_parser.add_argument('--no_summary', '-ns', help='do not write summaries', ac
 # For visualize.py
 arg_parser.add_argument('--load_model', help='the path to the model to load')
 
+# misc hyper parameters
+arg_parser.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
+arg_parser.add_argument('--beta_sender', help='sender entropy penalty coefficient', type=float, default=0.01)
+arg_parser.add_argument('--beta_receiver', help='sender entropy penalty coefficient', type=float, default=0.001)
+
+# convolutions
+arg_parser.add_argument('--img_channel', help='number of input channels in images', type=int, default=3)
+arg_parser.add_argument('--conv_layers', help='number of convolution layers', type=int, default=8)
+arg_parser.add_argument('--filters', help='number of filters per convolution layers', type=int, default=32)
+arg_parser.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
+arg_parser.add_argument('--strides', help='stride at each convolution layer', type=int, nargs='+', default=[2, 2, 1, 2, 1, 2, 1, 2]) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
 
 args = arg_parser.parse_args()
 print(args)
@@ -75,19 +86,19 @@ SCALE_VALUE = args.grad_scaling
 
 #K = 3 # size of pools of image for listener
 
-HIDDEN = 50
+HIDDEN = args.hidden_size
 
-CONV_LAYERS = 8
-FILTERS = 32
-STRIDES = (2, 2, 1, 2, 1, 2, 1, 2) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
-KERNEL_SIZE = 3
+CONV_LAYERS = args.conv_layers
+FILTERS = args.filters
+STRIDES = args.strides
+KERNEL_SIZE = args.kernel_size
 
 BATCH_SIZE = args.batch_size # Try with small values, such as 0.1
 LR = args.learning_rate
 
 # BETA values for reweighting entropy penalty
-BETA_SENDER = .01
-BETA_RECEIVER = .001
+BETA_SENDER = args.beta_sender
+BETA_RECEIVER = args.beta_receiver
 
 IMG_SHAPE = (3, 128, 128)
 

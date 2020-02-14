@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from collections import namedtuple
 
-from modules import MessageDecoder, build_cnn_encoder
+from modules import MessageDecoder, build_cnn_encoder_from_args
 
 from config import *
 
@@ -14,7 +14,7 @@ class Sender(nn.Module):
     def __init__(self, image_encoder=None, symbol_embeddings=None):
         super(Sender, self).__init__()
 
-        if(image_encoder is None): image_encoder = build_cnn_encoder()
+        if(image_encoder is None): image_encoder = build_cnn_encoder_from_args()
         self.image_encoder = image_encoder
         self.message_decoder = MessageDecoder(symbol_embeddings)
 
