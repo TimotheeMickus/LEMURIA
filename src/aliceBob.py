@@ -27,7 +27,7 @@ class AliceBob(nn.Module):
 
     def _bob_input(self, batch):
         return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors], dim=1)
-        
+
     def _forward(self, batch, sender, receiver):
         sender_outcome = sender(batch.original_img)
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
@@ -37,7 +37,7 @@ class AliceBob(nn.Module):
     def forward(self, batch):
         """
         Input:
-            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [BATCH_SIZE, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [BATCH_SIZE, 2, *IMG_SHAPE]
+            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch, 2, *IMG_SHAPE]
         Output:
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
@@ -58,7 +58,7 @@ class AliceBob(nn.Module):
 
         # As features, we will use the presence of n-grams
         import numpy as np
-        
+
         n = 2
         nb_ngrams = int(ALPHABET_SIZE * (ALPHABET_SIZE**n - 1) / (ALPHABET_SIZE - 1))
         print('Number of possible %i-grams: %i' % (n, nb_ngrams))
@@ -111,12 +111,12 @@ class AliceBob(nn.Module):
                             if(category[idx] != data_iterator._concepts[idx][conjunction[i]]): return False
 
                         return True
-                    
+
                     X = feature_vectors
                     Y = [in_class(datapoint.category) for datapoint in data_iterator.dataset] # TODO HERE check this
 
         for concept_idx in range(data_iterator.nb_concepts):
-            print(list(data_iterator._concepts[concept_idx].keys())) 
+            print(list(data_iterator._concepts[concept_idx].keys()))
             X = feature_vectors
             Y = [datapoint.category[concept_idx] for datapoint in data_iterator.dataset]
 
@@ -196,9 +196,9 @@ class AliceBob(nn.Module):
         filter_layer.weight.data = filter_weight
         filter_layer.weight.requires_grad = False
 
-        #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*LR)
-        optimizer = torch.optim.SGD([receiver_dream], lr=2*LR, momentum=0.9)
-        #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*LR)
+        #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*args.learning_rate)
+        optimizer = torch.optim.SGD([receiver_dream], lr=2*args.learning_rate, momentum=0.9)
+        #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*args.learning_rate)
         nb_iter = 1000
         j = 0
         for i in range(nb_iter):
@@ -210,7 +210,7 @@ class AliceBob(nn.Module):
 
             tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_message)
             loss = -tmp_outcome.scores[:, 0].sum()
-            
+
             regularisation_loss = 0.0
             #regularisation_loss += 0.05 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
             regularisation_loss += 0.01 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
@@ -220,7 +220,7 @@ class AliceBob(nn.Module):
             #smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).sum()
             smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).norm(1)
             loss += smoothness_loss
-            
+
             loss.backward()
 
             optimizer.step()
@@ -235,7 +235,7 @@ class AliceBob(nn.Module):
 
             imgs.append(batch.target_img[i].detach())
             imgs.append(receiver_part_target_img[i])
-            
+
             for j in range(batch.base_distractors.size(1)):
                 imgs.append(batch.base_distractors[i][j].detach())
                 imgs.append(receiver_part_base_distractors[i][j])
@@ -278,7 +278,7 @@ class AliceBob(nn.Module):
         loss = -(rewards * log_prob).mean()
 
         loss = loss - (BETA_SENDER * sender_outcome.entropy.mean()) # Entropy penalty
-        
+
         return (loss, successes, rewards)
 
     def receiver_loss(self, receiver_scores):
@@ -287,7 +287,7 @@ class AliceBob(nn.Module):
         # By design, the target is the first image
         if(args.use_expectation):
             successes = receiver_pointing['dist'].probs[:, 0].detach()
-            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0).to(DEVICE))
+            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0).to(args.device))
         else: # Plays dice
             successes = (receiver_pointing['action'] == 0).float()
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
@@ -297,7 +297,7 @@ class AliceBob(nn.Module):
         loss = -(rewards * log_prob).mean()
 
         loss = loss - (BETA_RECEIVER * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
-        
+
         return loss
 
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None):
@@ -313,7 +313,7 @@ class AliceBob(nn.Module):
         """
         self.train() # Sets the model in training mode
 
-        with Progress(SIMPLE_DISPLAY, steps_per_epoch, epoch) as pbar:
+        with Progress(args.simple_display, steps_per_epoch, epoch) as pbar:
             total_reward = 0.0 # sum of the rewards since the beginning of the epoch
             total_success = 0.0 # sum of the successes since the beginning of the epoch
             total_items = 0 # number of training instances since the beginning of the epoch
@@ -337,8 +337,8 @@ class AliceBob(nn.Module):
                 loss.backward() # Backpropagation
 
                 # Gradient clipping and scaling
-                if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
-                if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
+                if((args.grad_clipping is not None) and (args.grad_clipping > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), args.grad_clipping)
+                if((args.grad_scaling is not None) and (args.grad_scaling > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), args.grad_scaling)
 
                 optim.step()
 
@@ -360,12 +360,12 @@ class AliceBob(nn.Module):
 
                 # logs some values
                 if(event_writer is not None):
-                    number_ex_seen = i * BATCH_SIZE
+                    number_ex_seen = i * args.batch
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                     event_writer.add_scalar('train/success', avg_success, number_ex_seen)
                     event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
-                    if DEBUG_MODE:
+                    if args.debug:
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
                         max_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().max().item()

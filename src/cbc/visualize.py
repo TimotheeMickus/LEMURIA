@@ -24,8 +24,8 @@ sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
 if(__name__ == "__main__"):
-    if(not os.path.isdir(DATASET_PATH)):
-        print("Directory '%s' not found." % DATASET_PATH)
+    if(not os.path.isdir(args.data_set)):
+        print("Directory '%s' not found." % args.data_set)
         sys.exit()
 
     # Loads the model
@@ -35,8 +35,8 @@ if(__name__ == "__main__"):
 
     if(args.population is not None): model = AliceBobPopulation(size=args.population, shared=args.shared)
     else: model = AliceBob(shared=args.shared)
-    model.load_state_dict(torch.load(args.load_model, map_location=DEVICE))
-    model = model.to(DEVICE)
+    model.load_state_dict(torch.load(args.load_model, map_location=args.device))
+    model = model.to(args.device)
     #print(model)
 
     data_loader = get_data_loader(args.same_img)

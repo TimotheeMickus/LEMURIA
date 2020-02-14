@@ -76,15 +76,15 @@ class DistinctTargetClassDataLoader():
 
             return (idx, category)
 
-        print('Loading data from \'%s\'...' % DATASET_PATH)
+        print('Loading data from \'%s\'...' % args.data_set)
 
-        # Loads all images from DATASET_PATH as DataPoint
+        # Loads all images from args.data_set as DataPoint
         dataset = [] # Will end as a Numpy array of DataPoint·s
-        #for filename in os.listdir(DATASET_PATH):
-        tmp_data = os.listdir(DATASET_PATH)
-        if(not SIMPLE_DISPLAY): tmp_data = tqdm.tqdm(tmp_data)
+        #for filename in os.listdir(args.data_set):
+        tmp_data = os.listdir(args.data_set)
+        if(not args.simple_display): tmp_data = tqdm.tqdm(tmp_data)
         for filename in tmp_data:
-            full_path = os.path.join(DATASET_PATH, filename)
+            full_path = os.path.join(args.data_set, filename)
             if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
 
             idx, category = analyse_filename(filename)
@@ -101,9 +101,9 @@ class DistinctTargetClassDataLoader():
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
 
-        if(SIMPLE_DISPLAY): print('Loading done')
+        if(args.simple_display): print('Loading done')
 
-    _average_image = None 
+    _average_image = None
     def average_image(self):
         if(self._average_image is None):
             tmp = torch.stack([x.img for x in self.dataset])
@@ -119,8 +119,8 @@ class DistinctTargetClassDataLoader():
             new_category = tuple(e if(i not in changed_dim) else (not e) for i,e in enumerate(category))
 
             if(no_evaluation and (new_category in self.evaluation_categories)): continue
-            categories.append(new_category)  
-            
+            categories.append(new_category)
+
         return categories
 
     def _distance_to_category(self, category, distance, no_evaluation):
@@ -176,17 +176,17 @@ class DistinctTargetClassDataLoader():
         original_img, target_img, base_distractors = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
 
         # Adds noise if necessary (normal random noise + clamping)
-        if(NOISE_STD_DEV > 0.0):
-            original_img = add_normal_noise(original_img, std_dev=NOISE_STD_DEV, clamp_values=(0.0, 1.0))
-            target_img = add_normal_noise(target_img, std_dev=NOISE_STD_DEV, clamp_values=(0.0, 1.0))
-            base_distractors = add_normal_noise(base_distractors, std_dev=NOISE_STD_DEV, clamp_values=(0.0, 1.0))
+        if(args.noise > 0.0):
+            original_img = add_normal_noise(original_img, std_dev=args.noise, clamp_values=(0.0, 1.0))
+            target_img = add_normal_noise(target_img, std_dev=args.noise, clamp_values=(0.0, 1.0))
+            base_distractors = add_normal_noise(base_distractors, std_dev=args.noise, clamp_values=(0.0, 1.0))
 
-        return Batch(size=BATCH_SIZE, original_img=original_img.to(DEVICE), target_img=target_img.to(DEVICE), base_distractors=base_distractors.to(DEVICE))
+        return Batch(size=args.batch, original_img=original_img.to(args.device), target_img=target_img.to(args.device), base_distractors=base_distractors.to(args.device))
 
     def __iter__(self):
-        """Iterates over batches of size `BATCH_SIZE`"""
+        """Iterates over batches of size `args.batch`"""
         while True:
-            yield self.get_batch(BATCH_SIZE)
+            yield self.get_batch(args.batch)
 
 def get_data_loader(same_img=False):
     return DistinctTargetClassDataLoader(same_img)

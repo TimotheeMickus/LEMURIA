@@ -44,11 +44,11 @@ class CommunicationGame(nn.Module):
         sender_inputs = inputs[:,0] # These are the targets (the others are distractors)
         #input(sender_inputs.shape)
         #input(sender_inputs[0])
-        if(NOISE_STD_DEV > 0.0): sender_inputs = torch.clamp((sender_inputs + (NOISE_STD_DEV * torch.randn(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        if(args.noise > 0.0): sender_inputs = torch.clamp((sender_inputs + (args.noise * torch.randn(size=sender_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
         sender_outcome = self.sender(sender_inputs)
 
         receiver_inputs = inputs
-        if(NOISE_STD_DEV > 0.0): receiver_inputs = torch.clamp((receiver_inputs + (NOISE_STD_DEV * torch.randn(size=receiver_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
+        if(args.noise > 0.0): receiver_inputs = torch.clamp((receiver_inputs + (args.noise * torch.randn(size=receiver_inputs.shape))), 0.0, 1.0) # Adds normal random noise, then clamps
         receiver_outcome = self.receiver(receiver_inputs, *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
@@ -95,7 +95,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
         end_i = start_i + steps_per_epoch
 
         for i, batch in zip(range(start_i, end_i), data_iterator):
-            batch = batch.to(DEVICE)
+            batch = batch.to(args.device)
             optim.zero_grad()
             sender_outcome, receiver_outcome = model(batch)
 
@@ -126,7 +126,7 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
                 event_writer.add_scalar('train/reward', avg_reward, i)
                 event_writer.add_scalar('train/loss', loss.item(), i)
 
-    if(SIMPLE_DISPLAY):
+    if(args.simple_display):
         def callback(r):
             print('R: %f' % r)
 
@@ -144,25 +144,25 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
     return model # TODO Is there any reason to return the model?
 
 if __name__ == "__main__":
-    if(not os.path.isdir(DATASET_PATH)):
-        print("Directory '%s' not found." % DATASET_PATH)
+    if(not os.path.isdir(args.data_set)):
+        print("Directory '%s' not found." % args.data_set)
         sys.exit()
 
-    for run in range(RUNS):
+    for run in range(args.runs):
         print('Run %i' % run)
 
         run_models_dir = os.path.join(MODELS_DIR, str(run))
         run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
 
         if(not os.path.isdir(run_summary_dir)): os.makedirs(run_summary_dir)
-        if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
+        if(args.save_model and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        model = CommunicationGame().to(DEVICE)
+        model = CommunicationGame().to(args.device)
         optimizer = build_optimizer(model.parameters())
         data_loader = get_data_loader()
         event_writer = SummaryWriter(run_summary_dir)
 
         print(datetime.now(), "training start...")
-        for epoch in range(1, (EPOCHS + 1)):
+        for epoch in range(1, (args.epochs + 1)):
             train_epoch(model, data_loader, optimizer, epoch=epoch, event_writer=event_writer)
-            if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
+            if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))

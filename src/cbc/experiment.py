@@ -26,23 +26,23 @@ sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
 if(__name__ == "__main__"):
-    if(not os.path.isdir(DATASET_PATH)):
-        print(("Directory '%s' not found." % DATASET_PATH), flush=True)
+    if(not os.path.isdir(args.data_set)):
+        print(("Directory '%s' not found." % args.data_set), flush=True)
         sys.exit()
 
-    for run in range(RUNS):
+    for run in range(args.runs):
         print(('Run %i' % run), flush=True)
 
         run_models_dir = os.path.join(MODELS_DIR, str(run))
         run_summary_dir = os.path.join(SUMMARY_DIR, str(run))
 
         if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
-        if(SAVE_MODEL and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
+        if(args.save_model and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         if(args.population is not None): model = AliceBobPopulation(size=args.population, shared=args.shared)
         elif args.charlie: model = AliceBobCharlie()
         else: model = AliceBob(shared=args.shared)
-        model = model.to(DEVICE)
+        model = model.to(args.device)
         #print(model)
 
         if args.charlie:
@@ -60,6 +60,6 @@ if(__name__ == "__main__"):
             event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
 
         print(("[%s] training start..." % datetime.now()), flush=True)
-        for epoch in range(1, (EPOCHS + 1)):
+        for epoch in range(1, (args.epochs + 1)):
             model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer)
-            if(SAVE_MODEL): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
+            if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))

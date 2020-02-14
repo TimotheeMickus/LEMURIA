@@ -39,7 +39,7 @@ class AliceBobPopulation(AliceBob):
     def forward(self, batch):
         """
         Input:
-            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [BATCH_SIZE, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [BATCH_SIZE, 2, *IMG_SHAPE]
+            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch, 2, *IMG_SHAPE]
         Output:
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome

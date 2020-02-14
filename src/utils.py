@@ -136,4 +136,4 @@ def build_optimizer(θ):
     Input:
         `θ`, the model parameters
     """
-    return optim.RMSprop(θ, lr=LR)
+    return optim.RMSprop(θ, lr=args.learning_rate)

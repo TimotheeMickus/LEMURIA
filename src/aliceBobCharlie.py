@@ -35,7 +35,7 @@ class AliceBobCharlie(nn.Module):
     def forward(self, batch):
         """
         Input:
-            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [BATCH_SIZE, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [BATCH_SIZE, 2, *IMG_SHAPE]
+            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch, 2, *IMG_SHAPE]
         Output:
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
@@ -100,8 +100,8 @@ class AliceBobCharlie(nn.Module):
         loss.backward()
 
         # Gradient clipping and scaling
-        if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
-        if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
+        if((args.grad_clipping is not None) and (args.grad_clipping > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), args.grad_clipping)
+        if((args.grad_scaling is not None) and (args.grad_scaling > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), args.grad_scaling)
 
         optim.step()
 
@@ -134,8 +134,8 @@ class AliceBobCharlie(nn.Module):
         loss.backward()
 
         # Gradient clipping and scaling
-        if((CLIP_VALUE is not None) and (CLIP_VALUE > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), CLIP_VALUE)
-        if((SCALE_VALUE is not None) and (SCALE_VALUE > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), SCALE_VALUE)
+        if((args.grad_clipping is not None) and (args.grad_clipping > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), args.grad_clipping)
+        if((args.grad_scaling is not None) and (args.grad_scaling > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), args.grad_scaling)
 
         optim.step()
 
@@ -162,7 +162,7 @@ class AliceBobCharlie(nn.Module):
         optim_alice_bob, optim_charlie = optimizers
         self.train() # Sets the model in training mode
 
-        with Progress(SIMPLE_DISPLAY, steps_per_epoch, epoch) as pbar:
+        with Progress(args.simple_display, steps_per_epoch, epoch) as pbar:
             total_reward = 0.0 # sum of the rewards since the beginning of the epoch
             total_success = 0.0 # sum of the successes since the beginning of the epoch
             total_items = 0 # number of training instances since the beginning of the epoch
@@ -193,7 +193,7 @@ class AliceBobCharlie(nn.Module):
 
                 # logs some values
                 if(event_writer is not None):
-                    number_ex_seen = i * BATCH_SIZE
+                    number_ex_seen = i * args.batch
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                     event_writer.add_scalar('train/success', avg_success, number_ex_seen)
                     if generator_step:
@@ -202,7 +202,7 @@ class AliceBobCharlie(nn.Module):
                         event_writer.add_scalar('train/loss_alice_bob', loss.item(), number_ex_seen)
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
                     event_writer.add_scalar('train/charlie_acc', charlie_acc.item(), number_ex_seen)
-                    if DEBUG_MODE:
+                    if args.debug:
                         median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
                         mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
                         #min_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().min().item()

@@ -8,19 +8,19 @@ from config import *
 
 class DistinctTargetClassDataLoader():
     def __init__(self) :
-        # target images, batched by BATCH_SIZE
+        # target images, batched by args.batch
         self.target_dataset = ImageFolder(
-            root=DATASET_PATH,
+            root=args.data_set,
             transform=torchvision.transforms.ToTensor())
         self.target_loader = DataLoader(
             self.target_dataset,
-            batch_size=BATCH_SIZE,
+            batch_size=args.batch,
             num_workers=1,
             shuffle=True)
 
         # distractor images, that require to be matched with targets
         self.distractor_dataset = ImageFolder(
-            root=DATASET_PATH,
+            root=args.data_set,
             transform=torchvision.transforms.ToTensor())
         self.distractor_loader = DataLoader(
             self.distractor_dataset,
