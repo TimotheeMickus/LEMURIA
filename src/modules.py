@@ -27,16 +27,16 @@ class MessageEncoder(nn.Module):
         """
         Forward propagation.
         Input:
-            `message`, of shape [args.batch x <=MSG_LEN], message produced by sender
-            `length`, of shape [args.batch x 1], length of message produced by sender
+            `message`, of shape [args.batch_size x <=MSG_LEN], message produced by sender
+            `length`, of shape [args.batch_size x 1], length of message produced by sender
         Output:
-            encoded message, of shape [args.batch x output_dim]
+            encoded message, of shape [args.batch_size x output_dim]
         """
         # encode
         embeddings = self.symbol_embeddings(message)
         embeddings = self.lstm(embeddings)[0]
         # select last step corresponding to message
-        index = torch.arange(message.size(-1)).expand_as(message).to(args.device)
+        index = torch.arange(message.size(-1)).expand_as(message).to(message.device)
         output = embeddings.masked_select((index == (length-1)).unsqueeze(-1))
 
         return output.view(embeddings.size(0), embeddings.size(-1))
@@ -49,7 +49,7 @@ class MessageDecoder(nn.Module):
         embedding_dim=HIDDEN,
         padding_idx=PAD,
         output_dim=HIDDEN,
-        max_msg_len=MSG_LEN,
+        max_msg_len=args.max_len,
         bos_index=BOS,
         eos_index=EOS,
         ):

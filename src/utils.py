@@ -130,10 +130,10 @@ def simple_show_img(img):
 def show_imgs(imgs, nrow=8):
     show_img(torchvision.utils.make_grid(imgs, nrow))
 
-def build_optimizer(θ):
+def build_optimizer(θ, learning_rate=args.learning_rate):
     """
     Factory for optimizer
     Input:
         `θ`, the model parameters
     """
-    return optim.RMSprop(θ, lr=args.learning_rate)
+    return optim.RMSprop(θ, lr=learning_rate)

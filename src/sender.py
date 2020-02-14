@@ -22,7 +22,7 @@ class Sender(nn.Module):
         """
             Forward propagation.
             Input:
-                `image`, of shape [args.batch x *IMG_SHAPE]
+                `image`, of shape [args.batch_size x *IMG_SHAPE]
             Output:
                 `Outcome`, where `action` is the produced message
         """

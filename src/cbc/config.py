@@ -26,7 +26,7 @@ arg_parser.add_argument('--models', help='the path to the saved models (\'[summa
 arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
 #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
 
-arg_parser.add_argument('--batch', help='batch size', default=32, type=int)
+arg_parser.add_argument('--batch_size', help='batch size', default=32, type=int)
 
 arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
 
@@ -82,7 +82,7 @@ FILTERS = 32
 STRIDES = (2, 2, 1, 2, 1, 2, 1, 2) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
 KERNEL_SIZE = 3
 
-BATCH_SIZE = args.batch # Try with small values, such as 0.1
+BATCH_SIZE = args.batch_size # Try with small values, such as 0.1
 LR = args.learning_rate
 
 # BETA values for reweighting entropy penalty

@@ -8,13 +8,13 @@ from config import *
 
 class DistinctTargetClassDataLoader():
     def __init__(self) :
-        # target images, batched by args.batch
+        # target images, batched by args.batch_size
         self.target_dataset = ImageFolder(
             root=args.data_set,
             transform=torchvision.transforms.ToTensor())
         self.target_loader = DataLoader(
             self.target_dataset,
-            batch_size=args.batch,
+            batch_size=args.batch_size,
             num_workers=1,
             shuffle=True)
 

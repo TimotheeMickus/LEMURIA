@@ -35,9 +35,9 @@ class Receiver(nn.Module):
         """
             Forward propagation.
             Input:
-                `images`, of shape [args.batch x K x *IMG_SHAPE], where the first of each K image is the target
-                `message`, of shape [args.batch x (<=MSG_LEN)], message produced by sender
-                `length`, of shape [args.batch x 1], length of message produced by sender
+                `images`, of shape [args.batch_size x K x *IMG_SHAPE], where the first of each K image is the target
+                `message`, of shape [args.batch_size x (<=MSG_LEN)], message produced by sender
+                `length`, of shape [args.batch_size x 1], length of message produced by sender
             Output:
                 `Outcome` containing action taken, entropy, log prob, dist and scores.
         """

@@ -42,7 +42,7 @@ class DistinctTargetClassDataLoader():
     concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
     nb_concepts = len(_concepts)
 
-    def __init__(self, same_img=False, evaluation_categories=None):
+    def __init__(self, same_img=False, evaluation_categories=None, data_set=args.data_set, simple_display=args.simple_display):
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
         # If `evaluation_categories` is None, all categories are used during training
@@ -76,15 +76,15 @@ class DistinctTargetClassDataLoader():
 
             return (idx, category)
 
-        print('Loading data from \'%s\'...' % args.data_set)
+        print('Loading data from \'%s\'...' % data_set)
 
-        # Loads all images from args.data_set as DataPoint
+        # Loads all images from data_set as DataPoint
         dataset = [] # Will end as a Numpy array of DataPoint·s
-        #for filename in os.listdir(args.data_set):
-        tmp_data = os.listdir(args.data_set)
-        if(not args.simple_display): tmp_data = tqdm.tqdm(tmp_data)
+        #for filename in os.listdir(data_set):
+        tmp_data = os.listdir(data_set)
+        if(not simple_display): tmp_data = tqdm.tqdm(tmp_data)
         for filename in tmp_data:
-            full_path = os.path.join(args.data_set, filename)
+            full_path = os.path.join(data_set, filename)
             if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
 
             idx, category = analyse_filename(filename)
@@ -101,7 +101,7 @@ class DistinctTargetClassDataLoader():
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
 
-        if(args.simple_display): print('Loading done')
+        if(simple_display): print('Loading done')
 
     _average_image = None
     def average_image(self):
@@ -148,7 +148,7 @@ class DistinctTargetClassDataLoader():
         #distance = np.random.randint(self.nb_concepts) + 1
         #return self._distance_to_category(category, distance)
 
-    def get_batch(self, size, no_evaluation=True, target_evaluation=False):
+    def get_batch(self, size, no_evaluation=True, target_evaluation=False, noise=args.noise, device=args.device, batch_size=args.batch_size):
         """Generates a batch as a Batch object.
         'original_img', 'target_img' and 'base_distractors' are all tensors of outer dimension of size `size`.
         If 'no_evaluation' is True, none of the image is from an evaluation category.
@@ -176,17 +176,17 @@ class DistinctTargetClassDataLoader():
         original_img, target_img, base_distractors = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
 
         # Adds noise if necessary (normal random noise + clamping)
-        if(args.noise > 0.0):
-            original_img = add_normal_noise(original_img, std_dev=args.noise, clamp_values=(0.0, 1.0))
-            target_img = add_normal_noise(target_img, std_dev=args.noise, clamp_values=(0.0, 1.0))
-            base_distractors = add_normal_noise(base_distractors, std_dev=args.noise, clamp_values=(0.0, 1.0))
+        if(noise > 0.0):
+            original_img = add_normal_noise(original_img, std_dev=noise, clamp_values=(0.0, 1.0))
+            target_img = add_normal_noise(target_img, std_dev=noise, clamp_values=(0.0, 1.0))
+            base_distractors = add_normal_noise(base_distractors, std_dev=noise, clamp_values=(0.0, 1.0))
 
-        return Batch(size=args.batch, original_img=original_img.to(args.device), target_img=target_img.to(args.device), base_distractors=base_distractors.to(args.device))
+        return Batch(size=batch_size, original_img=original_img.to(device), target_img=target_img.to(device), base_distractors=base_distractors.to(device))
 
-    def __iter__(self):
-        """Iterates over batches of size `args.batch`"""
+    def __iter__(self, batch=args.batch_size):
+        """Iterates over batches of size `args.batch_size`"""
         while True:
-            yield self.get_batch(args.batch)
+            yield self.get_batch(batch)
 
 def get_data_loader(same_img=False):
     return DistinctTargetClassDataLoader(same_img)
