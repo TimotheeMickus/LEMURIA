@@ -14,8 +14,8 @@ from config import *
 class AliceBobCharlie(nn.Module):
     def __init__(self):
         nn.Module.__init__(self)
-        self.sender = Sender()
-        self.receiver = Receiver()
+        self.sender = Sender.from_args(args)
+        self.receiver = Receiver.from_args(args)
         self.drawer = Drawer()
 
     def _bob_input(self, batch, drawer_outcome):

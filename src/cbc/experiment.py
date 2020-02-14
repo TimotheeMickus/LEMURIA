@@ -47,10 +47,10 @@ if(__name__ == "__main__"):
 
         if args.charlie:
             optimizer = (
-                build_optimizer(chain(model.sender.parameters(), model.receiver.parameters())),
-                build_optimizer(model.drawer.parameters()))
+                build_optimizer(chain(model.sender.parameters(), model.receiver.parameters()), args.learning_rate),
+                build_optimizer(model.drawer.parameters()), args.learning_rate)
         else:
-            optimizer = build_optimizer(model.parameters())
+            optimizer = build_optimizer(model.parameters(), args.learning_rate)
 
         data_loader = get_data_loader(args.same_img)
 

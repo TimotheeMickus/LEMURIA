@@ -4,19 +4,15 @@ from collections import namedtuple
 
 from modules import MessageDecoder, build_cnn_encoder_from_args
 
-from config import *
-
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 
 # Image -(vector)-> message
 class Sender(nn.Module):
-    def __init__(self, image_encoder=None, symbol_embeddings=None):
+    def __init__(self, image_encoder, message_decoder):
         super(Sender, self).__init__()
-
-        if(image_encoder is None): image_encoder = build_cnn_encoder_from_args()
         self.image_encoder = image_encoder
-        self.message_decoder = MessageDecoder(symbol_embeddings)
+        self.message_decoder = message_decoder
 
     def forward(self, image):
         """
@@ -33,3 +29,10 @@ class Sender(nn.Module):
             log_prob=outputs["log_probs"],
             action=(outputs["message"], outputs["message_len"]))
         return outcome
+
+
+    @classmethod
+    def from_args(cls, args, image_encoder=None, symbol_embeddings=None):
+        if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)
+        message_decoder = MessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        return cls(image_encoder, message_decoder)

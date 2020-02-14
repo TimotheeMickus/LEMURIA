@@ -3,22 +3,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
-from config import *
-
 # Message -> vector
 class MessageEncoder(nn.Module):
     """
     Encodes a message of discrete symbols in a single vector.
     """
     def __init__(self,
-        symbol_embeddings=None,
-        alphabet_size=ALPHABET_SIZE,
-        embedding_dim=args.hidden_size,
-        padding_idx=PAD,
-        output_dim=args.hidden_size):
+        alphabet_size,
+        embedding_dim,
+        output_dim,
+        symbol_embeddings):
         super(MessageEncoder, self).__init__()
 
-        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((alphabet_size + 1), embedding_dim, padding_idx=padding_idx) # +1: padding symbol
         self.symbol_embeddings = symbol_embeddings
 
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
@@ -41,21 +37,22 @@ class MessageEncoder(nn.Module):
 
         return output.view(embeddings.size(0), embeddings.size(-1))
 
+    @classmethod
+    def from_args(cls, args, symbol_embeddings=None):
+        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.alphabet, args.hidden_size, use_bos=False)# nn.Embedding((alphabet_size + 1), embedding_dim, padding_idx=padding_idx) # +1: padding symbol
+        return cls(args.alphabet, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings)
+
 # Vector -> message
 class MessageDecoder(nn.Module):
     def __init__(self,
-        symbol_embeddings=None,
-        alphabet_size=ALPHABET_SIZE,
-        embedding_dim=args.hidden_size,
-        padding_idx=PAD,
-        output_dim=args.hidden_size,
-        max_msg_len=args.max_len,
-        bos_index=BOS,
-        eos_index=EOS,
+        alphabet_size,
+        embedding_dim,
+        output_dim,
+        max_msg_len,
+        symbol_embeddings,
         ):
         super(MessageDecoder, self).__init__()
 
-        if(symbol_embeddings is None): symbol_embeddings = nn.Embedding((alphabet_size + 2), embedding_dim, padding_idx=padding_idx) # +2: padding symbol, BOS symbol
         self.symbol_embeddings = symbol_embeddings
 
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
@@ -67,9 +64,9 @@ class MessageDecoder(nn.Module):
         self.action_space_proj = nn.Linear(embedding_dim, alphabet_size)
 
         self.max_msg_len = max_msg_len
-        self.bos_index = bos_index
-        self.eos_index = eos_index
-        self.padding_idx = padding_idx
+        self.bos_index = alphabet_size + 2
+        self.eos_index = 0
+        self.padding_idx = alphabet_size + 1
 
     def forward(self, encoded):
         # Initialisation
@@ -130,9 +127,19 @@ class MessageDecoder(nn.Module):
             "message_len":message_len}
         return outputs
 
+    @classmethod
+    def from_args(cls, args, symbol_embeddings=None):
+        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.alphabet, args.hidden_size, use_bos=True)# nn.Embedding((alphabet_size + 2), embedding_dim, padding_idx=padding_idx) # +2: padding symbol, BOS symbol
+        return cls(
+            alphabet_size=args.alphabet,
+            embedding_dim=args.hidden_size,
+            output_dim=args.hidden_size,
+            max_msg_len=args.max_len,
+            symbol_embeddings=symbol_embeddings,)
+
 # vector -> vector + random noise
 class Randomizer(nn.Module):
-    def __init__(self, input_dim=args.hidden_size, random_dim=args.hidden_size):
+    def __init__(self, input_dim, random_dim):
         super(Randomizer, self).__init__()
         self.merging_projection = nn.Linear(input_dim + random_dim, input_dim)
         self.random_dim = random_dim
@@ -147,6 +154,10 @@ class Randomizer(nn.Module):
         input_with_noise = torch.cat([input_vector, noise], dim=1)
         merged_input = self.merging_projection(input_with_noise)
         return merged_input
+
+    @classmethod
+    def from_args(cls, args):
+        return cls(input_dim=args.hidden_size, random_dim=args.hidden_size)
 
 
 def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
@@ -237,7 +248,7 @@ def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
     cnn = nn.Sequential(*layers)
     return cnn
 
-def build_cnn_encoder_from_args(args=args):
+def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
     """
@@ -252,7 +263,7 @@ def build_cnn_encoder_from_args(args=args):
         kernel_size=args.kernel_size,
         paddings=None,)
 
-def build_cnn_decoder_from_args(args=args):
+def build_cnn_decoder_from_args(args):
     """
     Factory for deconvolutionnal networks
     """
@@ -270,3 +281,7 @@ def build_cnn_decoder_from_args(args=args):
         kernel_size=args.kernel_size,
         flatten_last=False,
         sigmoid_after=True,)
+
+def build_embeddings(alphabet_size, dim, use_bos=False):
+    vocab_size = (alphabet_size + 3) if use_bos else (alphabet_size + 2)
+    return nn.Embedding(vocab_size, dim, padding_idx=alphabet_size + 1)

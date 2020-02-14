@@ -18,12 +18,12 @@ class AliceBob(nn.Module):
         nn.Module.__init__(self)
 
         if(shared):
-            senderReceiver = SenderReceiver()
+            senderReceiver = SenderReceiver.from_args(args)
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
         else:
-            self.sender = Sender()
-            self.receiver = Receiver()
+            self.sender = Sender.from_args(args)
+            self.receiver = Receiver.from_args(args)
 
     def _bob_input(self, batch):
         return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors], dim=1)

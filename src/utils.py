@@ -9,8 +9,6 @@ import torch.optim as optim
 import torchvision
 import tqdm
 
-from config import *
-
 def pointing(scores):
     probs = F.softmax(scores, dim=-1)
     dist = Categorical(probs)
@@ -130,7 +128,7 @@ def simple_show_img(img):
 def show_imgs(imgs, nrow=8):
     show_img(torchvision.utils.make_grid(imgs, nrow))
 
-def build_optimizer(θ, learning_rate=args.learning_rate):
+def build_optimizer(θ, learning_rate):
     """
     Factory for optimizer
     Input:

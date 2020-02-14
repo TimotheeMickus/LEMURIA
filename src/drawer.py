@@ -8,12 +8,11 @@ from modules import MessageEncoder, Randomizer, build_cnn_decoder_from_args
 Outcome = namedtuple("Outcome", ["image"])
 
 class Drawer(nn.Module):
-    def __init__(self, message_encoder=None):
+    def __init__(self, message_encoder, randomizer, image_decoder):
         super(Drawer, self).__init__()
-        if message_encoder is None: message_encoder = MessageEncoder()
         self.message_encoder = message_encoder
-        self.randomizer = Randomizer()
-        self.image_decoder = build_cnn_decoder_from_args()
+        self.randomizer = randomizer
+        self.image_decoder = image_decoder
 
     def forward(self, message, length):
         encoded_message = self.message_encoder(message, length)
@@ -25,3 +24,10 @@ class Drawer(nn.Module):
 
         outcome = Outcome(image=image)
         return outcome
+
+    @classmethod
+    def from_args(cls, args, message_decoder=None):
+        if message_encoder is None: message_encoder = MessageEncoder.from_args(args)
+        randomizer = Randomizer.from_args(args)
+        image_decoder = build_cnn_decoder_from_args(args)
+        return cls(MessageEncoder, randomizer, image_decoder)

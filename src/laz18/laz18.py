@@ -87,9 +87,9 @@ def train_epoch(model, data_iterator, optim, epoch=1, steps_per_epoch=1000, even
             `event_writer`: tensorboard writer to log evolution of values
     """
     model.train() # sets the model in training mode
-    
+
     def loop(callback=None):
-        total_reward = 0.0 # sum of the rewards since the beginning of the epoch 
+        total_reward = 0.0 # sum of the rewards since the beginning of the epoch
         total_items = 0 # number of training instances since the beginning of the epoch
         start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
         end_i = start_i + steps_per_epoch
@@ -158,7 +158,7 @@ if __name__ == "__main__":
         if(args.save_model and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         model = CommunicationGame().to(args.device)
-        optimizer = build_optimizer(model.parameters())
+        optimizer = build_optimizer(model.parameters(), args.learning_rate)
         data_loader = get_data_loader()
         event_writer = SummaryWriter(run_summary_dir)
 

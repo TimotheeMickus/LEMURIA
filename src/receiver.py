@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from modules import MessageEncoder, build_cnn_encoder_from_args
-from config import *
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["scores"])
@@ -17,13 +16,11 @@ class Receiver(nn.Module):
     Defines a receiver policy.
     Based on K presented images and a given message, chooses which image the message refers to.
     """
-    def __init__(self, image_encoder=None, symbol_embeddings=None):
+    def __init__(self, image_encoder, message_encoder):
         super(Receiver, self).__init__()
 
-        if(image_encoder is None): image_encoder = build_cnn_encoder_from_args()
         self.image_encoder = image_encoder
-
-        self.message_encoder = MessageEncoder(symbol_embeddings)
+        self.message_encoder = message_encoder
 
     def encode_message(self, message, length):
         return self.message_encoder(message, length).unsqueeze(-1)
@@ -52,3 +49,10 @@ class Receiver(nn.Module):
 
         outcome = Outcome(scores=scores)
         return outcome
+
+
+    @classmethod
+    def from_args(cls, args, image_encoder=None, symbol_embeddings=None):
+        if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)
+        message_encoder = MessageEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        return cls(image_encoder, message_encoder)
