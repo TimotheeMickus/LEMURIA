@@ -33,14 +33,14 @@ if(__name__ == "__main__"):
         print("'load_model' must be indicated")
         sys.exit()
 
-    if(args.population is not None): model = AliceBobPopulation(size=args.population, shared=args.shared)
-    else: model = AliceBob(shared=args.shared)
+    if(args.population is not None): model = AliceBobPopulation(args)
+    else: model = AliceBob(args)
     model.load_state_dict(torch.load(args.load_model, map_location=args.device))
     model = model.to(args.device)
     #print(model)
 
     data_loader = get_data_loader(args.same_img)
-   
-    model.decision_tree(data_loader)
+
+    model.decision_tree(data_loader, args.base_alphabet_size)
     while(True):
-        model.test_visualize(data_loader)
+        model.test_visualize(data_loader, args.learning_rate)

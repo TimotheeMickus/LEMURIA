@@ -7,11 +7,11 @@ from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
 
-from config import args
-
 class AliceBobPopulation(AliceBob):
-    def __init__(self, size, shared):
+    def __init__(self, args):
         nn.Module.__init__(self)
+
+        size, shared = args.population, args.shared
 
         if(shared):
             self._agents = [SenderReceiver.from_args(args) for _ in range(size)]
@@ -27,6 +27,14 @@ class AliceBobPopulation(AliceBob):
         parameters = []
         for agent in self._agents: parameters += list(agent.parameters())
         self.agent_parameters = nn.ParameterList(parameters)
+
+        self.use_expectation = args.use_expectation
+        self.grad_scaling = args.grad_scaling or 0
+        self.grad_clipping = args.grad_clipping or 0
+        self.beta_sender = args.beta_sender
+        self.beta_receiver = args.beta_receiver
+        self.penalty = args.penalty
+        self.adaptative_penalty = args.adaptative_penalty
 
     def to(self, *vargs, **kwargs):
         self = super().to(*vargs, **kwargs)

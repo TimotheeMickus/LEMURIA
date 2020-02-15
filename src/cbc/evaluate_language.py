@@ -30,8 +30,8 @@ if(__name__ == "__main__"):
     assert args.load_model is not None, "a valid path to a trained model is required."
     assert args.message_dump_file is not None, "a valid output file is required."
 
-    if(args.population > 1): model = AliceBobPopulation(args.population)
-    else: model = AliceBob()
+    if(args.population > 1): model = AliceBobPopulation(args)
+    else: model = AliceBob(args)
     model.load_state_dict(torch.load(args.load_model, map_location=args.device))
     model = model.to(args.device)
     #print(model)

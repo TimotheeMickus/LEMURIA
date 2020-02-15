@@ -42,16 +42,16 @@ if(__name__ == "__main__"):
         if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
         if(args.save_model and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        if(args.population is not None): model = AliceBobPopulation(size=args.population, shared=args.shared)
-        elif args.charlie: model = AliceBobCharlie()
-        else: model = AliceBob(shared=args.shared)
+        if(args.population is not None): model = AliceBobPopulation(args)
+        elif args.charlie: model = AliceBobCharlie(args)
+        else: model = AliceBob(args)
         model = model.to(args.device)
         #print(model)
 
         if args.charlie:
             optimizer = (
                 build_optimizer(chain(model.sender.parameters(), model.receiver.parameters()), args.learning_rate),
-                build_optimizer(model.drawer.parameters()), args.learning_rate)
+                build_optimizer(model.drawer.parameters(), args.learning_rate))
         else:
             optimizer = build_optimizer(model.parameters(), args.learning_rate)
 
@@ -64,5 +64,5 @@ if(__name__ == "__main__"):
 
         print(("[%s] training start..." % datetime.now()), flush=True)
         for epoch in range(1, (args.epochs + 1)):
-            model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress)
+            model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug, log_entropy=args.log_entropy)
             if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))

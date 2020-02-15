@@ -9,14 +9,19 @@ from receiver import Receiver
 from drawer import Drawer
 from utils import show_imgs, max_normalize_, to_color, Progress
 
-from config import *
-
 class AliceBobCharlie(nn.Module):
-    def __init__(self):
+    def __init__(self, args):
         nn.Module.__init__(self)
         self.sender = Sender.from_args(args)
         self.receiver = Receiver.from_args(args)
-        self.drawer = Drawer()
+        self.drawer = Drawer.from_args(args)
+
+        self.penalty = args.penalty
+        self.adaptative_penalty = args.adaptative_penalty
+        self.grad_clipping = args.grad_clipping or 0
+        self.grad_scaling = args.grad_scaling or 0
+        self.beta_sender = args.beta_sender
+        self.beta_receiver = args.beta_receiver
 
     def _bob_input(self, batch, drawer_outcome):
         return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors, drawer_outcome.image.unsqueeze(1)], dim=1)
@@ -42,7 +47,7 @@ class AliceBobCharlie(nn.Module):
         """
         return self._forward(batch, self.sender, self.drawer, self.receiver)
 
-    def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf, penalty=args.penalty, adaptative_penalty=args.adaptative_penalty):
+    def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
         """
             returns the reward as well as the success for each element of a batch
         """
@@ -50,12 +55,12 @@ class AliceBobCharlie(nn.Module):
 
         rewards = successes
 
-        if(penalty > 0.0):
+        if(self.penalty > 0.0):
             msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; see https://github.com/pytorch/pytorch/issues/9515 (I believe)
-            length_penalties = 1.0 - (1.0 / (1.0 + penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
             # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
-            if(adaptative_penalty):
+            if(self.adaptative_penalty):
                 improvement_factor = (running_avg_success - chance_perf) / (1 - chance_perf) # Equals 0 when running average equals chance performance, reaches 1 when running average reaches 1
                 length_penalties = (length_penalties * min(0.0, improvement_factor))
 
@@ -74,7 +79,7 @@ class AliceBobCharlie(nn.Module):
         log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
         return log_prob
 
-    def train_step_alice_bob(self, batch, optim, running_avg_success, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling):
+    def train_step_alice_bob(self, batch, optim, running_avg_success):
         optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
 
@@ -93,15 +98,15 @@ class AliceBobCharlie(nn.Module):
 
         loss = loss.mean()
         # entropy penalties
-        loss = loss - (BETA_SENDER * sender_outcome.entropy.mean())
-        loss = loss - (BETA_RECEIVER * bob_entropy.mean())
+        loss = loss - (self.beta_sender * sender_outcome.entropy.mean())
+        loss = loss - (self.beta_receiver * bob_entropy.mean())
 
         # backprop
         loss.backward()
 
         # Gradient clipping and scaling
-        if((grad_clipping is not None) and (grad_clipping > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), grad_clipping)
-        if((grad_scaling is not None) and (grad_scaling > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), grad_scaling)
+        if(self.grad_clipping > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
+        if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
 
         optim.step()
 
@@ -111,7 +116,7 @@ class AliceBobCharlie(nn.Module):
 
         return rewards, successes, message_length, loss, charlie_acc
 
-    def train_step_charlie(self, batch, optim, running_avg_success, default_adv_train=True, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling):
+    def train_step_charlie(self, batch, optim, running_avg_success, default_adv_train=True):
         optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
 
@@ -134,8 +139,8 @@ class AliceBobCharlie(nn.Module):
         loss.backward()
 
         # Gradient clipping and scaling
-        if((grad_clipping is not None) and (grad_clipping > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), grad_clipping)
-        if((grad_scaling is not None) and (grad_scaling > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), grad_scaling)
+        if(self.grad_clipping  > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
+        if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
 
         optim.step()
 
@@ -148,7 +153,7 @@ class AliceBobCharlie(nn.Module):
         return rewards, successes, message_length, loss, charlie_acc
 
 
-    def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, batch_size=args.batch_size, debug=args.debug):
+    def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, **unimplemented_options):
         """
             Model training function
             Input:
@@ -193,7 +198,7 @@ class AliceBobCharlie(nn.Module):
 
                 # logs some values
                 if(event_writer is not None):
-                    number_ex_seen = i * batch_size
+                    number_ex_seen = i * batch.size
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                     event_writer.add_scalar('train/success', avg_success, number_ex_seen)
                     if generator_step:

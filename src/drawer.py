@@ -26,8 +26,8 @@ class Drawer(nn.Module):
         return outcome
 
     @classmethod
-    def from_args(cls, args, message_decoder=None):
+    def from_args(cls, args, message_encoder=None):
         if message_encoder is None: message_encoder = MessageEncoder.from_args(args)
         randomizer = Randomizer.from_args(args)
         image_decoder = build_cnn_decoder_from_args(args)
-        return cls(MessageEncoder, randomizer, image_decoder)
+        return cls(message_encoder, randomizer, image_decoder)

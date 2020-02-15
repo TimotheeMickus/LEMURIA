@@ -11,11 +11,11 @@ from receiver import Receiver
 from senderReceiver import SenderReceiver
 from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
 
-from config import *
-
 class AliceBob(nn.Module):
-    def __init__(self, shared):
+    def __init__(self, args):
         nn.Module.__init__(self)
+
+        shared = args.shared
 
         if(shared):
             senderReceiver = SenderReceiver.from_args(args)
@@ -24,6 +24,15 @@ class AliceBob(nn.Module):
         else:
             self.sender = Sender.from_args(args)
             self.receiver = Receiver.from_args(args)
+
+        self.use_expectation = args.use_expectation
+        self.grad_scaling = args.grad_scaling or 0
+        self.grad_clipping = args.grad_clipping or 0
+        self.beta_sender = args.beta_sender
+        self.beta_receiver = args.beta_receiver
+        self.penalty = args.penalty
+        self.adaptative_penalty = args.adaptative_penalty
+
 
     def _bob_input(self, batch):
         return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors], dim=1)
@@ -44,7 +53,8 @@ class AliceBob(nn.Module):
         """
         return self._forward(batch, self.sender, self.receiver)
 
-    def decision_tree(self, data_iterator, base_alphabet_size=args.base_alphabet_size):
+    def decision_tree(self, data_iterator):
+        base_alphabet_size = self.get_base_alphabet_size()
         self.eval()
 
         print("Generating the messages…")
@@ -133,31 +143,31 @@ class AliceBob(nn.Module):
 
                         feature_type = 'presence'
                         prediction = feature_vectors[:, feature_idx]
-                    
+
                         matches = (gold == prediction)
 
                         accuracy = matches.mean()
-                        accuracy = matches.mean()    
+                        accuracy = matches.mean()
 
                         precision = gold[prediction].mean()
                         recall = prediction[gold].mean()
                         f1 = 2 * precision * recall / (precision + recall)
 
                         if(accuracy > 0.9 or f1 > 0.9): print((accuracy, baseline_accuracy, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type))
-                        
+
                         feature_type = 'absence'
                         prediction ^= True
-                       
+
                         matches = (gold == prediction)
-                        
-                        accuracy = matches.mean()    
+
+                        accuracy = matches.mean()
 
                         precision = gold[prediction].mean()
                         recall = prediction[gold].mean()
                         f1 = 2 * precision * recall / (precision + recall)
 
                         if(accuracy > 0.9 or f1 > 0.9): print((accuracy, baseline_accuracy, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type))
-                        
+
 
                     if(True): continue
 
@@ -173,13 +183,13 @@ class AliceBob(nn.Module):
                     baseline_precision = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
 
                     item = (
-                        precision, 
-                        baseline_precision, 
-                        (precision / baseline_precision), 
-                        ((1 - baseline_precision) / (1 - precision)), 
-                        conjunction, 
-                        n_leaves, 
-                        depth, 
+                        precision,
+                        baseline_precision,
+                        (precision / baseline_precision),
+                        ((1 - baseline_precision) / (1 - precision)),
+                        conjunction,
+                        n_leaves,
+                        depth,
                         classifier
                     )
 
@@ -198,7 +208,7 @@ class AliceBob(nn.Module):
         for e in results[:10]:
             print(e)
 
-    def test_visualize(self, data_iterator, learning_rate=args.learning_rate):
+    def test_visualize(self, data_iterator, learning_rate):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
         batch_size = 4
@@ -311,7 +321,7 @@ class AliceBob(nn.Module):
         #for img in imgs: print(img.shape)
         show_imgs(imgs, nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
 
-    def sender_rewards(self, sender_action, receiver_scores, running_avg_success, use_expectation=args.use_expectation, penalty=args.penalty, adaptative_penalty=args.adaptative_penalty):
+    def compute_sender_rewards(self, sender_action, receiver_scores, running_avg_success):
         """
             returns the reward as well as the success for each element of a batch
         """
@@ -319,17 +329,17 @@ class AliceBob(nn.Module):
         receiver_pointing = pointing(receiver_scores)
 
         # By design, the target is the first image
-        if(use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
+        if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
         else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
 
         rewards = successes
 
-        if(penalty > 0.0):
+        if(self.penalty > 0.0):
             msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; see https://github.com/pytorch/pytorch/issues/9515 (I believe)
-            length_penalties = 1.0 - (1.0 / (1.0 + penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
             # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
-            if(adaptative_penalty):
+            if(self.adaptative_penalty):
                 chance_perf = (1 / receiver_scores.size(1))
                 improvement_factor = (running_avg_success - chance_perf) / (1 - chance_perf) # Equals 0 when running average equals chance performance, reaches 1 when running average reaches 1
                 length_penalties = (length_penalties * min(0.0, improvement_factor))
@@ -338,21 +348,21 @@ class AliceBob(nn.Module):
 
         return (rewards, successes)
 
-    def sender_loss(self, sender_outcome, receiver_scores, running_avg_success):
-        (rewards, successes) = self.sender_rewards(sender_outcome.action, receiver_scores, running_avg_success)
+    def compute_sender_loss(self, sender_outcome, receiver_scores, running_avg_success):
+        (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores, running_avg_success)
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
         loss = -(rewards * log_prob).mean()
 
-        loss = loss - (BETA_SENDER * sender_outcome.entropy.mean()) # Entropy penalty
+        loss = loss - (self.beta_sender * sender_outcome.entropy.mean()) # Entropy penalty
 
         return (loss, successes, rewards)
 
-    def receiver_loss(self, receiver_scores, use_expectation=args.use_expectation):
+    def compute_receiver_loss(self, receiver_scores):
         receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
 
         # By design, the target is the first image
-        if(use_expectation):
+        if(self.use_expectation):
             successes = receiver_pointing['dist'].probs[:, 0].detach()
             log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0).to(probs.device))
         else: # Plays dice
@@ -363,11 +373,19 @@ class AliceBob(nn.Module):
 
         loss = -(rewards * log_prob).mean()
 
-        loss = loss - (BETA_RECEIVER * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
+        loss = loss - (self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
 
         return loss
 
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=args.simple_display, grad_clipping=args.grad_clipping, grad_scaling=args.grad_scaling, batch_size=args.batch_size, debug=args.debug, log_lang_progress=True, base_alphabet_size=args.base_alphabet_size, device=args.device):
+    def get_base_alphabet_size(self):
+        if hasattr(self, 'sender'):
+            return self.sender.message_decoder.symbol_embeddings.weight.size(0) - 1
+        elif hasattr(self, 'senders'):
+            return self.senders[0].message_decoder.symbol_embeddings.weight.size(0) - 1
+        else:
+            raise TypeError
+
+    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
         """
             Model training function
             Input:
@@ -380,6 +398,8 @@ class AliceBob(nn.Module):
         """
         self.train() # Sets the model in training mode
 
+        base_alphabet_size = self.get_base_alphabet_size()
+
         with Progress(simple_display, steps_per_epoch, epoch) as pbar:
             total_reward = 0.0 # sum of the rewards since the beginning of the epoch
             total_success = 0.0 # sum of the successes since the beginning of the epoch
@@ -388,27 +408,28 @@ class AliceBob(nn.Module):
             running_avg_success = 0.0
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
+            device = next(self.parameters()).device
             past_dist, current_dist = None, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings
-            batch_msg_manyhot = torch.zeros((batch_size, base_alphabet_size + 2), dtype=torch.float).to(device) # size of embeddings + EOS + PAD
-            if event_writer is not None and args.log_entropy:
+
+            if event_writer is not None and log_entropy:
                 symbol_counts = torch.zeros(base_alphabet_size, dtype=torch.float).to(device)
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
 
                 # Alice's part
-                (sender_loss, sender_successes, sender_rewards) = self.sender_loss(sender_outcome, receiver_outcome.scores, running_avg_success)
+                (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, running_avg_success)
 
                 # Bob's part
-                receiver_loss = self.receiver_loss(receiver_outcome.scores)
+                receiver_loss = self.compute_receiver_loss(receiver_outcome.scores)
 
                 loss = sender_loss + receiver_loss
 
                 loss.backward() # Backpropagation
 
                 # Gradient clipping and scaling
-                if((grad_clipping is not None) and (grad_clipping > 0)): torch.nn.utils.clip_grad_value_(self.parameters(), grad_clipping)
-                if((grad_scaling is not None) and (grad_scaling > 0)): torch.nn.utils.clip_grad_norm_(self.parameters(), grad_scaling)
+                if(self.grad_clipping > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
+                if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
 
                 optim.step()
 
@@ -427,7 +448,7 @@ class AliceBob(nn.Module):
                 running_avg_success = total_success / total_items
 
                 if log_lang_progress:
-                    batch_msg_manyhot.zero_()
+                    batch_msg_manyhot = torch.zeros((batch.size, base_alphabet_size + 2), dtype=torch.float).to(self.sender.device) # size of embeddings + EOS + PAD
                     # message -> many-hot
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,base_alphabet_size).float()
                     # summation along batch dimension,  and add to counts
@@ -437,7 +458,7 @@ class AliceBob(nn.Module):
 
                 # logs some values
                 if(event_writer is not None):
-                    number_ex_seen = i * batch_size
+                    number_ex_seen = i * batch.size
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                     event_writer.add_scalar('train/success', avg_success, number_ex_seen)
                     event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
@@ -464,13 +485,13 @@ class AliceBob(nn.Module):
                             kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
                             event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
                             past_dist, current_dist = current_dist, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device)
-                    if args.log_entropy:
+                    if log_entropy:
                         new_messages = sender_outcome.action[0].view(-1)
                         valid_indices = torch.arange(base_alphabet_size).expand(new_messages.size(0), base_alphabet_size).to(device)
                         selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
                         symbol_counts += selected_symbols.sum(dim=0)
 
-        if args.log_entropy and (event_writer is not None):
+        if log_entropy and (event_writer is not None):
             event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
 
 
