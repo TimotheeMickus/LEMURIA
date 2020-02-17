@@ -9,7 +9,8 @@ import tqdm
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
-from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
+import utils
+from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise
 
 class AliceBob(nn.Module):
     def __init__(self, args):
@@ -82,11 +83,15 @@ class AliceBob(nn.Module):
 
             idx -= 1 # Because the 0-gram is not taken into account
 
-            assert (ngrams[idx] == () or ngrams[idx] == ngram)
+            assert (ngrams[idx] == () or ngrams[idx] == ngram) # Checks that we are not assigning the same id to two different n-grams
 
             ngrams[idx] = ngram
 
             return idx
+
+        last_symbol = alphabet_size - 1 # Because the alphabet starts with 0
+        last_tuple = tuple([last_symbol] * n)
+        print('Id of %s: %i' % (last_tuple, ngram_to_idx(last_tuple)))
 
         feature_vectors = []
         for message in messages:
@@ -104,17 +109,17 @@ class AliceBob(nn.Module):
             feature_vectors.append(v)
 
         feature_vectors = np.array(feature_vectors)
-
+       
         import sklearn.tree
         import matplotlib.pyplot as plt
         import itertools
 
-        # TODO Pour une utilisation avec max_depth = 1, il y a surement beaucoup plus simple
-
-        results = []
+        results_decision_tree = []
         max_depth = 2 # None # We could successively try with increasing depth
         max_conjunctions = 3 # data_iterator.nb_concepts
         for size_conjunctions in range(1, (max_conjunctions + 1)):
+            results_binary_classifier = []
+
             for concept_indices in itertools.combinations(range(data_iterator.nb_concepts), size_conjunctions): # Iterates over all subsets of [|0, `data_iterator.nb_concepts`|[ of size `size_conjunctions`
                 #print([data_iterator.concept_names[idx] for idx in concept_indices])
 
@@ -137,7 +142,6 @@ class AliceBob(nn.Module):
                     for feature_idx in range(nb_ngrams):
                         if(ngrams[feature_idx] == ()): continue
 
-                        # TODO compute baseline_accuracy
                         ratio = gold.mean()
                         baseline_accuracy = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
 
@@ -147,26 +151,29 @@ class AliceBob(nn.Module):
                         matches = (gold == prediction)
 
                         accuracy = matches.mean()
-                        accuracy = matches.mean()
+                        error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
                         precision = gold[prediction].mean()
                         recall = prediction[gold].mean()
-                        f1 = 2 * precision * recall / (precision + recall)
+                        f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
-                        if(accuracy > 0.9 or f1 > 0.9): print((accuracy, baseline_accuracy, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type))
+                        item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type)
+                        results_binary_classifier.append(item)
 
                         feature_type = 'absence'
-                        prediction ^= True
+                        prediction = (prediction ^ True)
 
                         matches = (gold == prediction)
 
                         accuracy = matches.mean()
+                        error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
                         precision = gold[prediction].mean()
                         recall = prediction[gold].mean()
-                        f1 = 2 * precision * recall / (precision + recall)
+                        f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
-                        if(accuracy > 0.9 or f1 > 0.9): print((accuracy, baseline_accuracy, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type))
+                        item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type)
+                        results_binary_classifier.append(item)
 
 
                     if(True): continue
@@ -193,7 +200,7 @@ class AliceBob(nn.Module):
                         classifier
                     )
 
-                    results.append(item)
+                    results_decision_tree.append(item)
 
                     #if(precision > 0.9):
                     if(item[3] > 2.0):
@@ -204,8 +211,20 @@ class AliceBob(nn.Module):
                         sklearn.tree.plot_tree(classifier, filled=True)
                         plt.show()
 
-        results.sort(reverse=True, key=(lambda e: e[3]))
-        for e in results[:10]:
+            print("\nBest binary classifiers")
+            print("\tby error reduction")
+            results_binary_classifier.sort(reverse=True, key=(lambda e: e[2]))
+            for e in results_binary_classifier[:10]:
+                print(e)
+
+            print("\tby F1")
+            results_binary_classifier.sort(reverse=True, key=(lambda e: e[5]))
+            for e in results_binary_classifier[:10]:
+                print(e)
+
+        print("\nBest decision trees")
+        results_decision_tree.sort(reverse=True, key=(lambda e: e[3]))
+        for e in results_decision_tree[:10]:
             print(e)
 
     def test_visualize(self, data_iterator, learning_rate):
@@ -492,7 +511,7 @@ class AliceBob(nn.Module):
                         symbol_counts += selected_symbols.sum(dim=0)
 
         if log_entropy and (event_writer is not None):
-            event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
+            event_writer.writer.add_scalar('llp/entropy', utils.compute_entropy(symbol_counts), number_ex_seen)
 
 
 
