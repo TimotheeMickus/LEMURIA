@@ -27,12 +27,14 @@ Not found:
  - Focus on What’s Informative and Ignore What’s not: Communication Strategies in a Referential Game. *Study the lexicon by-product of communication games, and suggest to adopt a non-uniform distribution over categories*
  - Avoiding hashing and encouraging visual semantics in referential emergent language games. *Studies factors necessary to encode visual semantics rather than trivial low-level pixel properties*
  - Enhance the Compositionality of Emergent Language by Iterated Learning. *Uses iterated learning to learn communication*
+ - To Populate Is To Regulate. *Advocates in favor of population-based signaling games.*
 
 **Perhaps useful for perspective**
 
  - Biology and Compositionality: Empirical Considerations for Emergent-Communication Protocols. *Discusses studies of compositionality in emergent communication from the perspective of biology*
 
  **Less relevant**
+
  - Learning Autocomplete Systems as a Communication Game. *Treats sentence completion as a communication game*
  - The Emergence of Compositional Languages for Numeric Concepts Through Iterated Learning in Neural Agents. *Specifical focuses on signaling games based on distinct targets composed of similar objects in different quantities*
 
@@ -94,7 +96,24 @@ Not found:
  - Multi-agent Communication by Bi-directional Recurrent Neural Networks.
 
 
-## Older papers
+## Other papers
 
  - Emergence and Artificial Life. [paper](https://www.researchgate.net/publication/4048749_Emergence_and_artificial_life)
-- Synthetic Ethology: An Approach to the Study of Communication.  [paper](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.33.6635)
+ - Synthetic Ethology: An Approach to the Study of Communication.  [paper](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.33.6635)
+ - Mastering emergent language: learning to guide in simulated navigation [paper](https://arxiv.org/abs/1908.05135)
+ - Entropy Minimization In Emergent Languages [paper](https://arxiv.org/abs/1905.13687)
+ - Anti-efficient encoding in emergent communication [paper](https://arxiv.org/abs/1905.12561)
+ - Word-order biases in deep-agent emergent communication [paper](https://arxiv.org/abs/1905.12330)
+ - Miss Tools and Mr Fruit: Emergent communication in agents learning about object affordances [paper](https://arxiv.org/abs/1905.11871)
+ - On Voting Strategies and Emergent Communication [paper](https://arxiv.org/abs/1902.06897)
+ - Emergent Linguistic Phenomena in Multi-Agent Communication Games [paper](https://arxiv.org/abs/1901.08706)
+ - How agents see things: On visual representations in an emergent language game [paper](https://arxiv.org/abs/1808.10696)
+ - Talk the Walk: Navigating New York City through Grounded Dialogue [paper](https://arxiv.org/abs/1807.03367)
+ - Encoding Spatial Relations from Natural Language [paper](https://arxiv.org/abs/1807.01670)
+ - Emergence of Linguistic Communication from Referential Games with Symbolic and Pixel Input [paper](https://arxiv.org/abs/1804.03984)
+ - Exploring Structural Inductive Biases in Emergent Communication [paper](https://arxiv.org/abs/2002.01335)
+ - On the interaction between supervision and self-play in emergent communication [paper](https://arxiv.org/abs/2002.01093)
+ - Biases for Emergent Communication in Multi-agent Reinforcement Learning [paper](https://arxiv.org/abs/1912.05676)
+ - Learning to Request Guidance in Emergent Communication [paper](https://arxiv.org/abs/1912.05525)
+ - Capacity, Bandwidth, and Compositionality in Emergent Language Learning [paper](https://arxiv.org/abs/1910.11424)
+ - Emergence of Writing Systems Through Multi-Agent Cooperation [paper](https://arxiv.org/abs/1910.00741)
