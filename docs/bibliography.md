@@ -9,9 +9,7 @@
 
 [website](https://sites.google.com/view/emecom2019/home). Most accepted papers are available directly [from this link](https://sites.google.com/view/emecom2019/accepted-papers).
 
- - Biology and Compositionality: Empirical Considerations for Emergent-Communication Protocols. *Discusses studies of compositionality in emergent communication from the perspective of biology*
- - Playing log(N)-Questions over Sentences. *Variation on emergent communication games based on question answering*
- - Enhancing Communication Learning through Empathic Prediction. *Augment an emergent communication task with an auxiliary predictive task, consisting in predicting the other player's hidden state*
+
 
 Missing papers link:
 
@@ -21,6 +19,22 @@ Missing papers link:
 Not found:
 
  - Unnatural Language Processing: Bridging the Gap Between Synthetic and Natural Language Data. [paper](https://alanamarzoev.github.io/pdfs/unnatural_language.pdf)
+
+**Useful/ relevant papers**
+
+ - Playing log(N)-Questions over Sentences. *Variation on emergent communication games based on question answering*
+ - Enhancing Communication Learning through Empathic Prediction. *Augment an emergent communication task with an auxiliary predictive task, consisting in predicting the other player's hidden state*
+ - Focus on What’s Informative and Ignore What’s not: Communication Strategies in a Referential Game. *Study the lexicon by-product of communication games, and suggest to adopt a non-uniform distribution over categories*
+ - Avoiding hashing and encouraging visual semantics in referential emergent language games. *Studies factors necessary to encode visual semantics rather than trivial low-level pixel properties*
+ - Enhance the Compositionality of Emergent Language by Iterated Learning. *Uses iterated learning to learn communication*
+
+**Perhaps useful for perspective**
+
+ - Biology and Compositionality: Empirical Considerations for Emergent-Communication Protocols. *Discusses studies of compositionality in emergent communication from the perspective of biology*
+
+ **Less relevant**
+ - Learning Autocomplete Systems as a Communication Game. *Treats sentence completion as a communication game*
+ - The Emergence of Compositional Languages for Numeric Concepts Through Iterated Learning in Neural Agents. *Specifical focuses on signaling games based on distinct targets composed of similar objects in different quantities*
 
 ## EmeCom18
 
@@ -58,7 +72,7 @@ Not found:
 **Useful/ relevant papers**
 
  - Natural Language Does Not Emerge 'Naturally' in Multi-Agent Dialog. [paper](https://arxiv.org/abs/1706.08502)
- - Emergence of Language with Multi-agent Games: Learning to Communicate with Sequences of Symbols. [paper](https://arxiv.org/abs/1705.11192)
+ - Emergence of Language with Multi-agent Games: Learning to Communicate with Sequences of Symbols. [paper](https://arxiv.org/abs/1705.11192) *Original paper on discrete sequential message exchange in emergent communication.*
  - Emergent Communication through Negotiation. [paper](https://arxiv.org/abs/1804.03980)
  - Analyzing Language Learned by an Active Question Answering Agent. [paper](https://arxiv.org/abs/1801.07537)
  - Multi-Agent Compositional Communication Learning from Raw Visual Input. [paper](https://www.semanticscholar.org/paper/Multi-Agent-Compositional-Communication-Learning-Choi-Lazaridou/08bbcf6f753a4889f57cede3b0bdedb56024cc03), [more recent version](https://openreview.net/forum?id=rknt2Be0-)
