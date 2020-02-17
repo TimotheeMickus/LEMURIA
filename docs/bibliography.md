@@ -5,9 +5,13 @@
     colorlinks: true
 ...
 
-## EmeCom19 
+## EmeCom19
 
 [website](https://sites.google.com/view/emecom2019/home). Most accepted papers are available directly [from this link](https://sites.google.com/view/emecom2019/accepted-papers).
+
+ - Biology and Compositionality: Empirical Considerations for Emergent-Communication Protocols. *Discusses studies of compositionality in emergent communication from the perspective of biology*
+ - Playing log(N)-Questions over Sentences. *Variation on emergent communication games based on question answering*
+ - Enhancing Communication Learning through Empathic Prediction. *Augment an emergent communication task with an auxiliary predictive task, consisting in predicting the other player's hidden state*
 
 Missing papers link:
 
@@ -79,4 +83,4 @@ Not found:
 ## Older papers
 
  - Emergence and Artificial Life. [paper](https://www.researchgate.net/publication/4048749_Emergence_and_artificial_life)
-
+- Synthetic Ethology: An Approach to the Study of Communication.  [paper](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.33.6635)
