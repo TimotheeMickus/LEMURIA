@@ -448,7 +448,7 @@ class AliceBob(nn.Module):
                 running_avg_success = total_success / total_items
 
                 if log_lang_progress:
-                    batch_msg_manyhot = torch.zeros((batch.size, base_alphabet_size + 2), dtype=torch.float).to(self.sender.device) # size of embeddings + EOS + PAD
+                    batch_msg_manyhot = torch.zeros((batch.size, base_alphabet_size + 2), dtype=torch.float).to(device) # size of embeddings + EOS + PAD
                     # message -> many-hot
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,base_alphabet_size).float()
                     # summation along batch dimension,  and add to counts
