@@ -139,6 +139,7 @@ class AliceBob(nn.Module):
 
                     # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
                     gold = in_class_aux(data_iterator.dataset)
+                    # TODO I display rules that are interesting, but highly redundant. If (7, 8) means (up, left), then it is obvious that it also means (up), (left), NOT (right, cube), etc., or that (7, 7, 8) means (up, left) too.
                     for feature_idx in range(nb_ngrams):
                         if(ngrams[feature_idx] == ()): continue
 
@@ -153,8 +154,9 @@ class AliceBob(nn.Module):
                         accuracy = matches.mean()
                         error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
-                        precision = gold[prediction].mean()
-                        recall = prediction[gold].mean()
+                        precision = gold[prediction].mean() # 1 means that the symbol entails the property
+                        if(precision > 0.95 and (prediction.sum() > 0.05 *  prediction.size)): print('%s means %s (%f)' % (ngrams[feature_idx], conjunction, precision))
+                        recall = prediction[gold].mean() # 1 means that the property entails the symbol / the absence of the symbol entails the negation of the property
                         f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
                         item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type)
@@ -168,8 +170,9 @@ class AliceBob(nn.Module):
                         accuracy = matches.mean()
                         error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
-                        precision = gold[prediction].mean()
-                        recall = prediction[gold].mean()
+                        precision = gold[prediction].mean() # 1 means that the negation of the property entails the symbol / the absence of the symbol entails the property
+                        recall = prediction[gold].mean() # 1 means that the symbol entails the negation of the property
+                        #if(recall > 0.95 and (prediction.sum() < (1 - 0.1) * prediction.size)): print('%s means NOT %s (%f)' % (ngrams[feature_idx], conjunction, recall))
                         f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
                         item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type)
