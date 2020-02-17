@@ -9,17 +9,6 @@
 
 [website](https://sites.google.com/view/emecom2019/home). Most accepted papers are available directly [from this link](https://sites.google.com/view/emecom2019/accepted-papers).
 
-
-
-Missing papers link:
-
- - The Emergence of Compositional Languages for Numeric Concepts Through Iterated Learning in Neural Agents. [paper](https://arxiv.org/abs/1910.05291)
- - On Emergent Communication in Competitive Multi-Agent Teams. [paper](https://www.semanticscholar.org/paper/On-Emergent-Communication-in-Competitive-Teams-Liang-Chen/e1d308595eaa253574cda03e7f5fdcff38abb42e)
-
-Not found:
-
- - Unnatural Language Processing: Bridging the Gap Between Synthetic and Natural Language Data. [paper](https://alanamarzoev.github.io/pdfs/unnatural_language.pdf)
-
 **Useful/ relevant papers**
 
  - Playing log(N)-Questions over Sentences. *Variation on emergent communication games based on question answering*
@@ -28,6 +17,10 @@ Not found:
  - Avoiding hashing and encouraging visual semantics in referential emergent language games. *Studies factors necessary to encode visual semantics rather than trivial low-level pixel properties*
  - Enhance the Compositionality of Emergent Language by Iterated Learning. *Uses iterated learning to learn communication*
  - To Populate Is To Regulate. *Advocates in favor of population-based signaling games.*
+ - On Emergent Communication in Competitive Multi-Agent Teams. [paper](https://www.semanticscholar.org/paper/On-Emergent-Communication-in-Competitive-Teams-Liang-Chen/e1d308595eaa253574cda03e7f5fdcff38abb42e). *Advocates in favor of competition as an environmental pressure for learning composition*
+ - Emergence of Pragmatics from Referential Game between Theory of Mind Agents. *Linguistically informed design*
+ - Developmentally motivated emergence of compositional communication via template transfer. *Pretraining of communication protocols*
+
 
 **Perhaps useful for perspective**
 
@@ -36,7 +29,16 @@ Not found:
  **Less relevant**
 
  - Learning Autocomplete Systems as a Communication Game. *Treats sentence completion as a communication game*
- - The Emergence of Compositional Languages for Numeric Concepts Through Iterated Learning in Neural Agents. *Specifical focuses on signaling games based on distinct targets composed of similar objects in different quantities*
+ - The Emergence of Compositional Languages for Numeric Concepts Through Iterated Learning in Neural Agents. [paper](https://arxiv.org/abs/1910.05291). *Specifical focuses on signaling games based on distinct targets composed of similar objects in different quantities*
+ - Unnatural Language Processing: Bridging the Gap Between Synthetic and Natural Language Data. [paper](https://alanamarzoev.github.io/pdfs/unnatural_language.pdf). *Studies synthetic data*
+ - EGG: a toolkit for research on Emergence of lanGuage in Games. *Toolkit.*
+ - Improving Policies via Search in Cooperative Partially Observable Games. *Game RL*
+ - Emergent Communication with World Models. *Mostly about language modeling in RL settings.*
+
+
+**404 paper not found**
+
+ - Embodied Multi-Agent Learning in Minecraft.
 
 ## EmeCom18
 
@@ -95,7 +97,6 @@ Not found:
 
  - Multi-agent Communication by Bi-directional Recurrent Neural Networks.
 
-
 ## Other papers
 
  - Emergence and Artificial Life. [paper](https://www.researchgate.net/publication/4048749_Emergence_and_artificial_life)
@@ -110,7 +111,7 @@ Not found:
  - How agents see things: On visual representations in an emergent language game [paper](https://arxiv.org/abs/1808.10696)
  - Talk the Walk: Navigating New York City through Grounded Dialogue [paper](https://arxiv.org/abs/1807.03367)
  - Encoding Spatial Relations from Natural Language [paper](https://arxiv.org/abs/1807.01670)
- - Emergence of Linguistic Communication from Referential Games with Symbolic and Pixel Input [paper](https://arxiv.org/abs/1804.03984)
+ - Emergence of Linguistic Communication from Referential Games with Symbolic and Pixel Input [paper](https://arxiv.org/abs/1804.03984) *Well, duh.*
  - Exploring Structural Inductive Biases in Emergent Communication [paper](https://arxiv.org/abs/2002.01335)
  - On the interaction between supervision and self-play in emergent communication [paper](https://arxiv.org/abs/2002.01093)
  - Biases for Emergent Communication in Multi-agent Reinforcement Learning [paper](https://arxiv.org/abs/1912.05676)
