@@ -13,7 +13,7 @@
 
  - Playing log(N)-Questions over Sentences. *Variation on emergent communication games based on question answering*
  - Enhancing Communication Learning through Empathic Prediction. *Augment an emergent communication task with an auxiliary predictive task, consisting in predicting the other player's hidden state*
- - Focus on What’s Informative and Ignore What’s not: Communication Strategies in a Referential Game. *Study the lexicon by-product of communication games, and suggest to adopt a non-uniform distribution over categories*
+ - Focus on What’s Informative and Ignore What’s not: Communication Strategies in a Referential Game. *Study the lexicon by-product of communication games, and suggest to adopt a non-uniform distribution over categories. Use of interesting metrics (mutual information) to mesure the *
  - Avoiding hashing and encouraging visual semantics in referential emergent language games. *Studies factors necessary to encode visual semantics rather than trivial low-level pixel properties*
  - Enhance the Compositionality of Emergent Language by Iterated Learning. *Uses iterated learning to learn communication*
  - To Populate Is To Regulate. *Advocates in favor of population-based signaling games.*
@@ -75,8 +75,9 @@
 
 **Useful/ relevant papers**
 
- - Natural Language Does Not Emerge 'Naturally' in Multi-Agent Dialog. [paper](https://arxiv.org/abs/1706.08502)
- - Emergence of Language with Multi-agent Games: Learning to Communicate with Sequences of Symbols. [paper](https://arxiv.org/abs/1705.11192) *Original paper on discrete sequential message exchange in emergent communication.*
+ - Natural Language Does Not Emerge 'Naturally' in Multi-Agent Dialog. [paper](https://arxiv.org/abs/1706.08502) *Addresses the evaluation of compositionality and groundedness in agent-generated languages. No multi-symbol production*
+ - Multi-Agent Cooperation and the Emergence of (Natural) Language [paper](https://arxiv.org/abs/1612.07182) *Referential game with single-symbol messages*
+ - Emergence of Language with Multi-agent Games: Learning to Communicate with Sequences of Symbols. [paper](https://arxiv.org/abs/1705.11192) *Original paper on discrete sequential message exchange in emergent communication. Work conducted on real images (MSCOCO), suggests that Gumbel-softmax is better than RL for this task*
  - Emergent Communication through Negotiation. [paper](https://arxiv.org/abs/1804.03980)
  - Analyzing Language Learned by an Active Question Answering Agent. [paper](https://arxiv.org/abs/1801.07537)
  - Multi-Agent Compositional Communication Learning from Raw Visual Input. [paper](https://www.semanticscholar.org/paper/Multi-Agent-Compositional-Communication-Learning-Choi-Lazaridou/08bbcf6f753a4889f57cede3b0bdedb56024cc03), [more recent version](https://openreview.net/forum?id=rknt2Be0-)
@@ -118,3 +119,6 @@
  - Learning to Request Guidance in Emergent Communication [paper](https://arxiv.org/abs/1912.05525)
  - Capacity, Bandwidth, and Compositionality in Emergent Language Learning [paper](https://arxiv.org/abs/1910.11424)
  - Emergence of Writing Systems Through Multi-Agent Cooperation [paper](https://arxiv.org/abs/1910.00741)
+ - Learning to Communicate with Deep Multi-Agent Reinforcement Learning [paper](https://arxiv.org/abs/1605.06676)
+ - Compositional Obverter Communication Learning from Raw Visual Input [paper](https://openreview.net/forum?id=rknt2Be0-) *Manual analysis of the grammar of generated productions*
+ - Emergence of Grounded Compositional Language in Multi-Agent Populations [paper](https://www.semanticscholar.org/paper/Emergence-of-Grounded-Compositional-Language-in-Mordatch-Abbeel/5d2f5c2dc11c18c0d45203e2b980fe375a56d774) *Worth noting. fairly complex setup, where agents have different goals, and language is one way (though not the only way) to transmit information to other agent and achieve said goals. Each agent only emits one symbol per timestep, but multiple timesteps per episode allow for compositional grounded language to emerge*
