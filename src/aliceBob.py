@@ -443,10 +443,52 @@ class AliceBob(nn.Module):
         else:
             raise TypeError
 
-    def evaluate(self, data_loader, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
-        confusion_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
-        np.fill_diagonal(confusion_matrix, -np.inf)
-        confusion_matrix += 1 # Smoothing 
+    def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
+        self.eval()
+        
+        counts_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
+        failure_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
+
+        batch_size = 512
+        nb_batch = int(np.ceil(len(data_iterator) / batch_size))
+        for _ in range(nb_batch):
+            with torch.no_grad():
+                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=('different')) # We use all categories and use only one distractor from a different category 
+
+                # TODO In fact, we need the image categories too and we need to index them
+            
+                sender_outcome, receiver_outcome = self(batch)
+        
+                receiver_pointing = pointing(receiver_scores)
+                failure = receiver_pointing['dist'].probs[:, 1]
+
+                counts_matrix[target_category, distractor_category] += 1
+                failure_matrix[target_category, distractor_category] += failure
+
+        # Computes the accuracy when the target is selected from any category
+        accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
+        print('Accuracy: %s' % accuracy_all)
+
+        # Computes the acuracy when the target is selected from an evaluation category (never seen during training)
+        failure_matrix_eval_t = failure_matrix[eval_categories, :]
+        counts_matrix_eval_t = counts_matrix[eval_categories, :]
+        accuracy_eval_t = 1 - (failure_matrix_eval_t.sum() / counts_matrix_eval_t.sum())
+        print('Accuracy eval-t: %s' % accuracy_eval_t)
+
+        # Computes the acuracy when the distractor is selected from an evaluation category (never seen during training)
+        failure_matrix_eval_d = failure_matrix[:, eval_categories]
+        counts_matrix_eval_d = counts_matrix[:, eval_categories]
+        accuracy_eval_d = 1 - (failure_matrix_eval_d.sum() / counts_matrix_eval_d.sum())
+        print('Accuracy eval-d %s' % accuracy_eval_d)
+
+        # Smoothing
+        counts_matrix += 2
+        failure_matrix += 1.0
+        np.fill_diagonal(failure_matrix, 0) # Except on the diagonal
+
+        failure_matrix /= counts_matrix # 
+
+        score_matrix = np.ln(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
     
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
@@ -557,8 +599,5 @@ class AliceBob(nn.Module):
 
         if log_entropy and (event_writer is not None):
             event_writer.writer.add_scalar('llp/entropy', utils.compute_entropy(symbol_counts), number_ex_seen)
-
-
-
 
         self.eval()
