@@ -6,6 +6,8 @@ from torch.distributions.categorical import Categorical
 
 import tqdm
 
+from collections import defaultdict
+
 from sender import Sender
 from receiver import Receiver
 from senderReceiver import SenderReceiver
@@ -109,7 +111,11 @@ class AliceBob(nn.Module):
             feature_vectors.append(v)
 
         feature_vectors = np.array(feature_vectors)
-       
+      
+        rule_precision_threshold = 0.95
+        rule_frequence_threshold = 0.05
+        rules = defaultdict(list) # From ngram to list of RHS·s (to be conjuncted)
+
         import sklearn.tree
         import matplotlib.pyplot as plt
         import itertools
@@ -139,9 +145,11 @@ class AliceBob(nn.Module):
 
                     # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
                     gold = in_class_aux(data_iterator.dataset)
-                    # TODO I display rules that are interesting, but highly redundant. If (7, 8) means (up, left), then it is obvious that it also means (up), (left), NOT (right, cube), etc., or that (7, 7, 8) means (up, left) too.
                     for feature_idx in range(nb_ngrams):
-                        if(ngrams[feature_idx] == ()): continue
+                        ngram = ngrams[feature_idx]
+                        
+                        if(ngram == ()): continue
+                        
 
                         ratio = gold.mean()
                         baseline_accuracy = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
@@ -155,11 +163,13 @@ class AliceBob(nn.Module):
                         error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
                         precision = gold[prediction].mean() # 1 means that the symbol entails the property
-                        if(precision > 0.95 and (prediction.sum() > 0.05 *  prediction.size)): print('%s means %s (%f)' % (ngrams[feature_idx], conjunction, precision))
-                        recall = prediction[gold].mean() # 1 means that the property entails the symbol / the absence of the symbol entails the negation of the property
+                        if((precision > rule_precision_threshold) and (prediction.sum() > rule_frequence_threshold * prediction.size)):
+                            rules[ngram].append((set(conjunction), precision))
+                            #print('%s means %s (%f)' % (ngram, conjunction, precision))
+                        recall = prediction[gold].mean() # 1 means that the property entails the symbol
                         f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
-                        item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type)
+                        item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngram, feature_type)
                         results_binary_classifier.append(item)
 
                         feature_type = 'absence'
@@ -170,12 +180,14 @@ class AliceBob(nn.Module):
                         accuracy = matches.mean()
                         error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
-                        precision = gold[prediction].mean() # 1 means that the negation of the property entails the symbol / the absence of the symbol entails the property
-                        recall = prediction[gold].mean() # 1 means that the symbol entails the negation of the property
-                        #if(recall > 0.95 and (prediction.sum() < (1 - 0.1) * prediction.size)): print('%s means NOT %s (%f)' % (ngrams[feature_idx], conjunction, recall))
+                        precision = gold[prediction].mean() # 1 means that the absence of the symbol entails the property
+                        if((precision > rule_precision_threshold) and (prediction.sum() > rule_frequence_threshold * prediction.size)):
+                            rules[('NOT', ngram)].append((set(conjunction), precision))
+                            #print('NOT %s means %s (%f)' % (ngram, conjunction, precision))
+                        recall = prediction[gold].mean() # 1 means that the property entails the absence of the symbol
                         f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
-                        item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngrams[feature_idx], feature_type)
+                        item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngram, feature_type)
                         results_binary_classifier.append(item)
 
 
@@ -224,6 +236,12 @@ class AliceBob(nn.Module):
             results_binary_classifier.sort(reverse=True, key=(lambda e: e[5]))
             for e in results_binary_classifier[:10]:
                 print(e)
+
+        # TODO Remove redundant rules (i.e., if X => Y, than X ^ X' => Y)
+        for ngram, l in rules.items():
+            lhs = ngram # In fact it could be ('NOT', ngram)
+            rhs = set.union(*[e[0] for e in l])
+            print('%s => %s' % (lhs, rhs))
 
         print("\nBest decision trees")
         results_decision_tree.sort(reverse=True, key=(lambda e: e[3]))
