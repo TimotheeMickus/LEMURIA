@@ -181,7 +181,7 @@ class AliceBob(nn.Module):
                         error_reduction = (1 - baseline_accuracy) / (1 - accuracy)
 
                         precision = gold[prediction].mean() # 1 means that the absence of the symbol entails the property
-                        if((precision > rule_precision_threshold) and (prediction.sum() > rule_frequence_threshold * prediction.size)):
+                        if((precision > rule_precision_threshold) and (prediction.sum() < (1 - rule_frequence_threshold) * prediction.size)):
                             rules[('NOT', ngram)].append((set(conjunction), precision))
                             #print('NOT %s means %s (%f)' % (ngram, conjunction, precision))
                         recall = prediction[gold].mean() # 1 means that the property entails the absence of the symbol
@@ -237,11 +237,29 @@ class AliceBob(nn.Module):
             for e in results_binary_classifier[:10]:
                 print(e)
 
-        # TODO Remove redundant rules (i.e., if X => Y, than X ^ X' => Y)
+        clean_rules = []
         for ngram, l in rules.items():
             lhs = ngram # In fact it could be ('NOT', ngram)
             rhs = set.union(*[e[0] for e in l])
-            print('%s => %s' % (lhs, rhs))
+            clean_rules.append((lhs, rhs))
+
+        # Removes redundant rules (i.e., if (x1, …, xn) => Y, then (x1, …, x{n+1}) => Y)
+        # Does currently nothing for negative rules (whereas if NOT(x1, …, x{n+1}) => Y, then NOT(x1, …, xn) => Y)
+        for lhs, rhs in clean_rules:
+            ok = True
+            for lhs2, rhs2 in clean_rules:
+                if(lhs == lhs2): continue
+                if(rhs != rhs2): continue
+                
+                # Checks whether lhs2 is a subpart of lhs
+                for i in range(1 + len(lhs) - len(lhs2)):
+                    if(lhs[i:(i + len(lhs2))] == lhs2):
+                        ok = False
+                        break
+
+                if(not ok): break
+
+            if(ok or lhs[0] == 'NOT'): print('%s => %s' % (lhs, rhs))
 
         print("\nBest decision trees")
         results_decision_tree.sort(reverse=True, key=(lambda e: e[3]))
