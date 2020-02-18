@@ -443,6 +443,12 @@ class AliceBob(nn.Module):
         else:
             raise TypeError
 
+    def evaluate(self, data_loader, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
+        confusion_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
+        np.fill_diagonal(confusion_matrix, -np.inf)
+        confusion_matrix += 1 # Smoothing 
+    
+    # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
         """
             Model training function
