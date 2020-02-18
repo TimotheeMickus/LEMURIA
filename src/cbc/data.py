@@ -42,6 +42,9 @@ class DistinctTargetClassDataLoader():
     concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
     nb_concepts = len(_concepts)
 
+    def __len__(self):
+        return len(self.dataset)
+
     def __init__(self, same_img=False, evaluation_categories=None, data_set=args.data_set, simple_display=args.simple_display):
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
@@ -148,7 +151,16 @@ class DistinctTargetClassDataLoader():
         #distance = np.random.randint(self.nb_concepts) + 1
         #return self._distance_to_category(category, distance)
 
-    def get_batch(self, size, no_evaluation=True, target_evaluation=False, noise=args.noise, device=args.device, batch_size=args.batch_size):
+    def sample_category(self, sampling_strategy, category, no_evaluation):
+        if(sampling_strategy == 'hamming1'):
+            return self._distance_to_category(category, 1, no_evaluation)
+
+        if(sampling_strategy == 'different'):
+            return self._different_category(category, no_evaluation)
+
+        assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
+
+    def get_batch(self, size, sampling_strategies=('hamming1', 'different'), no_evaluation=True, target_evaluation=False, noise=args.noise, device=args.device):
         """Generates a batch as a Batch object.
         'original_img', 'target_img' and 'base_distractors' are all tensors of outer dimension of size `size`.
         If 'no_evaluation' is True, none of the image is from an evaluation category.
@@ -167,10 +179,12 @@ class DistinctTargetClassDataLoader():
             _original_img = np.random.choice(self.categories[target_category])
             #_original_img = np.random.choice(self.dataset)
             _target_img = _original_img if(self.same_img) else np.random.choice(self.categories[_original_img.category]) # same category
-            distractor_1 = np.random.choice(self.categories[self._distance_to_category(_original_img.category, 1, no_evaluation)]) # neighbouring category
-            distractor_2 = np.random.choice(self.categories[self._different_category(_original_img.category, no_evaluation)]) # different category
 
-            _base_distractors = [distractor_1, distractor_2]
+            _base_distractors = []
+            for sampling_strategy in sampling_strategies:
+                distractor_category = self.sample_category(sampling_strategy, _original_img.category, no_evaluation)
+                _base_distractors.append(np.random.choice(self.categories[distractor_category]))
+
             batch.append((_original_img.img, _target_img.img, torch.stack([x.img for x in _base_distractors]), torch.IntTensor(_original_img.category)))
 
         original_img, target_img, base_distractors, categories = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
@@ -181,12 +195,12 @@ class DistinctTargetClassDataLoader():
             target_img = add_normal_noise(target_img, std_dev=noise, clamp_values=(0.0, 1.0))
             base_distractors = add_normal_noise(base_distractors, std_dev=noise, clamp_values=(0.0, 1.0))
 
-        return Batch(size=batch_size, original_img=original_img.to(device), target_img=target_img.to(device), base_distractors=base_distractors.to(device), original_category=categories)
+        return Batch(size=size, original_img=original_img.to(device), target_img=target_img.to(device), base_distractors=base_distractors.to(device), original_category=categories)
 
-    def __iter__(self, batch=args.batch_size):
+    def __iter__(self, size=args.batch_size):
         """Iterates over batches of size `args.batch_size`"""
         while True:
-            yield self.get_batch(batch)
+            yield self.get_batch(size)
 
 def get_data_loader(same_img=False):
     return DistinctTargetClassDataLoader(same_img)
