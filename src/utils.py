@@ -21,7 +21,7 @@ class Vocabulary:
     def __len__(self):
         return len(self.entries)
 
-    def contains(self, x):
+    def __contains__(self, x):
         return (x in self.entry_ids)
 
     # Returns a pair composed of a boolean indicating whether a new entry was just created and the index of the entry
@@ -40,8 +40,8 @@ class Vocabulary:
 
         return (False, idx)
 
-    def getId(self, x):
-        return self.entry_ids.get(x, None)
+    def getId(self, x, default=None):
+        return self.entry_ids.get(x, default)
 
     def __getitem__(self, idx):
         return self.entries[idx]
