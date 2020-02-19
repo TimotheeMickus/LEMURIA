@@ -11,7 +11,7 @@ from collections import defaultdict
 from deprecated import deprecated
 
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.misc import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
+from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, log_grads_tensorboard, build_optimizer
 
 from .game import Game
 
@@ -38,18 +38,33 @@ class AliceBob(Game):
         self.penalty = args.penalty
         self.adaptative_penalty = args.adaptative_penalty
 
+        self.optim = build_optimizer(self.parameters(), args.learning_rate)
+
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
 
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
-    def _forward(self, batch, *agents):
+    def compute_interaction(self, batches, *agents, **state_info):
+        batch = batches[0]
         sender, receiver = agents
         sender_outcome = sender(self._alice_input(batch))
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
-        return sender_outcome, receiver_outcome
+        # Alice's part
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, state_info['running_avg_success'])
+
+        # Bob's part
+        receiver_loss = self.compute_receiver_loss(receiver_outcome.scores)
+
+        loss = sender_loss + receiver_loss
+
+        rewards, successes = sender_rewards, sender_successes
+        avg_msg_length = sender_outcome.action[1].float().mean().item()
+        losses = (loss,)
+
+        return rewards, successes, avg_msg_length, losses
 
     def forward(self, batch):
         """
@@ -506,120 +521,14 @@ class AliceBob(Game):
         #print(score_matrix)
         data_iterator.difficulty_scores = score_matrix
 
-    # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
-        """
-            Model training function
-            Input:
-                `data_iterator`, an infinite iterator over (batched) data
-                `optim`, the optimizer
-            Optional arguments:
-                `epoch`: epoch number to display in progressbar
-                `steps_per_epoch`: number of steps for epoch
-                `event_writer`: tensorboard writer to log evolution of values
-        """
-        self.train() # Sets the model in training mode
+    @property
+    def num_batches_per_episode(self):
+        return 1
 
-        with Progress(simple_display, steps_per_epoch, epoch) as pbar:
-            total_reward = 0.0 # sum of the rewards since the beginning of the epoch
-            total_success = 0.0 # sum of the successes since the beginning of the epoch
-            total_items = 0 # number of training instances since the beginning of the epoch
-            running_avg_reward = 0.0
-            running_avg_success = 0.0
-            start_i = (epoch * steps_per_epoch)
-            end_i = start_i + steps_per_epoch
-            device = next(self.parameters()).device
-            past_dist, current_dist = None, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings # TODO What do these variable mean?
-
-            if event_writer is not None and log_entropy:
-                symbol_counts = torch.zeros(self.base_alphabet_size, dtype=torch.float).to(device)
-
-            for i in range(start_i, end_i):
-                batch = data_iterator.get_batch(keep_category=log_lang_progress)
-
-                optim.zero_grad()
-                sender_outcome, receiver_outcome = self(batch)
-
-                # Alice's part
-                (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, running_avg_success)
-
-                # Bob's part
-                receiver_loss = self.compute_receiver_loss(receiver_outcome.scores)
-
-                loss = sender_loss + receiver_loss
-
-                loss.backward() # Backpropagation
-
-                # Gradient clipping and scaling
-                if(self.grad_clipping > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
-                if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
-
-                optim.step()
-
-                rewards = sender_rewards
-                successes = sender_successes
-
-                avg_reward = rewards.mean().item() # average reward of the batch
-                avg_success = successes.mean().item() # average success of the batch
-                avg_msg_length = sender_outcome.action[1].float().mean().item() # average message length of the batch
-
-                # updates running average reward
-                total_reward += rewards.sum().item()
-                total_success += successes.sum().item()
-                total_items += batch.size
-                running_avg_reward = total_reward / total_items
-                running_avg_success = total_success / total_items
-
-                if log_lang_progress: # TODO À quoi sert cette section ?
-                    batch_msg_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(device) # Bag of words (i.e., symbols) count vectors, here initialized with 0·s
-                    # message -> many-hot TODO What?
-                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,self.base_alphabet_size).float()
-
-                    target_category = torch.stack([torch.tensor(x.category) for x in batch.original])
-                    # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
-                    current_dist += torch.einsum('bi,bj->ij', many_hots, target_category.float().to(device)).detach().float()
-
-                pbar.update(R=running_avg_success)
-
-                # Logs some values
-                if(event_writer is not None):
-                    number_ex_seen = i * batch.size
-                    event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
-                    event_writer.add_scalar('train/success', avg_success, number_ex_seen)
-                    event_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
-                    event_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
-                    if debug:
-                        median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
-                        mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
-                        max_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().max().item()
-                        mean_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).mean().item()
-                        max_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).max().item()
-                        event_writer.add_scalar('grad/median_grad', median_grad, number_ex_seen)
-                        event_writer.add_scalar('grad/mean_grad', mean_grad, number_ex_seen)
-                        event_writer.add_scalar('grad/max_grad', max_grad, number_ex_seen)
-                        event_writer.add_scalar('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
-                        event_writer.add_scalar('grad/max_norm_grad', max_norm_grad, number_ex_seen)
-
-                    if log_lang_progress and i%100 == 0:
-                        if past_dist is None:
-                            past_dist, current_dist = current_dist, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device)
-                            continue
-                        else:
-                            logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
-                            prev_p = (past_dist.view(1, -1) / past_dist.sum())
-                            kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
-                            event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
-                            past_dist, current_dist = current_dist, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device)
-                    if log_entropy:
-                        new_messages = sender_outcome.action[0].view(-1)
-                        valid_indices = torch.arange(self.base_alphabet_size).expand(new_messages.size(0), self.base_alphabet_size).to(device)
-                        selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
-                        symbol_counts += selected_symbols.sum(dim=0)
-
-        if log_entropy and (event_writer is not None):
-            event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
-
-        self.eval()
-
-    def get_agents(self):
+    @property
+    def agents(self):
         return self.sender, self.receiver
+
+    @property
+    def optims(self):
+        return self.optim,

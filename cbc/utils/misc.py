@@ -110,14 +110,14 @@ class Progress:
 
         return self
 
-    def update(self, **logged_items):
+    def update(self, num_batches_per_episode, **logged_items):
         if(self.simple_display):
             postfix = " ".join(("%s: %f" % (k, logged_items[k])) for k in sorted(logged_items))
             print(('%i/%i - %s' % (self.i, self.steps_per_epoch, postfix)), flush=True)
-            self.i += 1
+            self.i += num_batches_per_episode
         else:
             self.pbar.set_postfix(logged_items, refresh=False)
-            self.pbar.update()
+            self.pbar.update(num_batches_per_episode)
 
     def __exit__(self, type, value, traceback):
         if(not self.simple_display): self.pbar.close()
@@ -175,3 +175,24 @@ def build_optimizer(θ, learning_rate):
         `θ`, the model parameters
     """
     return optim.RMSprop(θ, lr=learning_rate)
+
+def log_grads_tensorboard(parameter_list, event_writer):
+    """
+    Log gradient evolution
+    Input:
+        `parameter_list`, the model parameters
+        `event_writer`, the tensorboard summary
+    """
+    raw_grad = torch.cat([p.grad.view(-1).detach() for p in parameters])
+    median_grad = raw_grad.abs().median().item()
+    mean_grad = raw_grad.abs().mean().item()
+    max_grad = raw_grad.abs().max().item()
+
+    norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in parameters])
+    mean_norm_grad = norm_grad.mean().item()
+    max_norm_grad = norm_grad.max().item()
+    event_writer.add_scalar('grad/median_grad', median_grad, number_ex_seen)
+    event_writer.add_scalar('grad/mean_grad', mean_grad, number_ex_seen)
+    event_writer.add_scalar('grad/max_grad', max_grad, number_ex_seen)
+    event_writer.add_scalar('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
+    event_writer.add_scalar('grad/max_norm_grad', max_norm_grad, number_ex_seen)

@@ -37,6 +37,8 @@ class AliceBobPopulation(AliceBob):
         self.penalty = args.penalty
         self.adaptative_penalty = args.adaptative_penalty
 
+        self._sender, self._receiver = None, None
+
     def to(self, *vargs, **kwargs):
         self = super().to(*vargs, **kwargs)
 
@@ -56,10 +58,18 @@ class AliceBobPopulation(AliceBob):
             `receiver_outcome`, receiver.Outcome
         """
 
-        sender = random.choice(self.senders)
-        receiver = random.choice(self.receivers)
+
 
         return self.compute_interaction(batch, sender, receiver)
 
-    def get_agents(self):
-        return self.sender, self.receiver
+    def start_episode(self):
+        self._sender = random.choice(self.senders)
+        self._receiver = random.choice(self.receivers)
+
+    @property
+    def agents(self):
+        return self._sender, self._receiver
+
+    @property
+    def num_batches_per_episode(self):
+        return 1

@@ -11,16 +11,9 @@ import tqdm
 
 from .utils.data import get_data_loader
 from .utils.opts import get_args
-
-# [START] Imports shared code from the parent directory
-#parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
-#sys.path.append(parent_dir_path)
-
 from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
 from .utils.misc import build_optimizer, AverageSummaryWriter
 
-#sys.path.remove(parent_dir_path)
-# [END] Imports shared code from the parent directory
 
 def train(args):
     if(not os.path.isdir(args.data_set)):

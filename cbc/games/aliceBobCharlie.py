@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
-from ..utils.misc import show_imgs, max_normalize_, to_color, Progress
+from ..utils.misc import show_imgs, max_normalize_, to_color, Progress, log_grads_tensorboard
 
 class AliceBobCharlie(Game):
     def __init__(self, args):
@@ -207,18 +207,7 @@ class AliceBobCharlie(Game):
                     event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
                     event_writer.add_scalar('train/charlie_acc', charlie_acc.item(), number_ex_seen)
                     if debug:
-                        median_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().median().item()
-                        mean_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().mean().item()
-                        #min_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().min().item()
-                        max_grad = torch.cat([p.grad.view(-1).detach() for p in self.parameters()]).abs().max().item()
-                        mean_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).mean().item()
-                        max_norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in self.parameters()]).max().item()
-                        event_writer.add_scalar('train/median_grad', median_grad, number_ex_seen)
-                        event_writer.add_scalar('train/mean_grad', mean_grad, number_ex_seen)
-                        #event_writer.add_scalar('train/min_grad', min_grad, number_ex_seen)
-                        event_writer.add_scalar('train/max_grad', max_grad, number_ex_seen)
-                        event_writer.add_scalar('train/mean_norm_grad', mean_norm_grad, number_ex_seen)
-                        event_writer.add_scalar('train/max_norm_grad', max_norm_grad, number_ex_seen)
+                        log_grads_tensorboard(list(self.parameters()), event_writer)
 
         self.eval()
 
@@ -227,9 +216,13 @@ class AliceBobCharlie(Game):
         #TODO
         raise NotImplemented
 
-    def get_agents(self):
-        #TODO
-        raise NotImplemented
+    @property
+    def agents(self):
+        return self.sender, self.receiver, self.drawer
+        
+    @property
+    def num_batches_per_episode(self):
+        return 1
 
     def evaluate(self):
         #TODO
