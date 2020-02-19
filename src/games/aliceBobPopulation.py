@@ -3,9 +3,7 @@ import torch.nn as nn
 import random
 
 from .aliceBob import AliceBob
-from ..agents.sender import Sender
-from ..agents.receiver import Receiver
-from ..agents.senderReceiver import SenderReceiver
+from ..agents import Sender, Receiver, SenderReceiver
 
 class AliceBobPopulation(AliceBob):
     def __init__(self, args):

@@ -10,9 +10,7 @@ import tqdm
 from collections import defaultdict
 from deprecated import deprecated
 
-from ..agents.sender import Sender
-from ..agents.receiver import Receiver
-from ..agents.senderReceiver import SenderReceiver
+from ..agents import Sender, Receiver, SenderReceiver
 from ..utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
 
 from .game import Game
@@ -622,3 +620,6 @@ class AliceBob(Game):
             event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
 
         self.eval()
+
+    def get_agents(self):
+        raise NotImplemented
