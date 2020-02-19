@@ -111,7 +111,7 @@ class AliceBob(nn.Module):
             feature_vectors.append(v)
 
         feature_vectors = np.array(feature_vectors)
-      
+
         rule_precision_threshold = 0.95
         rule_frequence_threshold = 0.05
         rules = defaultdict(list) # From ngram to list of RHS·s (to be conjuncted)
@@ -147,9 +147,9 @@ class AliceBob(nn.Module):
                     gold = in_class_aux(data_iterator.dataset)
                     for feature_idx in range(nb_ngrams):
                         ngram = ngrams[feature_idx]
-                        
+
                         if(ngram == ()): continue
-                        
+
 
                         ratio = gold.mean()
                         baseline_accuracy = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
@@ -250,7 +250,7 @@ class AliceBob(nn.Module):
             for lhs2, rhs2 in clean_rules:
                 if(lhs == lhs2): continue
                 if(rhs != rhs2): continue
-                
+
                 # Checks whether lhs2 is a subpart of lhs
                 for i in range(1 + len(lhs) - len(lhs2)):
                     if(lhs[i:(i + len(lhs2))] == lhs2):
@@ -436,16 +436,17 @@ class AliceBob(nn.Module):
         return loss
 
     def get_base_alphabet_size(self):
+        extra_symbols = 2 if self.shared else 1
         if hasattr(self, 'sender'):
-            return self.sender.message_decoder.symbol_embeddings.weight.size(0) - 1
+            return self.sender.message_decoder.symbol_embeddings.weight.size(0) - extra_symbols
         elif hasattr(self, 'senders'):
-            return self.senders[0].message_decoder.symbol_embeddings.weight.size(0) - 1
+            return self.senders[0].message_decoder.symbol_embeddings.weight.size(0) - extra_symbols
         else:
             raise TypeError
 
     def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
         self.eval()
-        
+
         counts_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
         failure_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
 
@@ -453,12 +454,12 @@ class AliceBob(nn.Module):
         nb_batch = int(np.ceil(len(data_iterator) / batch_size))
         for _ in range(nb_batch):
             with torch.no_grad():
-                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=('different')) # We use all categories and use only one distractor from a different category 
+                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=('different')) # We use all categories and use only one distractor from a different category
 
                 # TODO In fact, we need the image categories too and we need to index them
-            
+
                 sender_outcome, receiver_outcome = self(batch)
-        
+
                 receiver_pointing = pointing(receiver_scores)
                 failure = receiver_pointing['dist'].probs[:, 1]
 
@@ -486,10 +487,10 @@ class AliceBob(nn.Module):
         failure_matrix += 1.0
         np.fill_diagonal(failure_matrix, 0) # Except on the diagonal
 
-        failure_matrix /= counts_matrix # 
+        failure_matrix /= counts_matrix #
 
         score_matrix = np.ln(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
-    
+
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
         """
