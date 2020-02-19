@@ -468,7 +468,7 @@ class AliceBob(nn.Module):
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
         print('Accuracy: %s' % accuracy_all)
 
-        eval_categories = [data_iterator.category_idx(category) for category in data_iterator.evaluation_categories]
+        eval_categories = data_iterator.evaluation_categories_idx
         if(eval_categories != []):
             # Computes the acuracy when the target is selected from an evaluation category (never seen during training)
             failure_matrix_eval_t = failure_matrix[eval_categories, :]
@@ -494,11 +494,12 @@ class AliceBob(nn.Module):
         #print(failure_matrix)
 
         score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
-        np.fill_diagonal(score_matrix, -np.inf) # Except on the diagonal
+        np.fill_diagonal(score_matrix, -np.inf) # Warning: this line is very important!
         #print(score_matrix)
+        data_iterator.difficulty_scores = score_matrix
     
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=10, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
+    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
         """
             Model training function
             Input:

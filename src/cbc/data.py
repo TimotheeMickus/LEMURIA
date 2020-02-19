@@ -3,6 +3,8 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 import PIL
 import numpy as np
+import scipy
+import scipy.special as scispe
 
 import tqdm
 
@@ -161,6 +163,10 @@ class DistinctTargetClassDataLoader():
                     break
 
                 category[j] = False
+        
+        self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
+        self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
+        
         print('Training categories: %s' % self.training_categories)
         print('Evaluation categories: %s' % self.evaluation_categories)
 
@@ -198,6 +204,8 @@ class DistinctTargetClassDataLoader():
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
 
+        self.difficulty_scores = None # This matrix is set during the evaluation phase
+
         if(simple_display): print('Loading done')
 
     _average_image = None
@@ -232,7 +240,6 @@ class DistinctTargetClassDataLoader():
         #new_category = tuple(e if(i not in changed_dim) else (not e) for i,e in enumerate(category))
         #return new_category
 
-
     def _different_category(self, category, no_evaluation):
         """Returns a category that is different from `category`."""
         categories = self.training_categories
@@ -246,15 +253,28 @@ class DistinctTargetClassDataLoader():
         #return self._distance_to_category(category, distance)
 
     def sample_category(self, sampling_strategy, category, no_evaluation):
-        if(sampling_strategy == 'hamming1'):
+        if(sampling_strategy == 'hamming1'): # Selects a category at distance 1 in the concept space
             return self._distance_to_category(category, 1, no_evaluation)
 
-        if(sampling_strategy == 'different'):
+        if(sampling_strategy == 'different'): # Selects a different category
             return self._different_category(category, no_evaluation)
+
+        if(sampling_strategy == 'difficulty'): # Selects a category based on the difficulty scores, that are softmaxed
+            if(self.difficulty_scores is None): return self._different_category(category, no_evaluation)
+            
+            line = self.difficulty_scores[self.category_idx(category)]
+            if(no_evaluation):
+                categories_idx = self.training_categories_idx
+                dist = scispe.softmax(line[categories_idx])
+            else:
+                categories_idx = range(self.nb_categories)
+                dist = scispe.softmax(line)
+
+            return self.category_tuple(np.random.choice(a=categories_idx, p=dist))
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=args.batch_size, sampling_strategies=['hamming1', 'different'], no_evaluation=True, target_evaluation=False, noise=args.noise, keep_category=False, device=args.device):
+    def get_batch(self, size=args.batch_size, sampling_strategies=['difficulty'], no_evaluation=True, target_evaluation=False, noise=args.noise, keep_category=False, device=args.device):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
         'sampling_strategies' indicates how the distractor·s are determined.
