@@ -14,16 +14,8 @@ import itertools
 import random
 from deprecated import deprecated
 
-from .config import *
-
-# [START] Imports shared code from the parent directory
-#parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
-#sys.path.append(parent_dir_path)
-
 from .misc import add_normal_noise
 
-#sys.path.remove(parent_dir_path)
-# [END] Imports shared code from the parent directory
 
 class Batch():
     def __init__(self, size, original, target, base_distractors):
@@ -64,7 +56,7 @@ class Batch():
         if(for_original): images.extend(self.original_img())
         if(for_target): images.extend(self.target_img())
         if(for_base_distractors): images.extend(self.base_distractors_img(flat=True))
-        
+
         return images
 
     def require_grad(self, for_original=True, for_target=True, for_base_distractors=True):
@@ -91,7 +83,7 @@ class DataPoint():
     def toInput(self, keep_category=False, device=None):
         img = self.img if(device is None) else self.img.to(device)
         category = self.category if keep_category else None
-        
+
         return InputDataPoint(img, category)
 
 class FailureBasedDistribution():
@@ -113,10 +105,10 @@ class FailureBasedDistribution():
     def distribution(self, category_idx, allowed_categories_idx=None):
         unnormalised_dist = (self.failure_matrix[category_idx, allowed_categories_idx] / self.counts_matrix[category_idx, allowed_categories_idx])
         return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
-        
+
     def sample(self, category_idx, allowed_categories_idx=None):
         dist = self.distribution(category_idx, allowed_categories_idx)
-       
+
         if(allowed_categories_idx is None): allowed_categories_idx = range(dist.shape[1])
 
         return np.random.choice(a=allowed_categories_idx, p=dist)
@@ -153,7 +145,7 @@ class DistinctTargetClassDataLoader():
         #if(np.random.randint(2)): assert self.category_idx(category_tuple) == category_idx # DEBUG ONLY
 
         return category_tuple
-    
+
     def category_idx(self, category_tuple):
         category_idx = 0
         k = 1
@@ -165,10 +157,10 @@ class DistinctTargetClassDataLoader():
 
         return category_idx
 
-    def __len__(self):
-        return len(self.dataset)
-
-    def __init__(self, same_img=False, evaluation_categories=None, data_set=args.data_set, simple_display=args.simple_display):
+    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128):
+        self.device = device
+        self.noise = noise
+        self.batch_size=batch_size
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
         # If `evaluation_categories` is None, all categories are used during training
@@ -190,10 +182,10 @@ class DistinctTargetClassDataLoader():
                     break
 
                 category[j] = False
-        
+
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
-        
+
         print('Training categories: %s' % self.training_categories)
         print('Evaluation categories: %s' % self.evaluation_categories)
 
@@ -234,6 +226,9 @@ class DistinctTargetClassDataLoader():
         self.failure_based_distribution = FailureBasedDistribution(self.nb_categories)
 
         if(simple_display): print('Loading done')
+
+    def __len__(self):
+        return len(self.dataset)
 
     _average_image = None
     def average_image(self):
@@ -295,7 +290,7 @@ class DistinctTargetClassDataLoader():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=args.batch_size, sampling_strategies=['difficulty'], no_evaluation=True, target_evaluation=False, noise=args.noise, keep_category=False, device=args.device):
+    def get_batch(self, size=self.batch_size, sampling_strategies=['difficulty'], no_evaluation=True, target_evaluation=False, noise=self.noise, keep_category=False, device=self.device):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
         'sampling_strategies' indicates how the distractor·s are determined.
@@ -343,5 +338,6 @@ class DistinctTargetClassDataLoader():
         while True:
             yield self.get_batch()
 
-def get_data_loader(same_img=False):
-    return DistinctTargetClassDataLoader(same_img)
+
+def get_data_loader(args):
+    return DistinctTargetClassDataLoader(args.same_img, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size)

@@ -3,11 +3,12 @@ import torch.nn as nn
 
 from .sender import Sender
 from .receiver import Receiver
+from .agent import Agent
 from ..utils.modules import build_cnn_encoder_from_args, build_embeddings
 
-class SenderReceiver(nn.Module):
+class SenderReceiver(Agent):
     def __init__(self, sender, receiver, check_shared_params=True):
-        nn.Module.__init__(self)
+        super(Agent, self).__init__()
 
         if check_shared_params:
             assert sender.image_encoder is receiver.image_encoder, 'parameters are not shared'

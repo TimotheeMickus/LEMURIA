@@ -2,15 +2,16 @@ import torch
 import torch.nn as nn
 from collections import namedtuple
 
+from .agent import Agent
 from ..utils.modules import MessageDecoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 
 # Image -(vector)-> message
-class Sender(nn.Module):
+class Sender(Agent):
     def __init__(self, image_encoder, message_decoder):
-        super(Sender, self).__init__()
+        super(Agent, self).__init__()
         self.image_encoder = image_encoder
         self.message_decoder = message_decoder
 

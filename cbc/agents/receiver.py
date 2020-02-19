@@ -5,19 +5,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
+from .agent import Agent
 from ..utils.modules import MessageEncoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["scores"])
 
 # Scores images according to a message
-class Receiver(nn.Module):
+class Receiver(Agent):
     """
     Defines a receiver policy.
     Based on K presented images and a given message, chooses which image the message refers to.
     """
     def __init__(self, image_encoder, message_encoder):
-        super(Receiver, self).__init__()
+        super(Agent, self).__init__()
 
         self.image_encoder = image_encoder
         self.message_encoder = message_encoder

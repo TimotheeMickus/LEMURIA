@@ -3,13 +3,14 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 
+from .agent import Agent
 from ..utils.modules import MessageEncoder, Randomizer, build_cnn_decoder_from_args
 
 Outcome = namedtuple("Outcome", ["image"])
 
-class Drawer(nn.Module):
+class Drawer(Agent):
     def __init__(self, message_encoder, randomizer, image_decoder):
-        super(Drawer, self).__init__()
+        super(Agent, self).__init__()
         self.message_encoder = message_encoder
         self.randomizer = randomizer
         self.image_decoder = image_decoder

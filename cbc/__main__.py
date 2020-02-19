@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
 from .utils.data import get_data_loader
-from .utils.config import *
+from .utils.config import get_args
 
 # [START] Imports shared code from the parent directory
 #parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
@@ -22,7 +22,7 @@ from .utils.misc import build_optimizer, AverageSummaryWriter
 #sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
-if(__name__ == "__main__"):
+def train(args):
     if(not os.path.isdir(args.data_set)):
         print(("Directory '%s' not found." % args.data_set), flush=True)
         sys.exit()
@@ -52,7 +52,7 @@ if(__name__ == "__main__"):
         else:
             optimizer = build_optimizer(model.parameters(), args.learning_rate)
 
-        data_loader = get_data_loader(args.same_img)
+        data_loader = get_data_loader(args)
 
         if(args.no_summary): event_writer = None
         else:
@@ -65,3 +65,14 @@ if(__name__ == "__main__"):
             model.evaluate(data_loader, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
 
             if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
+
+if(__name__ == "__main__"):
+    args = get_args()
+    if args.evaluate_language:
+        from .eval.evaluate_language import main
+        main(args)
+    elif args.visualize:
+        from .eval.visualize import main
+        main(args)
+    else:
+        train(args)

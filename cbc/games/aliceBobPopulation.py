@@ -8,7 +8,7 @@ from ..agents import Sender, Receiver, SenderReceiver
 class AliceBobPopulation(AliceBob):
     def __init__(self, args):
         nn.Module.__init__(self)
-        
+
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
 
@@ -59,4 +59,4 @@ class AliceBobPopulation(AliceBob):
         sender = random.choice(self.senders)
         receiver = random.choice(self.receivers)
 
-        return self._forward(batch, sender, receiver)
+        return self.compute_interaction(batch, sender, receiver)

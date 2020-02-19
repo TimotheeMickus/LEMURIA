@@ -39,7 +39,7 @@ if(__name__ == "__main__"):
     model = model.to(args.device)
     #print(model)
 
-    data_loader = get_data_loader(args.same_img)
+    data_loader = get_data_loader(args)
 
     model.decision_tree(data_loader)
     while(True):
