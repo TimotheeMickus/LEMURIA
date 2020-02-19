@@ -4,12 +4,13 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
+from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.misc import show_imgs, max_normalize_, to_color, Progress
 
-class AliceBobCharlie(nn.Module):
+class AliceBobCharlie(Game):
     def __init__(self, args):
-        nn.Module.__init__(self)
+        super(Game, self).__init__()
         self.sender = Sender.from_args(args)
         self.receiver = Receiver.from_args(args)
         self.drawer = Drawer.from_args(args)
@@ -24,7 +25,7 @@ class AliceBobCharlie(nn.Module):
     def _bob_input(self, batch, drawer_outcome):
         return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors, drawer_outcome.image.unsqueeze(1)], dim=1)
 
-    def _forward(self, batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
+    def compute_interaction(self, batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
         with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
             sender_outcome = sender(batch.original_img)
 
@@ -43,7 +44,7 @@ class AliceBobCharlie(nn.Module):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self._forward(batch, self.sender, self.drawer, self.receiver)
+        return self.compute_interaction(batch, self.sender, self.drawer, self.receiver)
 
     def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
         """
@@ -79,7 +80,7 @@ class AliceBobCharlie(nn.Module):
 
     def train_step_alice_bob(self, batch, optim, running_avg_success):
         optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
+        sender_outcome, drawer_outcome, receiver_outcome = self.compute_interaction(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
 
         bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
         bob_dist = Categorical(bob_probs)
@@ -116,7 +117,7 @@ class AliceBobCharlie(nn.Module):
 
     def train_step_charlie(self, batch, optim, running_avg_success, default_adv_train=True):
         optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self._forward(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
+        sender_outcome, drawer_outcome, receiver_outcome = self.compute_interaction(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
 
         bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
         bob_dist = Categorical(bob_probs)
@@ -220,3 +221,13 @@ class AliceBobCharlie(nn.Module):
                         event_writer.add_scalar('train/max_norm_grad', max_norm_grad, number_ex_seen)
 
         self.eval()
+
+
+    def test_visualize(self, data_iterator, learning_rate):
+        raise NotImplemented
+
+    def get_agents(self):
+        raise NotImplemented
+
+    def evaluate(self):
+        raise NotImplemented
