@@ -394,7 +394,7 @@ class AliceBob(nn.Module):
         if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
         else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
 
-        rewards = successes
+        rewards = successes.clone()
 
         msg_lengths = sender_action[1].view(-1).float()
         
