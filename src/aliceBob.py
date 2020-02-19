@@ -567,8 +567,10 @@ class AliceBob(nn.Module):
                     batch_msg_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(device) # Bag of words (i.e., symbols) count vectors, here initialized with 0·s
                     # message -> many-hot TODO What?
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,self.base_alphabet_size).float()
+                
+                    target_category = torch.stack([x.category for x in batch.original])
                     # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
-                    current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(device)).detach().float()
+                    current_dist += torch.einsum('bi,bj->ij', many_hots, target_category.float().to(device)).detach().float()
 
                 pbar.update(R=running_avg_success)
 
