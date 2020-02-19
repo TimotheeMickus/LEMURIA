@@ -622,4 +622,4 @@ class AliceBob(Game):
         self.eval()
 
     def get_agents(self):
-        raise NotImplemented
+        return self.sender, self.receiver

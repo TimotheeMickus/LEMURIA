@@ -60,3 +60,6 @@ class AliceBobPopulation(AliceBob):
         receiver = random.choice(self.receivers)
 
         return self.compute_interaction(batch, sender, receiver)
+
+    def get_agents(self):
+        return self.sender, self.receiver
