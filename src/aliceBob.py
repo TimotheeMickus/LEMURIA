@@ -491,11 +491,11 @@ class AliceBob(nn.Module):
         failure_matrix += 1.0
 
         failure_matrix /= counts_matrix # 
-        print(failure_matrix)
+        #print(failure_matrix)
 
         score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
         np.fill_diagonal(score_matrix, -np.inf) # Except on the diagonal
-        print(score_matrix)
+        #print(score_matrix)
     
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=10, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):

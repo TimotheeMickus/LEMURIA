@@ -94,11 +94,11 @@ class DataPoint():
 
 class DistinctTargetClassDataLoader():
     # The binary concepts
-    shapes = {'sphere': True, 'cube': False}
-    colours = {'red': True, 'blue': False}
-    v_positions = {'up': True, 'down': False}
-    h_positions = {'right': True, 'left': False}
-    sizes = {'big': True, 'small': False}
+    shapes = {'cube': 0, 'sphere': 1}
+    colours = {'blue': 0, 'red': 1}
+    v_positions = {'down': 0, 'up': 1}
+    h_positions = {'left': 0, 'right': 1}
+    sizes = {'small': 0, 'big': 1}
     _concepts = [shapes, colours, v_positions, h_positions, sizes]
     nb_categories = np.prod([len(concept) for concept in _concepts])
     nb_concepts = len(_concepts)
@@ -110,15 +110,18 @@ class DistinctTargetClassDataLoader():
         for i, concept in enumerate(self._concepts):
             ks.append(k)
             k *= len(concept)
-        k.reverse()
+        ks.reverse()
 
         l = []
+        remainder = category_idx
         for k in ks:
-            l.append(category_idx // k)
-            category_idx = (category_idx % k)
+            l.append(remainder // k)
+            remainder = (remainder % k)
         l.reverse()
 
         category_tuple = tuple(l)
+
+        #if(np.random.randint(2)): assert self.category_idx(category_tuple) == category_idx # DEBUG ONLY
 
         return category_tuple
     
@@ -128,6 +131,8 @@ class DistinctTargetClassDataLoader():
         for i, concept in enumerate(self._concepts):
             category_idx += category_tuple[i] * k
             k *= len(concept)
+
+        #if(np.random.randint(2)): assert self.category_tuple(category_idx) == category_tuple # DEBUG ONLY
 
         return category_idx
 
