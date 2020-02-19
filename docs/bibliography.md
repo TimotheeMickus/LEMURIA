@@ -80,7 +80,7 @@
  - Emergence of Language with Multi-agent Games: Learning to Communicate with Sequences of Symbols. [paper](https://arxiv.org/abs/1705.11192). *Original paper on discrete sequential message exchange in emergent communication. Work conducted on real images (MSCOCO), suggests that Gumbel-softmax is better than RL for this task*
  - Emergent Communication through Negotiation. [paper](https://arxiv.org/abs/1804.03980).
  - Analyzing Language Learned by an Active Question Answering Agent. [paper](https://arxiv.org/abs/1801.07537).
- - Multi-Agent Compositional Communication Learning from Raw Visual Input. [paper](https://www.semanticscholar.org/paper/Multi-Agent-Compositional-Communication-Learning-Choi-Lazaridou/08bbcf6f753a4889f57cede3b0bdedb56024cc03), [more recent version](https://openreview.net/forum?id=rknt2Be0-). *Cf. compositional obverter, infra.*
+ - Multi-Agent Compositional Communication Learning from Raw Visual Input. [paper](https://www.semanticscholar.org/paper/Multi-Agent-Compositional-Communication-Learning-Choi-Lazaridou/08bbcf6f753a4889f57cede3b0bdedb56024cc03), [more recent version](https://openreview.net/forum?id=rknt2Be0-). *Same paper as 'compositional obverter', cf. infra.*
 
 **Perhaps useful for perspective**
 
