@@ -3,4 +3,4 @@ __pycache__/
 models/
 data/
 .venv/
-.vimrc
+.tmpvimrc
