@@ -90,7 +90,7 @@ class MessageDecoder(nn.Module):
             output = self.action_space_proj(output).squeeze(0)
 
             # selects action
-            probs =  F.softmax(output, dim=-1)
+            probs = F.softmax(output, dim=-1)
             dist = Categorical(probs)
             action = dist.sample() if self.training else probs.argmax(dim=-1)
 
