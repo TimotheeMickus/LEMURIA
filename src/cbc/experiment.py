@@ -63,7 +63,7 @@ if(__name__ == "__main__"):
             event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
 
         print(("[%s] training start..." % datetime.now()), flush=True)
-        for epoch in range(1, (args.epochs + 1)):
+        for epoch in range(args.epochs):
             model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug, log_entropy=args.log_entropy)
             model.evaluate(data_loader, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
 

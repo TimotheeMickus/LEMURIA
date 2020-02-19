@@ -522,7 +522,7 @@ class AliceBob(nn.Module):
             total_items = 0 # number of training instances since the beginning of the epoch
             running_avg_reward = 0.0
             running_avg_success = 0.0
-            start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
+            start_i = (epoch * steps_per_epoch)
             end_i = start_i + steps_per_epoch
             device = next(self.parameters()).device
             past_dist, current_dist = None, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings # TODO What do these variable mean?
@@ -568,7 +568,7 @@ class AliceBob(nn.Module):
                     # message -> many-hot TODO What?
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,self.base_alphabet_size).float()
                 
-                    target_category = torch.stack([x.category for x in batch.original])
+                    target_category = torch.stack([torch.tensor(x.catecory) for x in batch.original])
                     # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
                     current_dist += torch.einsum('bi,bj->ij', many_hots, target_category.float().to(device)).detach().float()
 
