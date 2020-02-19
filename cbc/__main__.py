@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
 from .utils.data import get_data_loader
-from .utils.config import get_args
+from .utils.opts import get_args
 
 # [START] Imports shared code from the parent directory
 #parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
