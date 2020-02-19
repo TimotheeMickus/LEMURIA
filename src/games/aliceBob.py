@@ -11,7 +11,7 @@ from collections import defaultdict
 from deprecated import deprecated
 
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
+from ..utils.misc import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
 
 from .game import Game
 

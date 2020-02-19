@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from collections import namedtuple
 
-from ..modules import MessageDecoder, build_cnn_encoder_from_args
+from ..utils.modules import MessageDecoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])

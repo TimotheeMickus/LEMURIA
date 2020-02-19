@@ -5,7 +5,7 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from ..agents import Sender, Receiver, Drawer
-from ..utils import show_imgs, max_normalize_, to_color, Progress
+from ..utils.misc import show_imgs, max_normalize_, to_color, Progress
 
 class AliceBobCharlie(nn.Module):
     def __init__(self, args):

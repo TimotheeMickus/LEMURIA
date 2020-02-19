@@ -11,7 +11,7 @@ import tqdm
 
 from data import get_data_loader
 
-from config import *
+from ..utils.config import *
 
 # [START] Imports shared code from the parent directory
 parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)

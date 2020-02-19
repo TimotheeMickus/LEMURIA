@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
-from ..modules import MessageEncoder, build_cnn_encoder_from_args
+from ..utils.modules import MessageEncoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["scores"])

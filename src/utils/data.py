@@ -20,7 +20,7 @@ from .config import *
 #parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
 #sys.path.append(parent_dir_path)
 
-from ..utils import add_normal_noise
+from .misc import add_normal_noise
 
 #sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
