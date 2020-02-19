@@ -21,6 +21,7 @@ class AliceBob(nn.Module):
         nn.Module.__init__(self)
 
         self.base_alphabet_size = args.base_alphabet_size
+        self.max_len_msg = args.max_len
 
         if(args.shared):
             senderReceiver = SenderReceiver.from_args(args)
@@ -395,9 +396,12 @@ class AliceBob(nn.Module):
 
         rewards = successes
 
+        msg_lengths = sender_action[1].view(-1).float()
+        
+        rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
+
         if(self.penalty > 0.0):
-            msg_lengths = sender_action[1].view(-1).float() # Float casting could be avoided if we upgrade torch to 1.3.1; see https://github.com/pytorch/pytorch/issues/9515 (I believe)
-            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
             # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
             if(self.adaptative_penalty):

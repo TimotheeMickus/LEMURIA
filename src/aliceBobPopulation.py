@@ -12,6 +12,7 @@ class AliceBobPopulation(AliceBob):
         nn.Module.__init__(self)
         
         self.base_alphabet_size = args.base_alphabet_size
+        self.max_len_msg = args.max_len
 
         size = args.population
 
