@@ -265,10 +265,13 @@ class DistinctTargetClassDataLoader():
             line = self.difficulty_scores[self.category_idx(category)]
             if(no_evaluation):
                 categories_idx = self.training_categories_idx
-                dist = scispe.softmax(line[categories_idx])
+                dist = line[categories_idx]
+                #dist = scispe.softmax(line[categories_idx])
             else:
                 categories_idx = range(self.nb_categories)
-                dist = scispe.softmax(line)
+                dist = line
+                #dist = scispe.softmax(line)
+            dist /= np.linalg.norm(dist, 1)
 
             return self.category_tuple(np.random.choice(a=categories_idx, p=dist))
 

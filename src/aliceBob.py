@@ -497,8 +497,10 @@ class AliceBob(nn.Module):
         failure_matrix /= counts_matrix # 
         #print(failure_matrix)
 
-        score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
-        np.fill_diagonal(score_matrix, -np.inf) # Warning: this line is very important!
+        score_matrix = failure_matrix
+        np.fill_diagonal(score_matrix, 0.0)
+        #score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
+        #np.fill_diagonal(score_matrix, -np.inf) # Warning: this line is very important!
         #print(score_matrix)
         data_iterator.difficulty_scores = score_matrix
     
