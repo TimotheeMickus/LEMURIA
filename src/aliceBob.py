@@ -466,7 +466,7 @@ class AliceBob(nn.Module):
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
                 counts_matrix[target_category, distractor_category] += 1
-                failure_matrix[target_category, distractor_category] += failure.numpy()
+                failure_matrix[target_category, distractor_category] += failure.cpu().numpy()
 
         # Computes the accuracy when the target is selected from any category
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
@@ -529,7 +529,10 @@ class AliceBob(nn.Module):
 
             if event_writer is not None and log_entropy:
                 symbol_counts = torch.zeros(self.base_alphabet_size, dtype=torch.float).to(device)
-            for i, batch in zip(range(start_i, end_i), data_iterator):
+
+            for i in range(start_i, end_i):
+                batch = data_iterator.get_batch(keep_category=log_lang_progress)
+
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
 
@@ -568,7 +571,7 @@ class AliceBob(nn.Module):
                     # message -> many-hot TODO What?
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,self.base_alphabet_size).float()
                 
-                    target_category = torch.stack([torch.tensor(x.catecory) for x in batch.original])
+                    target_category = torch.stack([torch.tensor(x.category) for x in batch.original])
                     # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
                     current_dist += torch.einsum('bi,bj->ij', many_hots, target_category.float().to(device)).detach().float()
 
