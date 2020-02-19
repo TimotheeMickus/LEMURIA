@@ -1,16 +1,16 @@
-import itertools as it
-import os
-from collections import namedtuple, defaultdict
-import itertools
-import random
-
-import tqdm
-
 import torch, torchvision
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 import PIL
 import numpy as np
+
+import tqdm
+
+import os
+from collections import namedtuple, defaultdict
+import itertools
+import random
+from deprecated import deprecated
 
 from config import *
 
@@ -23,13 +23,74 @@ from utils import add_normal_noise
 sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
-Batch = namedtuple("Batch", ["size", "original_img", "target_img", "base_distractors", "original_category"])
+class Batch():
+    def __init__(self, size, original, target, base_distractors):
+       self.size = size
+       self.original = original # List of InputDataPoint·s
+       self.target = target # List of InputDataPoint·s
+       self.base_distractors = base_distractors # List of lists of InputDataPoint·s
+
+    def original_img(self, stack=False, f=None):
+        if(f is None): f = (lambda x: x)
+
+        tmp = [f(x.img) for x in self.original]
+
+        if(stack): return torch.stack(tmp)
+        else: return tmp
+
+    def target_img(self, stack=False, f=None):
+        if(f is None): f = (lambda x: x)
+
+        tmp = [f(x.img) for x in self.target]
+
+        if(stack): return torch.stack(tmp)
+        else: return tmp
+
+    def base_distractors_img(self, flat=False, stack=False, f=None):
+        if(f is None): f = (lambda x: x)
+
+        if(not flat):
+            tmp = [[f(x.img) for x in base_distractor] for base_distractor in self.base_distractors]
+            if(stack): tmp = list(map(torch.stack, tmp))
+        else: tmp = [f(x.img) for base_distractor in self.distractors for x in base_distractor]
+
+        if(stack): return torch.stack(tmp)
+        else: return tmp
+
+    def get_images(self, original=True, target=True, base_distractors=True):
+        images = []
+        if(for_original): images.extend(self.original_img())
+        if(for_target): images.extend(self.target_img())
+        if(for_base_distractors): images.extend(self.base_distractors_img(flat=True))
+        
+        return images
+
+    def require_grad(self, for_original=True, for_target=True, for_base_distractors=True):
+        for img in self.get_images(original=for_original, target=for_target, base_distractors=for_base_distractors):
+            img.requires_grad = True
+
+class InputDataPoint():
+    def __init__(self, img, category=None):
+        self.img = img
+        self.category = category
+
+    # Adds noise if necessary (normal random noise + clamping)
+    def add_normal_noise_(self, noise):
+        if(noise <= 0.0): return
+
+        self.img = add_normal_noise(self.img, std_dev=noise, clamp_values=(0.0, 1.0))
 
 class DataPoint():
     def __init__(self, idx, category, img):
         self.idx = idx
         self.category = category
         self.img = img
+
+    def toInput(self, keep_category=False, device=None):
+        img = self.img if(device is None) else self.img.to(device)
+        category = self.category if keep_category else None
+        
+        return InputDataPoint(img, category)
 
 class DistinctTargetClassDataLoader():
     # The binary concepts
@@ -39,8 +100,36 @@ class DistinctTargetClassDataLoader():
     h_positions = {'right': True, 'left': False}
     sizes = {'big': True, 'small': False}
     _concepts = [shapes, colours, v_positions, h_positions, sizes]
-    concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
+    nb_categories = np.prod([len(concept) for concept in _concepts])
     nb_concepts = len(_concepts)
+    concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
+
+    def category_tuple(self, category_idx):
+        ks = []
+        k = 1
+        for i, concept in enumerate(self._concepts):
+            ks.append(k)
+            k *= len(concept)
+        k.reverse()
+
+        l = []
+        for k in ks:
+            l.append(category_idx // k)
+            category_idx = (category_idx % k)
+        l.reverse()
+
+        category_tuple = tuple(l)
+
+        return category_tuple
+    
+    def category_idx(self, category_tuple):
+        category_idx = 0
+        k = 1
+        for i, concept in enumerate(self._concepts):
+            category_idx += category_tuple[i] * k
+            k *= len(concept)
+
+        return category_idx
 
     def __len__(self):
         return len(self.dataset)
@@ -160,47 +249,53 @@ class DistinctTargetClassDataLoader():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size, sampling_strategies=('hamming1', 'different'), no_evaluation=True, target_evaluation=False, noise=args.noise, device=args.device):
+    def get_batch(self, size=args.batch_size, sampling_strategies=['hamming1', 'different'], no_evaluation=True, target_evaluation=False, noise=args.noise, keep_category=False, device=args.device):
         """Generates a batch as a Batch object.
-        'original_img', 'target_img' and 'base_distractors' are all tensors of outer dimension of size `size`.
-        If 'no_evaluation' is True, none of the image is from an evaluation category.
-        Each element of 'original_img' is an image. In 'target_evaluation' is True, then this image is from an evaluation category.
-        Each element of 'target_img' is an image of the same category as its counterpart in 'original_img'.
-        Each element of 'base_distractors' is the stack of two images related to their counterpart in 'original_img':
-            - base_distractors[0] is an image of a neighbouring category (distance = 1), and
-            - base_distractors[1] is an image of a different category (distance != 0)."""
+        'size' is the size of the batch.
+        'sampling_strategies' indicates how the distractor·s are determined.
+        'no_evaluation' indicates whether we avoid evaluation categories.
+        'target_evaluation' indicates whether the original/target category must be one of the evaluation categories.
+        'noise' indicates how much (random normal) noise must be added to the images.
+        'device' is a PyTorch parameter.
+        """
         batch = []
         for _ in range(size):
+            # Choice of the original/target category
             categories = self.training_categories
             if(not no_evaluation): categories = categories.union(self.evaluation_categories)
             if(target_evaluation): categories = categories.intersection(self.evaluation_categories)
             target_category = random.choice(list(categories))
 
-            _original_img = np.random.choice(self.categories[target_category])
-            #_original_img = np.random.choice(self.dataset)
-            _target_img = _original_img if(self.same_img) else np.random.choice(self.categories[_original_img.category]) # same category
+            # Original image
+            _original = np.random.choice(self.categories[target_category]).toInput(keep_category, device)
+            _original.add_normal_noise_(noise)
 
+            # Target image
+            if(self.same_img): _target = _original
+            else: # Same category
+                _target = np.random.choice(self.categories[target_category]).toInput(keep_category, device)
+                _target.add_normal_noise_(noise)
+
+            # Base distractors
             _base_distractors = []
             for sampling_strategy in sampling_strategies:
-                distractor_category = self.sample_category(sampling_strategy, _original_img.category, no_evaluation)
-                _base_distractors.append(np.random.choice(self.categories[distractor_category]))
+                distractor_category = self.sample_category(sampling_strategy, target_category, no_evaluation)
+                distractor = np.random.choice(self.categories[distractor_category]).toInput(keep_category, device)
+                distractor.add_normal_noise_(noise)
 
-            batch.append((_original_img.img, _target_img.img, torch.stack([x.img for x in _base_distractors]), torch.IntTensor(_original_img.category)))
+                _base_distractors.append(distractor)
 
-        original_img, target_img, base_distractors, categories = map(torch.stack, zip(*batch)) # Unzips the list of pairs (to a pair of lists) and then stacks
+            batch.append((_original, _target, _base_distractors))
 
-        # Adds noise if necessary (normal random noise + clamping)
-        if(noise > 0.0):
-            original_img = add_normal_noise(original_img, std_dev=noise, clamp_values=(0.0, 1.0))
-            target_img = add_normal_noise(target_img, std_dev=noise, clamp_values=(0.0, 1.0))
-            base_distractors = add_normal_noise(base_distractors, std_dev=noise, clamp_values=(0.0, 1.0))
+        original, target, base_distractors = zip(*batch) # Unzips the list of pairs (to a pair of lists)
 
-        return Batch(size=size, original_img=original_img.to(device), target_img=target_img.to(device), base_distractors=base_distractors.to(device), original_category=categories)
+        return Batch(size=size, original=original, target=target, base_distractors=base_distractors)
 
-    def __iter__(self, size=args.batch_size):
-        """Iterates over batches of size `args.batch_size`"""
+    @deprecated(version='[on n\'a pas de numéro de version, mais aujourd\'hui est le 2019/02/19, un mercredi]', reason='pas vraiment de raison ; je fais un test')
+    def __iter__(self):
+        """Iterates over batches of default parameters"""
         while True:
-            yield self.get_batch(size)
+            yield self.get_batch()
 
 def get_data_loader(same_img=False):
     return DistinctTargetClassDataLoader(same_img)

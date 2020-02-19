@@ -3,10 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions.categorical import Categorical
+import numpy as np
 
 import tqdm
 
 from collections import defaultdict
+from deprecated import deprecated
 
 from sender import Sender
 from receiver import Receiver
@@ -36,12 +38,14 @@ class AliceBob(nn.Module):
         self.penalty = args.penalty
         self.adaptative_penalty = args.adaptative_penalty
 
+    def _alice_input(self, batch):
+        return batch.original_img(stack=True)
 
     def _bob_input(self, batch):
-        return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors], dim=1)
+        return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
     def _forward(self, batch, sender, receiver):
-        sender_outcome = sender(batch.original_img)
+        sender_outcome = sender(self._alice_input(batch))
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
@@ -270,16 +274,14 @@ class AliceBob(nn.Module):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
         batch_size = 4
-        batch = data_iterator.get_batch(batch_size)
+        batch = data_iterator.get_batch(batch_size) # Standard training batch
 
-        batch.original_img.requires_grad = True
-        batch.target_img.requires_grad = True
-        batch.base_distractors.requires_grad = True
+        batch.require_grad()
 
         sender_outcome, receiver_outcome = self(batch)
 
         # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
-        pseudo_optimizer = torch.optim.Optimizer([batch.original_img, batch.target_img, batch.base_distractors], {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
+        pseudo_optimizer = torch.optim.Optimizer(batch.get_images(), {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
         pseudo_optimizer.zero_grad()
 
         _COLOR, _INTENSITY = range(2)
@@ -293,7 +295,9 @@ class AliceBob(nn.Module):
             elif(mode == _INTENSITY):
                 t = t.abs()
                 t = t.max(dim).values # Max over the colour channel
+                
                 max_normalize_(t, dim=dim, abs_val=False) # Normalises each image
+                
                 return to_color(t, dim)
 
         mode = _INTENSITY
@@ -301,16 +305,16 @@ class AliceBob(nn.Module):
         # Alice's part
         sender_outcome.log_prob.sum().backward()
 
-        sender_part = batch.original_img.grad.detach()
+        sender_part = batch.original_img(stack=True, f=(lambda img: img.grad.detach()))
         sender_part = process(sender_part, 1, mode)
 
         # Bob's part
         receiver_outcome.scores.sum().backward()
 
-        receiver_part_target_img = batch.target_img.grad.detach()
+        receiver_part_target_img = batch.target_img(stack=True, f=(lambda img: img.grad.detach()))
         receiver_part_target_img = process(receiver_part_target_img.unsqueeze(axis=1), 2, mode).squeeze(axis=1)
 
-        receiver_part_base_distractors = batch.base_distractors.grad.detach()
+        receiver_part_base_distractors = batch.base_distractors_img(stack=True, f=(lambda img: img.grad.detach()))
         receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
 
         # Message Bob-model visualisation (inspired by Simonyan et al. 2013)
@@ -365,14 +369,14 @@ class AliceBob(nn.Module):
         # Displays the visualisations
         imgs = []
         for i in range(batch_size):
-            imgs.append(batch.original_img[i].detach())
+            imgs.append(batch.original[i].img)
             imgs.append(sender_part[i])
 
-            imgs.append(batch.target_img[i].detach())
+            imgs.append(batch.target[i].img)
             imgs.append(receiver_part_target_img[i])
 
             for j in range(batch.base_distractors.size(1)):
-                imgs.append(batch.base_distractors[i][j].detach())
+                imgs.append(batch.base_distractors[i][j].img)
                 imgs.append(receiver_part_base_distractors[i][j])
 
             imgs.append(receiver_dream[i].detach())
@@ -446,53 +450,65 @@ class AliceBob(nn.Module):
 
     def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
         self.eval()
-
-        counts_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
-        failure_matrix = np.zeros((data_loader.nb_concepts, data.nb.concepts))
+        
+        counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
+        failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
         batch_size = 512
         nb_batch = int(np.ceil(len(data_iterator) / batch_size))
-        for _ in range(nb_batch):
+        
+        batch_numbers = range(nb_batch)
+        if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch))
+        for _ in batch_numbers:
             with torch.no_grad():
-                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=('different')) # We use all categories and use only one distractor from a different category
-
-                # TODO In fact, we need the image categories too and we need to index them
+                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category 
 
                 sender_outcome, receiver_outcome = self(batch)
+        
+                receiver_pointing = pointing(receiver_outcome.scores)
+                failure = receiver_pointing['dist'].probs[:, 1] # Probability of the different image
 
-                receiver_pointing = pointing(receiver_scores)
-                failure = receiver_pointing['dist'].probs[:, 1]
+                target_category = [data_iterator.category_idx(x.category) for x in batch.original]
+                distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
                 counts_matrix[target_category, distractor_category] += 1
-                failure_matrix[target_category, distractor_category] += failure
+                failure_matrix[target_category, distractor_category] += failure.numpy()
 
         # Computes the accuracy when the target is selected from any category
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
         print('Accuracy: %s' % accuracy_all)
 
-        # Computes the acuracy when the target is selected from an evaluation category (never seen during training)
-        failure_matrix_eval_t = failure_matrix[eval_categories, :]
-        counts_matrix_eval_t = counts_matrix[eval_categories, :]
-        accuracy_eval_t = 1 - (failure_matrix_eval_t.sum() / counts_matrix_eval_t.sum())
-        print('Accuracy eval-t: %s' % accuracy_eval_t)
+        eval_categories = [data_iterator.category_idx(category) for category in data_iterator.evaluation_categories]
+        if(eval_categories != []):
+            # Computes the acuracy when the target is selected from an evaluation category (never seen during training)
+            failure_matrix_eval_t = failure_matrix[eval_categories, :]
+            counts_matrix_eval_t = counts_matrix[eval_categories, :]
 
-        # Computes the acuracy when the distractor is selected from an evaluation category (never seen during training)
-        failure_matrix_eval_d = failure_matrix[:, eval_categories]
-        counts_matrix_eval_d = counts_matrix[:, eval_categories]
-        accuracy_eval_d = 1 - (failure_matrix_eval_d.sum() / counts_matrix_eval_d.sum())
-        print('Accuracy eval-d %s' % accuracy_eval_d)
+            counts = counts_matrix_eval_t.sum()
+            accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
+            print('Accuracy eval-t: %s' % accuracy_eval_t)
+
+            # Computes the acuracy when the distractor is selected from an evaluation category (never seen during training)
+            failure_matrix_eval_d = failure_matrix[:, eval_categories]
+            counts_matrix_eval_d = counts_matrix[:, eval_categories]
+            
+            counts = counts_matrix_eval_d.sum()
+            accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
+            print('Accuracy eval-d %s' % accuracy_eval_d)
 
         # Smoothing
         counts_matrix += 2
         failure_matrix += 1.0
-        np.fill_diagonal(failure_matrix, 0) # Except on the diagonal
 
-        failure_matrix /= counts_matrix #
+        failure_matrix /= counts_matrix # 
+        print(failure_matrix)
 
-        score_matrix = np.ln(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
-
+        score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
+        np.fill_diagonal(score_matrix, -np.inf) # Except on the diagonal
+        print(score_matrix)
+    
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
+    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=10, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
         """
             Model training function
             Input:
@@ -516,7 +532,7 @@ class AliceBob(nn.Module):
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
             device = next(self.parameters()).device
-            past_dist, current_dist = None, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings
+            past_dist, current_dist = None, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings # TODO What do these variable mean?
 
             if event_writer is not None and log_entropy:
                 symbol_counts = torch.zeros(base_alphabet_size, dtype=torch.float).to(device)
@@ -554,16 +570,16 @@ class AliceBob(nn.Module):
                 running_avg_reward = total_reward / total_items
                 running_avg_success = total_success / total_items
 
-                if log_lang_progress:
-                    batch_msg_manyhot = torch.zeros((batch.size, base_alphabet_size + 2), dtype=torch.float).to(device) # size of embeddings + EOS + PAD
-                    # message -> many-hot
+                if log_lang_progress: # TODO À quoi sert cette section ?
+                    batch_msg_manyhot = torch.zeros((batch.size, base_alphabet_size + 2), dtype=torch.float).to(device) # Bag of words (i.e., symbols) count vectors, here initialized with 0·s
+                    # message -> many-hot TODO What?
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,base_alphabet_size).float()
-                    # summation along batch dimension,  and add to counts
+                    # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
                     current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(device)).detach().float()
 
                 pbar.update(R=running_avg_success)
 
-                # logs some values
+                # Logs some values
                 if(event_writer is not None):
                     number_ex_seen = i * batch.size
                     event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
