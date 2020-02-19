@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import random
 
-from aliceBob import AliceBob
-from sender import Sender
-from receiver import Receiver
-from senderReceiver import SenderReceiver
+from .aliceBob import AliceBob
+from ..agents.sender import Sender
+from ..agents.receiver import Receiver
+from ..agents.senderReceiver import SenderReceiver
 
 class AliceBobPopulation(AliceBob):
     def __init__(self, args):

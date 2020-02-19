@@ -10,15 +10,16 @@ import tqdm
 from collections import defaultdict
 from deprecated import deprecated
 
-from sender import Sender
-from receiver import Receiver
-from senderReceiver import SenderReceiver
-import utils
-from utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise
+from ..agents.sender import Sender
+from ..agents.receiver import Receiver
+from ..agents.senderReceiver import SenderReceiver
+from ..utils import Progress, show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy
 
-class AliceBob(nn.Module):
+from .game import Game
+
+class AliceBob(Game):
     def __init__(self, args):
-        nn.Module.__init__(self)
+        super(Game, self).__init__()
 
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
@@ -45,7 +46,8 @@ class AliceBob(nn.Module):
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
-    def _forward(self, batch, sender, receiver):
+    def _forward(self, batch, *agents):
+        sender, receiver = agents
         sender_outcome = sender(self._alice_input(batch))
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
@@ -59,7 +61,7 @@ class AliceBob(nn.Module):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self._forward(batch, self.sender, self.receiver)
+        return self.compute_interaction(batch, self.sender, self.receiver)
 
     def decision_tree(self, data_iterator):
         self.eval()
@@ -295,9 +297,9 @@ class AliceBob(nn.Module):
             elif(mode == _INTENSITY):
                 t = t.abs()
                 t = t.max(dim).values # Max over the colour channel
-                
+
                 max_normalize_(t, dim=dim, abs_val=False) # Normalises each image
-                
+
                 return to_color(t, dim)
 
         mode = _INTENSITY
@@ -397,7 +399,7 @@ class AliceBob(nn.Module):
         rewards = successes.clone()
 
         msg_lengths = sender_action[1].view(-1).float()
-        
+
         rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
 
         if(self.penalty > 0.0):
@@ -444,21 +446,21 @@ class AliceBob(nn.Module):
 
     def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
         self.eval()
-        
+
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
         batch_size = 256
         nb_batch = int(np.ceil(len(data_iterator) / batch_size))
-        
+
         batch_numbers = range(nb_batch)
         if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch))
         for _ in batch_numbers:
             with torch.no_grad():
-                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category 
+                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
 
-                _, receiver_outcome = self(batch)
-        
+                sender_outcome, receiver_outcome = self(batch)
+
                 receiver_pointing = pointing(receiver_outcome.scores)
                 failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
 
@@ -466,7 +468,7 @@ class AliceBob(nn.Module):
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
                 data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
-                
+
                 np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
                 np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
@@ -487,11 +489,25 @@ class AliceBob(nn.Module):
             # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
             failure_matrix_eval_d = failure_matrix[:, eval_categories]
             counts_matrix_eval_d = counts_matrix[:, eval_categories]
-            
+
             counts = counts_matrix_eval_d.sum()
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
             print('Accuracy eval-d %s' % accuracy_eval_d)
-    
+
+        # Smoothing
+        counts_matrix += 2
+        failure_matrix += 1.0
+
+        failure_matrix /= counts_matrix #
+        #print(failure_matrix)
+
+        score_matrix = failure_matrix
+        np.fill_diagonal(score_matrix, 0.0)
+        #score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
+        #np.fill_diagonal(score_matrix, -np.inf) # Warning: this line is very important!
+        #print(score_matrix)
+        data_iterator.difficulty_scores = score_matrix
+
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):
         """
@@ -560,7 +576,7 @@ class AliceBob(nn.Module):
                     batch_msg_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(device) # Bag of words (i.e., symbols) count vectors, here initialized with 0·s
                     # message -> many-hot TODO What?
                     many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,self.base_alphabet_size).float()
-                
+
                     target_category = torch.stack([torch.tensor(x.category) for x in batch.original])
                     # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
                     current_dist += torch.einsum('bi,bj->ij', many_hots, target_category.float().to(device)).detach().float()
@@ -603,6 +619,6 @@ class AliceBob(nn.Module):
                         symbol_counts += selected_symbols.sum(dim=0)
 
         if log_entropy and (event_writer is not None):
-            event_writer.writer.add_scalar('llp/entropy', utils.compute_entropy(symbol_counts), number_ex_seen)
+            event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
 
         self.eval()

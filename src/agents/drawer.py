@@ -3,7 +3,7 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 
-from modules import MessageEncoder, Randomizer, build_cnn_decoder_from_args
+from ..modules import MessageEncoder, Randomizer, build_cnn_decoder_from_args
 
 Outcome = namedtuple("Outcome", ["image"])
 

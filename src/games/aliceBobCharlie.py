@@ -4,10 +4,10 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from sender import Sender
-from receiver import Receiver
-from drawer import Drawer
-from utils import show_imgs, max_normalize_, to_color, Progress
+from ..agents.sender import Sender
+from ..agents.receiver import Receiver
+from ..agents.drawer import Drawer
+from ..utils import show_imgs, max_normalize_, to_color, Progress
 
 class AliceBobCharlie(nn.Module):
     def __init__(self, args):

@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 
-from sender import Sender
-from receiver import Receiver
-from modules import build_cnn_encoder_from_args, build_embeddings
+from .sender import Sender
+from .receiver import Receiver
+from ..modules import build_cnn_encoder_from_args, build_embeddings
 
 class SenderReceiver(nn.Module):
     def __init__(self, sender, receiver, check_shared_params=True):

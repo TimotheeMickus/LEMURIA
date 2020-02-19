@@ -14,15 +14,15 @@ import itertools
 import random
 from deprecated import deprecated
 
-from config import *
+from .config import *
 
 # [START] Imports shared code from the parent directory
-parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
-sys.path.append(parent_dir_path)
+#parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
+#sys.path.append(parent_dir_path)
 
-from utils import add_normal_noise
+from ..utils import add_normal_noise
 
-sys.path.remove(parent_dir_path)
+#sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
 class Batch():

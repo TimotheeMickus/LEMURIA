@@ -9,20 +9,17 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from data import get_data_loader
-
-from config import *
+from .cbc.data import get_data_loader
+from .cbc.config import *
 
 # [START] Imports shared code from the parent directory
-parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
-sys.path.append(parent_dir_path)
+#parent_dir_path = os.path.join(os.path.dirname(__file__), os.pardir)
+#sys.path.append(parent_dir_path)
 
-from aliceBob import AliceBob
-from aliceBobCharlie import AliceBobCharlie
-from aliceBobPopulation import AliceBobPopulation
-from utils import build_optimizer, AverageSummaryWriter
+from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
+from .utils import build_optimizer, AverageSummaryWriter
 
-sys.path.remove(parent_dir_path)
+#sys.path.remove(parent_dir_path)
 # [END] Imports shared code from the parent directory
 
 if(__name__ == "__main__"):
