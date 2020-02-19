@@ -10,10 +10,12 @@ from senderReceiver import SenderReceiver
 class AliceBobPopulation(AliceBob):
     def __init__(self, args):
         nn.Module.__init__(self)
+        
+        self.base_alphabet_size = args.base_alphabet_size
 
-        size, shared = args.population, args.shared
+        size = args.population
 
-        if(shared):
+        if(args.shared):
             self._agents = [SenderReceiver.from_args(args) for _ in range(size)]
 
             self.senders, self.receivers = zip(*[(agent.sender, agent.receiver) for agent in self._agents])

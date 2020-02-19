@@ -20,9 +20,9 @@ class AliceBob(nn.Module):
     def __init__(self, args):
         nn.Module.__init__(self)
 
-        shared = args.shared
+        self.base_alphabet_size = args.base_alphabet_size
 
-        if(shared):
+        if(args.shared):
             senderReceiver = SenderReceiver.from_args(args)
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
@@ -61,7 +61,6 @@ class AliceBob(nn.Module):
         return self._forward(batch, self.sender, self.receiver)
 
     def decision_tree(self, data_iterator):
-        base_alphabet_size = self.get_base_alphabet_size()
         self.eval()
 
         print("Generating the messages…")
@@ -77,7 +76,7 @@ class AliceBob(nn.Module):
         import numpy as np
 
         n = 3
-        alphabet_size = base_alphabet_size + 1
+        alphabet_size = self.base_alphabet_size + 1
         nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
         print('Number of possible %i-grams: %i' % (n, nb_ngrams))
 
@@ -439,15 +438,6 @@ class AliceBob(nn.Module):
 
         return loss
 
-    def get_base_alphabet_size(self):
-        extra_symbols = 2 if self.shared else 1
-        if hasattr(self, 'sender'):
-            return self.sender.message_decoder.symbol_embeddings.weight.size(0) - extra_symbols
-        elif hasattr(self, 'senders'):
-            return self.senders[0].message_decoder.symbol_embeddings.weight.size(0) - extra_symbols
-        else:
-            raise TypeError
-
     def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
         self.eval()
         
@@ -521,8 +511,6 @@ class AliceBob(nn.Module):
         """
         self.train() # Sets the model in training mode
 
-        base_alphabet_size = self.get_base_alphabet_size()
-
         with Progress(simple_display, steps_per_epoch, epoch) as pbar:
             total_reward = 0.0 # sum of the rewards since the beginning of the epoch
             total_success = 0.0 # sum of the successes since the beginning of the epoch
@@ -532,10 +520,10 @@ class AliceBob(nn.Module):
             start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
             end_i = start_i + steps_per_epoch
             device = next(self.parameters()).device
-            past_dist, current_dist = None, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings # TODO What do these variable mean?
+            past_dist, current_dist = None, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device) # size of embeddings # TODO What do these variable mean?
 
             if event_writer is not None and log_entropy:
-                symbol_counts = torch.zeros(base_alphabet_size, dtype=torch.float).to(device)
+                symbol_counts = torch.zeros(self.base_alphabet_size, dtype=torch.float).to(device)
             for i, batch in zip(range(start_i, end_i), data_iterator):
                 optim.zero_grad()
                 sender_outcome, receiver_outcome = self(batch)
@@ -571,9 +559,9 @@ class AliceBob(nn.Module):
                 running_avg_success = total_success / total_items
 
                 if log_lang_progress: # TODO À quoi sert cette section ?
-                    batch_msg_manyhot = torch.zeros((batch.size, base_alphabet_size + 2), dtype=torch.float).to(device) # Bag of words (i.e., symbols) count vectors, here initialized with 0·s
+                    batch_msg_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(device) # Bag of words (i.e., symbols) count vectors, here initialized with 0·s
                     # message -> many-hot TODO What?
-                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,base_alphabet_size).float()
+                    many_hots = batch_msg_manyhot.scatter_(1,sender_outcome.action[0].detach(),1).narrow(1,1,self.base_alphabet_size).float()
                     # summation along batch dimension,  and add to counts # TODO summation of what? and what are the "counts" mentioned?
                     current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(device)).detach().float()
 
@@ -600,17 +588,17 @@ class AliceBob(nn.Module):
 
                     if log_lang_progress and i%100 == 0:
                         if past_dist is None:
-                            past_dist, current_dist = current_dist, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device)
+                            past_dist, current_dist = current_dist, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device)
                             continue
                         else:
                             logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
                             prev_p = (past_dist.view(1, -1) / past_dist.sum())
                             kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
                             event_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
-                            past_dist, current_dist = current_dist, torch.zeros((base_alphabet_size, 5), dtype=torch.float).to(device)
+                            past_dist, current_dist = current_dist, torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(device)
                     if log_entropy:
                         new_messages = sender_outcome.action[0].view(-1)
-                        valid_indices = torch.arange(base_alphabet_size).expand(new_messages.size(0), base_alphabet_size).to(device)
+                        valid_indices = torch.arange(self.base_alphabet_size).expand(new_messages.size(0), self.base_alphabet_size).to(device)
                         selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
                         symbol_counts += selected_symbols.sum(dim=0)
 
