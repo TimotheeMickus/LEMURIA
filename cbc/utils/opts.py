@@ -13,48 +13,7 @@ def get_args():
 
     default_data_set = os.path.join('data', 'cbc')
     default_models = os.path.join('[summary]', 'models')
-<<<<<<< HEAD
-    arg_parser.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models)
-
-    arg_parser.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
-    #arg_parser.add_argument('-cpu', help='run PyTorch on CPU instead of GPU', action='store_true')
-
-    arg_parser.add_argument('--batch_size', help='batch size', default=128, type=int)
-
-    arg_parser.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
-
-    arg_parser.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
-
-    arg_parser.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
-    arg_parser.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true')
-
-    arg_parser.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
-
-    arg_parser.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
-
-    arg_parser.add_argument('--population', help='population size', default=None, type=int)
-
-    arg_parser.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
-
-    arg_parser.add_argument('--base_alphabet_size', help='size of the alphabet (not including special symbols)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
-    arg_parser.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
-
-    arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
-    arg_parser.add_argument('--steps_per_epoch', help='number of epochs', default=1000, type=int)
-
-    arg_parser.add_argument('--runs', help='number of runs', default=1, type=int)
-
-    arg_parser.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
-
-    arg_parser.add_argument('--grad_clipping', help='threshold for gradient clipping', default=None, type=float)
-    arg_parser.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
-
-    arg_parser.add_argument('--debug', '-d', help='log more stuff', action='store_true')
-    arg_parser.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
-    arg_parser.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
-=======
     default_summary = os.path.join('runs', 'cbc', ('[now]_' + socket.gethostname()))
->>>>>>> structured argument parser
 
     group = arg_parser.add_argument_group(title='data', description='arguments relative to data handling')
     group.add_argument('--data_set', help='the path to the data set', default=default_data_set)
@@ -99,6 +58,7 @@ def get_args():
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
+    group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
     group.add_argument('--runs', help='number of runs', default=1, type=int)
 
     group = arg_parser.add_argument_group(title='Conv', description='arguments relative to convolutional structure')

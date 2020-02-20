@@ -290,7 +290,7 @@ class DistinctTargetClassDataLoader():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=self.batch_size, sampling_strategies=['difficulty'], no_evaluation=True, target_evaluation=False, noise=self.noise, keep_category=False, device=self.device):
+    def get_batch(self, size=None, sampling_strategies=['difficulty'], no_evaluation=True, target_evaluation=False, keep_category=False):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
         'sampling_strategies' indicates how the distractor·s are determined.
@@ -300,6 +300,7 @@ class DistinctTargetClassDataLoader():
         'device' is a PyTorch parameter.
         """
         batch = []
+        size = size or self.batch_size
         for _ in range(size):
             # Choice of the original/target category
             categories = self.training_categories
@@ -308,21 +309,21 @@ class DistinctTargetClassDataLoader():
             target_category = random.choice(list(categories))
 
             # Original image
-            _original = np.random.choice(self.categories[target_category]).toInput(keep_category, device)
-            _original.add_normal_noise_(noise)
+            _original = np.random.choice(self.categories[target_category]).toInput(keep_category, self.device)
+            _original.add_normal_noise_(self.noise)
 
             # Target image
             if(self.same_img): _target = _original
             else: # Same category
-                _target = np.random.choice(self.categories[target_category]).toInput(keep_category, device)
-                _target.add_normal_noise_(noise)
+                _target = np.random.choice(self.categories[target_category]).toInput(keep_category, self.device)
+                _target.add_normal_noise_(self.noise)
 
             # Base distractors
             _base_distractors = []
             for sampling_strategy in sampling_strategies:
                 distractor_category = self.sample_category(sampling_strategy, target_category, no_evaluation)
-                distractor = np.random.choice(self.categories[distractor_category]).toInput(keep_category, device)
-                distractor.add_normal_noise_(noise)
+                distractor = np.random.choice(self.categories[distractor_category]).toInput(keep_category, self.device)
+                distractor.add_normal_noise_(self.noise)
 
                 _base_distractors.append(distractor)
 
