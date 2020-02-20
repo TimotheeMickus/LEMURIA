@@ -47,6 +47,7 @@ arg_parser.add_argument('--base_alphabet_size', help='size of the alphabet (not 
 arg_parser.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
 
 arg_parser.add_argument('--epochs', help='number of epochs', default=100, type=int)
+arg_parser.add_argument('--steps_per_epoch', help='number of epochs', default=1000, type=int)
 
 arg_parser.add_argument('--runs', help='number of runs', default=1, type=int)
 

@@ -64,7 +64,7 @@ if(__name__ == "__main__"):
 
         print(("[%s] training start..." % datetime.now()), flush=True)
         for epoch in range(args.epochs):
-            model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug, log_entropy=args.log_entropy)
+            model.train_epoch(data_loader, optimizer, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug, log_entropy=args.log_entropy, steps_per_epoch=args.steps_per_epoch)
             model.evaluate(data_loader, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
 
             if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
