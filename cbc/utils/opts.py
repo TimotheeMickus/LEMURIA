@@ -8,7 +8,6 @@ import socket # for `gethostname`
 from datetime import datetime
 
 def get_args():
-
     arg_parser = argparse.ArgumentParser()
 
     default_data_set = os.path.join('data', 'cbc')
@@ -19,6 +18,7 @@ def get_args():
     group.add_argument('--data_set', help='the path to the data set', default=default_data_set)
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
+    group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty)', default='difficulty')
     group.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')

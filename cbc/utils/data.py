@@ -157,10 +157,11 @@ class DistinctTargetClassDataLoader():
 
         return category_idx
 
-    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128):
+    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different']):
         self.device = device
         self.noise = noise
-        self.batch_size=batch_size
+        self.batch_size = batch_size
+        self.sampling_strategies = sampling_strategies
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
         # If `evaluation_categories` is None, all categories are used during training
@@ -292,7 +293,7 @@ class DistinctTargetClassDataLoader():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=None, sampling_strategies=['difficulty'], no_evaluation=True, target_evaluation=False, keep_category=False):
+    def get_batch(self, size=None, sampling_strategies=None, no_evaluation=True, target_evaluation=False, keep_category=False):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
         'sampling_strategies' indicates how the distractor·s are determined.
@@ -303,6 +304,7 @@ class DistinctTargetClassDataLoader():
         """
         batch = []
         size = size or self.batch_size
+        sampling_strategies = sampling_strategies or self.sampling_strategies
         for _ in range(size):
             # Choice of the original/target category
             categories = self.training_categories
@@ -335,12 +337,7 @@ class DistinctTargetClassDataLoader():
 
         return Batch(size=size, original=original, target=target, base_distractors=base_distractors)
 
-    @deprecated(version='[on n\'a pas de numéro de version, mais aujourd\'hui est le 2019/02/19, un mercredi]', reason='pas vraiment de raison ; je fais un test')
-    def __iter__(self):
-        """Iterates over batches of default parameters"""
-        while True:
-            yield self.get_batch()
-
-
 def get_data_loader(args):
-    return DistinctTargetClassDataLoader(args.same_img, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size)
+    sampling_strategies = args.sampling_strategies.split('/')
+
+    return DistinctTargetClassDataLoader(args.same_img, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies)

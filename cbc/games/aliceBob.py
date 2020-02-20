@@ -84,7 +84,7 @@ class AliceBob(Game):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
         batch_size = 4
-        batch = data_iterator.get_batch(batch_size) # Standard training batch
+        batch = data_iterator.get_batch(batch_size, sampling_strategies=['hamming1', 'different'])
 
         batch.require_grad()
 
