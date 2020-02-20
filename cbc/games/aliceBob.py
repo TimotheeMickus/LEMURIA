@@ -263,7 +263,8 @@ class AliceBob(Game):
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
 
-                sender_outcome, receiver_outcome = self(batch)
+                sender_outcome = self.sender(self._alice_input(batch))
+                receiver_outcome = self.receiver(self._bob_input(batch), *sender_outcome.action)
 
                 receiver_pointing = pointing(receiver_outcome.scores)
                 failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
