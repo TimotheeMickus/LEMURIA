@@ -448,7 +448,7 @@ class AliceBob(nn.Module):
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
-        batch_size = 512
+        batch_size = 256
         nb_batch = int(np.ceil(len(data_iterator) / batch_size))
         
         batch_numbers = range(nb_batch)
@@ -457,16 +457,18 @@ class AliceBob(nn.Module):
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category 
 
-                sender_outcome, receiver_outcome = self(batch)
+                _, receiver_outcome = self(batch)
         
                 receiver_pointing = pointing(receiver_outcome.scores)
-                failure = receiver_pointing['dist'].probs[:, 1] # Probability of the different image
+                failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
-                counts_matrix[target_category, distractor_category] += 1
-                failure_matrix[target_category, distractor_category] += failure.cpu().numpy()
+                data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
+                
+                np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
+                np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
         # Computes the accuracy when the target is selected from any category
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
@@ -474,7 +476,7 @@ class AliceBob(nn.Module):
 
         eval_categories = data_iterator.evaluation_categories_idx
         if(eval_categories != []):
-            # Computes the acuracy when the target is selected from an evaluation category (never seen during training)
+            # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
             failure_matrix_eval_t = failure_matrix[eval_categories, :]
             counts_matrix_eval_t = counts_matrix[eval_categories, :]
 
@@ -482,27 +484,13 @@ class AliceBob(nn.Module):
             accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
             print('Accuracy eval-t: %s' % accuracy_eval_t)
 
-            # Computes the acuracy when the distractor is selected from an evaluation category (never seen during training)
+            # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
             failure_matrix_eval_d = failure_matrix[:, eval_categories]
             counts_matrix_eval_d = counts_matrix[:, eval_categories]
             
             counts = counts_matrix_eval_d.sum()
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
             print('Accuracy eval-d %s' % accuracy_eval_d)
-
-        # Smoothing
-        counts_matrix += 2
-        failure_matrix += 1.0
-
-        failure_matrix /= counts_matrix # 
-        #print(failure_matrix)
-
-        score_matrix = failure_matrix
-        np.fill_diagonal(score_matrix, 0.0)
-        #score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
-        #np.fill_diagonal(score_matrix, -np.inf) # Warning: this line is very important!
-        #print(score_matrix)
-        data_iterator.difficulty_scores = score_matrix
     
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False):

@@ -94,6 +94,33 @@ class DataPoint():
         
         return InputDataPoint(img, category)
 
+class FailureBasedDistribution():
+    def __init__(self, nb_categories, momentum_factor=0.79, smoothing_factor=1.0):
+        self.momentum_factor = momentum_factor
+
+        # Initialisation with smoothing
+        self.counts_matrix = np.full((nb_categories, nb_categories), smoothing_factor)
+        self.failure_matrix = np.full((nb_categories, nb_categories), (0.5 * smoothing_factor))
+        np.fill_diagonal(self.failure_matrix, 0.0)
+
+    def update(self, target_category_idx, distractor_category_idx, failure):
+        # Note: if the same pair (target, distractor) appears multiple time, the momentum factor would still be applied only once
+        self.counts_matrix[target_category_idx, distractor_category_idx] *= self.momentum_factor
+        np.add.at(self.counts_matrix, (target_category_idx, distractor_category_idx), 1.0)
+        self.failure_matrix[target_category_idx, distractor_category_idx] *= self.momentum_factor
+        np.add.at(self.failure_matrix, (target_category_idx, distractor_category_idx), failure)
+
+    def distribution(self, category_idx, allowed_categories_idx=None):
+        unnormalised_dist = (self.failure_matrix[category_idx, allowed_categories_idx] / self.counts_matrix[category_idx, allowed_categories_idx])
+        return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
+        
+    def sample(self, category_idx, allowed_categories_idx=None):
+        dist = self.distribution(category_idx, allowed_categories_idx)
+       
+        if(allowed_categories_idx is None): allowed_categories_idx = range(dist.shape[1])
+
+        return np.random.choice(a=allowed_categories_idx, p=dist)
+
 class DistinctTargetClassDataLoader():
     # The binary concepts
     shapes = {'cube': 0, 'sphere': 1}
@@ -204,7 +231,7 @@ class DistinctTargetClassDataLoader():
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
 
-        self.difficulty_scores = None # This matrix is set during the evaluation phase
+        self.failure_based_distribution = FailureBasedDistribution(self.nb_categories)
 
         if(simple_display): print('Loading done')
 
@@ -260,20 +287,11 @@ class DistinctTargetClassDataLoader():
             return self._different_category(category, no_evaluation)
 
         if(sampling_strategy == 'difficulty'): # Selects a category based on the difficulty scores, that are softmaxed
-            if(self.difficulty_scores is None): return self._different_category(category, no_evaluation)
-            
-            line = self.difficulty_scores[self.category_idx(category)]
-            if(no_evaluation):
-                categories_idx = self.training_categories_idx
-                dist = line[categories_idx]
-                #dist = scispe.softmax(line[categories_idx])
-            else:
-                categories_idx = range(self.nb_categories)
-                dist = line
-                #dist = scispe.softmax(line)
-            dist /= np.linalg.norm(dist, 1)
+            category_idx = self.category_idx(category)
+            allowed_categories_idx = self.training_categories_idx if(no_evaluation) else None
+            sample_idx = self.failure_based_distribution.sample(category_idx, allowed_categories_idx)
 
-            return self.category_tuple(np.random.choice(a=categories_idx, p=dist))
+            return self.category_tuple(sample_idx)
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
