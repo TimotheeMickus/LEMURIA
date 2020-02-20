@@ -303,20 +303,6 @@ class AliceBob(Game):
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
             print('Accuracy eval-d %s' % accuracy_eval_d)
 
-        # Smoothing
-        counts_matrix += 2
-        failure_matrix += 1.0
-
-        failure_matrix /= counts_matrix #
-        #print(failure_matrix)
-
-        score_matrix = failure_matrix
-        np.fill_diagonal(score_matrix, 0.0)
-        #score_matrix = np.log(failure_matrix / (1 - failure_matrix)) # Inverse of the sigmoid
-        #np.fill_diagonal(score_matrix, -np.inf) # Warning: this line is very important!
-        #print(score_matrix)
-        data_iterator.difficulty_scores = score_matrix
-
     @property
     def num_batches_per_episode(self):
         return 1
