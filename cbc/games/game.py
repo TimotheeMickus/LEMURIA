@@ -17,7 +17,7 @@ class Game(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def optims(self):
+    def agents(self):
         """
         List agents involved in the current round of the game
         """
@@ -25,7 +25,7 @@ class Game(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def agents(self):
+    def optims(self):
         """
         List optimizers involved in the current round of the game
         """
