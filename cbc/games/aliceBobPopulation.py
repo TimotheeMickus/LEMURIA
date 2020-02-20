@@ -77,8 +77,6 @@ class AliceBobPopulation(AliceBob):
     def num_batches_per_episode(self):
         return 1
 
-    def evaluate(self, *vargs, **kwargs):
-        pass
     @property
     def optims(self):
         return (self.optim,)
