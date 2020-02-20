@@ -8,7 +8,7 @@ from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.misc import show_imgs, max_normalize_, to_color, Progress, log_grads_tensorboard
 
-class AliceBobCharlie(Game):
+class AliceBobCharlie(nn.Module, Game):
     def __init__(self, args):
         super(Game, self).__init__()
         self.sender = Sender.from_args(args)
@@ -219,7 +219,7 @@ class AliceBobCharlie(Game):
     @property
     def agents(self):
         return self.sender, self.receiver, self.drawer
-        
+
     @property
     def num_batches_per_episode(self):
         return 1

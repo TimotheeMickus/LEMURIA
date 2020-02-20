@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions.categorical import Categorical
 import numpy as np
-
+import itertools as it
 import tqdm
 
 from collections import defaultdict
@@ -17,8 +17,6 @@ from .game import Game
 
 class AliceBob(Game):
     def __init__(self, args):
-        super(Game, self).__init__()
-
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
 
@@ -26,9 +24,11 @@ class AliceBob(Game):
             senderReceiver = SenderReceiver.from_args(args)
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
+            parameters = senderReceiver.parameters()
         else:
             self.sender = Sender.from_args(args)
             self.receiver = Receiver.from_args(args)
+            parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
 
         self.use_expectation = args.use_expectation
         self.grad_scaling = args.grad_scaling or 0
@@ -38,7 +38,7 @@ class AliceBob(Game):
         self.penalty = args.penalty
         self.adaptative_penalty = args.adaptative_penalty
 
-        self.optim = build_optimizer(self.parameters(), args.learning_rate)
+        self.optim = build_optimizer(parameters, args.learning_rate)
 
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
@@ -66,7 +66,11 @@ class AliceBob(Game):
 
         return rewards, successes, avg_msg_length, losses
 
-    def forward(self, batch):
+    def to(self, *vargs, **kwargs):
+        self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
+        return self
+
+    def __call__(self, batch):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -249,7 +253,7 @@ class AliceBob(Game):
         return loss
 
     def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
-        self.eval()
+        for agent in self.agents: agent.eval()
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))

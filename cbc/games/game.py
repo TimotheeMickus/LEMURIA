@@ -6,10 +6,7 @@ import torch.nn as nn
 
 from ..utils.misc import Progress
 
-class Game(nn.Module, metaclass=ABCMeta):
-    @abstractmethod
-    def __init__(self, *vargs, **kwargs):
-        super(nn.Module, self).__init__(*vargs, **kwargs)
+class Game(metaclass=ABCMeta):
 
     @abstractmethod
     def test_visualize(self, data_iterator, learning_rate):
@@ -64,16 +61,19 @@ class Game(nn.Module, metaclass=ABCMeta):
         """
         Called before starting a new round of the game. Override for setup behavior.
         """
-        pass
+        for agent in self.agents:  # Sets the current agents in training mode
+            agent.train()
+
 
     def end_episode(self):
         """
         Called after finishing a round of the game. Override for cleanup behavior.
         """
-        pass
+        for agent in self.agents:
+            agent.eval()
 
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, optim, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False, base_alphabet_size=None):
+    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, log_lang_progress=True, log_entropy=False, base_alphabet_size=None):
         """
             Model training function
             Input:
@@ -84,7 +84,6 @@ class Game(nn.Module, metaclass=ABCMeta):
                 `steps_per_epoch`: number of steps for epoch
                 `event_writer`: tensorboard writer to log evolution of values
         """
-        self.train() # Sets the model in training mode
 
         with Progress(simple_display, steps_per_epoch, epoch) as pbar:
 
@@ -180,5 +179,3 @@ class Game(nn.Module, metaclass=ABCMeta):
 
         if log_entropy and (event_writer is not None):
             event_writer.writer.add_scalar('llp/entropy', compute_entropy(symbol_counts), number_ex_seen)
-
-        self.eval()
