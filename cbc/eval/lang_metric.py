@@ -32,6 +32,6 @@ def compute_correlation(messages, categories):
 
     return spearman(categories, messssages)
 
-def main(args)
+def main(args):
     messages, categories = read_csv(args.messages_file)
     print(compute_correlation(messages, categories))

@@ -81,7 +81,7 @@ def get_args():
     # For evaluate_language.py
     group.add_argument('--load_other_model', help='path to a second model to load')
     group.add_argument('--message_dump_file', help='output file for messages produced by model')
-    group.add_argument('--message_file', help='input file containing messages paired with their categories')
+    group.add_argument('--messages_file', help='input file containing messages paired with their categories')
 
     args = arg_parser.parse_args()
     print(args)
