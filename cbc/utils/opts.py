@@ -75,11 +75,13 @@ def get_args():
 
     group.add_argument('--evaluate_language', help='evaluate language instead of training', action='store_true')
     group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
+    group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')
     # For visualize.py / evaluate_language.py
     group.add_argument('--load_model', help='the path to the model to load')
     # For evaluate_language.py
     group.add_argument('--load_other_model', help='path to a second model to load')
     group.add_argument('--message_dump_file', help='output file for messages produced by model')
+    group.add_argument('--message_file', help='input file containing messages paired with their categories')
 
     args = arg_parser.parse_args()
     print(args)

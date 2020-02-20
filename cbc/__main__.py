@@ -58,5 +58,8 @@ if(__name__ == "__main__"):
     elif args.visualize:
         from .eval.visualize import main
         main(args)
+    elif args.compute_correlation:
+        from .eval.lang_metric import main
+        main(args)
     else:
         train(args)
