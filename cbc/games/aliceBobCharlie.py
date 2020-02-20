@@ -222,7 +222,7 @@ class AliceBobCharlie(nn.Module, Game):
 
     @property
     def num_batches_per_episode(self):
-        return 1
+        return 2
 
     def evaluate(self):
         #TODO

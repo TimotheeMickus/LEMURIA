@@ -327,4 +327,4 @@ class AliceBob(Game):
 
     @property
     def optims(self):
-        return self.optim,
+        return (self.optim,)

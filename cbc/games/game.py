@@ -17,7 +17,7 @@ class Game(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def agents(self):
+    def optims(self):
         """
         List agents involved in the current round of the game
         """
@@ -147,7 +147,7 @@ class Game(metaclass=ABCMeta):
                         # summation along batch dimension,  and add to counts
                         current_dist += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(device)).detach().float()
 
-                pbar.update(self.num_batches_per_episode, R=running_avg_success)
+                pbar.update(self.num_batches_per_episode, S=running_avg_success)
 
                 # logs some values
                 if(event_writer is not None):
