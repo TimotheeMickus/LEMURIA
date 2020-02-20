@@ -8,6 +8,7 @@ import socket # for `gethostname`
 from datetime import datetime
 
 def get_args():
+
     arg_parser = argparse.ArgumentParser()
 
     default_data_set = os.path.join('data', 'cbc')
@@ -33,6 +34,7 @@ def get_args():
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
     group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
+    group.add_argument('--logging_period', help='how often counts of logged variables are accumulated', type=int, default=10)
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
     group.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)

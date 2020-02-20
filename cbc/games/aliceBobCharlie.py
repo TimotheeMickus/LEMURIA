@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
-from ..utils.logging import Progress, log_grads_tensorboard
+from ..utils.logging import Progress
 from ..utils.misc import show_imgs, max_normalize_, to_color
 
 class AliceBobCharlie(nn.Module, Game):

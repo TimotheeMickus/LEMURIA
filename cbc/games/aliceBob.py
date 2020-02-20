@@ -11,7 +11,6 @@ from collections import defaultdict
 from deprecated import deprecated
 
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.logging import log_grads_tensorboard
 from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, build_optimizer
 
 from .game import Game

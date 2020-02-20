@@ -13,7 +13,7 @@ from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
 from .utils.data import get_data_loader
 from .utils.opts import get_args
 from .utils.misc import build_optimizer
-from .utils.logging import AverageSummaryWriter
+from .utils.logging import AutoLogger
 
 
 def train(args):
@@ -41,15 +41,12 @@ def train(args):
 
         data_loader = get_data_loader(args)
 
-        if(args.no_summary): event_writer = None
-        else:
-            tmp_writer = SummaryWriter(run_summary_dir)
-            event_writer = AverageSummaryWriter(writer=tmp_writer, default_period=10)
+        autologger = AutoLogger(simple_display=args.simple_display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, base_alphabet_size=args.base_alphabet_size, device=args.device, no_summary=args.no_summary, summary_dir=args.summary, default_period=args.logging_period)
 
         print(("[%s] training start..." % datetime.now()), flush=True)
         for epoch in range(args.epochs):
-            model.train_epoch(data_loader, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug, log_entropy=args.log_entropy, steps_per_epoch=args.steps_per_epoch)
-            model.evaluate(data_loader, epoch=epoch, event_writer=event_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
+            model.train_epoch(data_loader, epoch=epoch, autologger=autologger, steps_per_epoch=args.steps_per_epoch)
+            model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
 
             if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
 
