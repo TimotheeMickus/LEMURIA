@@ -6,7 +6,7 @@ with open("regular.tsv", "w") as ostr:
             message = [2 * i + int(c) for i,c in enumerate(category)] + [10]
             print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
 
-rolls = 3
+rolls = 5
 with open("random-order.tsv", "w") as ostr:
     idx = 0
     for i in range(rolls):
