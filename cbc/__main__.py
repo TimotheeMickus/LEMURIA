@@ -9,10 +9,11 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
+from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
 from .utils.data import get_data_loader
 from .utils.opts import get_args
-from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
-from .utils.misc import build_optimizer, AverageSummaryWriter
+from .utils.misc import build_optimizer
+from .utils.logging import AverageSummaryWriter
 
 
 def train(args):

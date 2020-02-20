@@ -11,7 +11,8 @@ from collections import defaultdict
 from deprecated import deprecated
 
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, log_grads_tensorboard, build_optimizer
+from ..utils.logging import log_grads_tensorboard
+from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, build_optimizer
 
 from .game import Game
 
@@ -84,7 +85,7 @@ class AliceBob(Game):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
         batch_size = 4
-        batch = data_iterator.get_batch(batch_size, sampling_strategies=['hamming1', 'different'])
+        batch = data_iterator.get_batch(batch_size) # Standard training batch
 
         batch.require_grad()
 

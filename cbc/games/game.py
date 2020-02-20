@@ -4,7 +4,7 @@ import more_itertools as m_it
 import torch
 import torch.nn as nn
 
-from ..utils.misc import Progress
+from ..utils.logging import Progress
 
 class Game(metaclass=ABCMeta):
 
