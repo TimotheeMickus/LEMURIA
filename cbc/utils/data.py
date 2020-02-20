@@ -165,24 +165,26 @@ class DistinctTargetClassDataLoader():
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
         # If `evaluation_categories` is None, all categories are used during training
-        # Otherwise, category (0,0,…,0) and all categories with a distance from (0,0,…,0) that is a multiple of `evaluation_categories` are reserved for evaluation
+        # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         self.training_categories = set()
         self.evaluation_categories = set()
-        category = np.full(self.nb_concepts, False)
+        ref_category = np.array([np.random.randint(len(concept)) for concept in self._concepts])
+        category = np.full(self.nb_concepts, 0)
         while(True): # Enumerates all categories to sort them
-            dist = category.sum()
+            dist = (category != ref_category).sum()
             if((evaluation_categories is not None) and ((dist % evaluation_categories) == 0)):
                 self.evaluation_categories.add(tuple(category))
             else:
                 self.training_categories.add(tuple(category))
 
-            if(category.all()): break # If category is (1,1,…,1), we've seen all categories
-            for j in range(len(category)): # Let's go to the next category
-                if(category[j] == False):
-                    category[j] = True
+            # Let's go to the next category
+            for i, concept in enumerate(self._concepts):
+                if(category[i] < (len(concept) - 1)):
+                    category[i] += 1
                     break
 
-                category[j] = False
+                category[i] = 0
+            if(category.sum() == 0): break # If we're back to (0,0,…,0), then we've seen all categories
 
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
