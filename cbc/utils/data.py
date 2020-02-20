@@ -340,4 +340,4 @@ class DistinctTargetClassDataLoader():
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    return DistinctTargetClassDataLoader(args.same_img, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies)
+    return DistinctTargetClassDataLoader(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies)

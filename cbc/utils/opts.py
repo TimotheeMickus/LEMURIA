@@ -20,6 +20,7 @@ def get_args():
     group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
     group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty)', default='difficulty')
     group.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
+    group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=None, type=int)
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary)
