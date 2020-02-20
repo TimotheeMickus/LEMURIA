@@ -3,15 +3,14 @@ import tqdm
 import sklearn.tree
 import matplotlib.pyplot as plt
 
-def decision_tree(self, data_iterator):
-    base_alphabet_size = self.get_base_alphabet_size()
-    self.eval()
+def decision_tree(model, data_iterator):
+    model.eval()
 
     print("Generating the messages…")
     messages = []
     with torch.no_grad():
         for datapoint in tqdm.tqdm(data_iterator.dataset):
-            sender_outcome = self.sender(datapoint.img.unsqueeze(0))
+            sender_outcome = model.sender(datapoint.img.unsqueeze(0))
             message = sender_outcome.action[0].view(-1).tolist()
             messages.append(message)
             #print((datapoint.category, message))
@@ -20,7 +19,7 @@ def decision_tree(self, data_iterator):
     import numpy as np
 
     n = 3
-    alphabet_size = base_alphabet_size + 1
+    alphabet_size = model.base_alphabet_size + 1
     nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
     print('Number of possible %i-grams: %i' % (n, nb_ngrams))
 

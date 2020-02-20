@@ -104,13 +104,12 @@ class Game(nn.Module, metaclass=ABCMeta):
                 if log_entropy:
                     symbol_counts = torch.zeros(base_alphabet_size, dtype=torch.float).to(device)
 
-            raw_batches = zip(range(start_i, end_i), data_iterator)
+            raw_batches = range(start_i, end_i)
 
-            for chunked_data in m_it.chunked(raw_batches, self.num_batches_per_episode):
-                indices, batches = zip(*chunked_data)
+            for indices in m_it.chunked(raw_batches, self.num_batches_per_episode):
+                indices = list(indices)
+                batches = [data_iterator.get_batch(keep_category=log_lang_progress) for _ in indices]
                 self.start_episode()
-
-                batches = list(batches)
 
                 for optim in self.optims:
                     optim.zero_grad()
