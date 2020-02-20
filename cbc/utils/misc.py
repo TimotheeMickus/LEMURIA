@@ -73,19 +73,19 @@ class AverageSummaryWriter:
         self.writer = writer
         self.default_period = default_period
         self.specific_periods = specific_periods
-        self.prefix = prefix # If not None, will be add (with ':') before all tags
+        self.prefix = prefix # If not None, will be added (with ':') before all tags
 
-        self._values = {};
+        self._values = {}
 
     def reset_values(self):
         self._values = {}
 
-    def add_scalar(self, tag, scalar_value, global_step=None):
+    def add_scalar(self, tag, scalar_value, global_step=None, period=None):
         values = self._values.setdefault(tag, [])
         values.append(scalar_value)
 
-        period = self.specific_periods.get(tag, self.default_period)
-        if(len(values) == period): # If the buffer is full, logs the average and clears the buffer
+        if(period is None): period = self.specific_periods.get(tag, self.default_period)
+        if(len(values) >= period): # If the buffer is full, logs the average and clears the buffer
             _tag = tag if(self.prefix is None) else (self.prefix + ':' +  tag)
             self.writer.add_scalar(tag=_tag, scalar_value=np.mean(values), global_step=global_step)
 

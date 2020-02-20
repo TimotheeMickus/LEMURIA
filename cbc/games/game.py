@@ -86,14 +86,11 @@ class Game(metaclass=ABCMeta):
         """
 
         with Progress(simple_display, steps_per_epoch, epoch) as pbar:
-
             total_reward = 0.0 # sum of the rewards since the beginning of the epoch
             total_success = 0.0 # sum of the successes since the beginning of the epoch
             total_items = 0 # number of training instances since the beginning of the epoch
             running_avg_reward = 0.0
             running_avg_success = 0.0
-            start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
-            end_i = start_i + steps_per_epoch
 
             device = next(self.agents[0].parameters()).device
 
@@ -103,6 +100,8 @@ class Game(metaclass=ABCMeta):
                 if log_entropy:
                     symbol_counts = torch.zeros(base_alphabet_size, dtype=torch.float).to(device)
 
+            start_i = (epoch * steps_per_epoch)
+            end_i = (start_i + steps_per_epoch)
             raw_batches = range(start_i, end_i)
 
             for indices in m_it.chunked(raw_batches, self.num_batches_per_episode):

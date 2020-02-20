@@ -87,7 +87,7 @@ class DataPoint():
         return InputDataPoint(img, category)
 
 class FailureBasedDistribution():
-    def __init__(self, nb_categories, momentum_factor=0.79, smoothing_factor=1.0):
+    def __init__(self, nb_categories, momentum_factor=0.99, smoothing_factor=1.0):
         self.momentum_factor = momentum_factor
 
         # Initialisation with smoothing
@@ -223,7 +223,9 @@ class DistinctTargetClassDataLoader():
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()}
 
-        self.failure_based_distribution = FailureBasedDistribution(self.nb_categories)
+        # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
+        # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
+        self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
 
         if(simple_display): print('Loading done')
 

@@ -252,14 +252,14 @@ class AliceBob(Game):
 
         return loss
 
-    def evaluate(self, data_iterator, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
+    def evaluate(self, data_iterator, epoch, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
         for agent in self.agents: agent.eval()
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
         batch_size = 256
-        nb_batch = int(np.ceil(len(data_iterator) / batch_size))
+        nb_batch = int(np.ceil(len(data_iterator) / batch_size)) # Doing so makes us see on average at least each data point once; this also means that each cell of the failure matrix is updated (len(data_iterator) / ((nb_categories) * (nb_categories - 1))) time, which can be quite low (~10)
 
         batch_numbers = range(nb_batch)
         if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch))
@@ -283,6 +283,7 @@ class AliceBob(Game):
 
         # Computes the accuracy when the target is selected from any category
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
+        if(event_writer is not None): event_writer.add_scalar('eval/accuracy', accuracy_all, epoch, period=1)
         print('Accuracy: %s' % accuracy_all)
 
         eval_categories = data_iterator.evaluation_categories_idx
@@ -293,6 +294,7 @@ class AliceBob(Game):
 
             counts = counts_matrix_eval_t.sum()
             accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-t', accuracy_eval_t, epoch, period=1)
             print('Accuracy eval-t: %s' % accuracy_eval_t)
 
             # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
@@ -301,6 +303,7 @@ class AliceBob(Game):
 
             counts = counts_matrix_eval_d.sum()
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-d', accuracy_eval_d, epoch, period=1)
             print('Accuracy eval-d %s' % accuracy_eval_d)
 
     @property
