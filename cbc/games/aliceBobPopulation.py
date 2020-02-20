@@ -4,6 +4,7 @@ import random
 
 from .aliceBob import AliceBob
 from ..agents import Sender, Receiver, SenderReceiver
+from ..utils.misc import build_optimizer
 
 class AliceBobPopulation(AliceBob):
     def __init__(self, args):
@@ -38,6 +39,8 @@ class AliceBobPopulation(AliceBob):
         self.adaptative_penalty = args.adaptative_penalty
 
         self._sender, self._receiver = None, None
+        self.start_episode()
+        self.optim = build_optimizer(self.agent_parameters, args.learning_rate)
 
     def to(self, *vargs, **kwargs):
         self = super().to(*vargs, **kwargs)
@@ -73,3 +76,9 @@ class AliceBobPopulation(AliceBob):
     @property
     def num_batches_per_episode(self):
         return 1
+
+    def evaluate(self, *vargs, **kwargs):
+        pass
+    @property
+    def optims(self):
+        return (self.optim,)
