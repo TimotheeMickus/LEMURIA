@@ -50,6 +50,13 @@ def main(args):
     assert args.message_dump_file is not None, "Messages are required."
 
     messages, categories = read_csv(args.message_dump_file)
-
-    print('levenshtein:', compute_correlation(messages, categories))
-    print('jaccard:',  compute_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False))
+    l_cor = compute_correlation(messages, categories).correlation
+    j_cor = compute_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False).correlation
+    if args.simple_display:
+        print(args.message_dump_file, l_cor, j_cor, sep='\t')
+    else:
+        print(
+            'file: %s' % args.message_dump_file,
+            'levenshtein: %f' % l_cor,
+            'jaccard: %f' % j_cor,
+            sep='\t')
