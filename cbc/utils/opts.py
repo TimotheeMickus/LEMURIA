@@ -21,7 +21,7 @@ def get_args():
     group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
     group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty)', default='difficulty')
     group.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
-    group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=None, type=int)
+    group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=5, type=int)
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary)
@@ -38,13 +38,13 @@ def get_args():
     group.add_argument('--quiet', help='display less information', action='store_true')
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
-    group.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
+    group.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.01, type=float)
     group.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true')
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument('--beta_sender', help='sender entropy penalty coefficient', type=float, default=0.01)
     group.add_argument('--beta_receiver', help='sender entropy penalty coefficient', type=float, default=0.001)
     group.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
-    group.add_argument('--grad_clipping', help='threshold for gradient clipping', default=None, type=float)
+    group.add_argument('--grad_clipping', help='threshold for gradient clipping', default=1, type=float)
     group.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
 
     group = arg_parser.add_argument_group(title='Language', description='arguments relative to language capacity')
