@@ -53,12 +53,24 @@ def generate_synonym_table(num_synonyms, upper_mwe_len):
         synonym_table = list(m_it.chunked(items, num_synonyms))[:10]
     return synonym_table, base_alphabet_size
 
-
 #1. Generate regular language
 with open(os.path.join(OUTPUT_DIR, 'regular.tsv'), 'w') as ostr:
     for id, category in enumerate(it.product([0, 1], repeat=5)):
             message = _base_msg(category) + [10]
             print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
+
+#1. Generate random languages
+with open(os.path.join(OUTPUT_DIR, 'irregular.tsv'), 'w') as ostr:
+    for _ in range(NUMBER_MSG_PER_CATEGORY):
+        for category in it.product([0, 1], repeat=5):
+                message = random.choices(range(10), k=random.choice(range(10))) + [10]
+                print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
+
+with open(os.path.join(OUTPUT_DIR, 'irregular-constlen.tsv'), 'w') as ostr:
+    for _ in range(NUMBER_MSG_PER_CATEGORY):
+        for category in it.product([0, 1], repeat=5):
+                message = random.choices(range(10), k=5) + [10]
+                print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
 
 for synonyms in range(1, MAX_SYNONYMS + 1):
 
