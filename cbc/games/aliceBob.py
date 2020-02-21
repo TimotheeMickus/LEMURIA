@@ -15,7 +15,7 @@ from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, build_optimizer
 from ..utils import misc
 
-from ..eval import lang_metric
+from ..eval import compute_correlation
 
 from .game import Game
 
@@ -351,15 +351,15 @@ class AliceBob(Game):
         else:
             sample_messages, sample_categories = zip(*sample)
 
-            l_cor = lang_metric.compute_correlation(sample_messages, sample_categories).correlation
+            l_cor = compute_correlation.compute_correlation(sample_messages, sample_categories).correlation
             print('Levenshtein: %f' % l_cor)
-            
-            l_n_cor = lang_metric.compute_correlation(sample_messages, sample_categories, message_distance=lang_metric.levenshtein_normalised).correlation
+
+            l_n_cor = compute_correlation.compute_correlation(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised).correlation
             print('Levenshtein (normalised): %f' % l_n_cor)
-            
-            j_cor = lang_metric.compute_correlation(sample_messages, sample_categories, message_distance=lang_metric.jaccard, map_msg_to_str=False).correlation
+
+            j_cor = compute_correlation.compute_correlation(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False).correlation
             print('Jaccard: %f' % j_cor)
-            
+
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
                 event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)

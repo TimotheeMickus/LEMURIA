@@ -1,4 +1,5 @@
 import itertools as it
+import functools as ft
 import csv
 from collections import Counter
 import random
@@ -27,15 +28,18 @@ def read_csv(csv_filename):
 
     return messages, categories
 
+#@ft.lru_cache(maxsize=128)
 def levenshtein(str1, str2, normalise=False):
     tmp = Levenshtein.distance(str1, str2)
     if(normalise): tmp /= (len(str1) + len(str2))
 
     return tmp
 
+#@ft.lru_cache(maxsize=128)
 def levenshtein_normalised(str1, str2):
     return levenshtein(str1, str2, normalise=True)
 
+#@ft.lru_cache(maxsize=128)
 def jaccard(seq1, seq2):
     cnt1, cnt2 = Counter(seq1), Counter(seq2)
     return 1.0 - len(cnt1 & cnt2) / len(cnt1 | cnt2)
@@ -69,10 +73,13 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
         remapped_categories = list(map(mapping.__getitem__, map(tuple, categories)))
         results.append(compute_correlation(messages, remapped_categories, **kwargs).correlation)
     results = np.array(results)
-    return results.mean(), results.std()
+    return results.mean(), results.std(), (results.mean() / results.std())
 
 def score(cor, μ, σ):
     return (cor - μ) / σ
+
+def analyze_correlation(messages, categories, scrambling_pool_size, **kwargs):
+    cor = compute_correlation(messages, categories, **kwargs)
 
 def main(args):
     assert args.message_dump_file is not None, "Messages are required."
