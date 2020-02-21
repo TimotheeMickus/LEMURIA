@@ -3,7 +3,7 @@ import csv
 from collections import Counter
 
 from Levenshtein import hamming
-from Levenshtein import distance as levenshtein
+import Levenshtein
 from scipy.stats import spearmanr as spearman
 
 def read_csv(csv_filename):
@@ -24,6 +24,15 @@ def read_csv(csv_filename):
     categories = [list(map(eval, ctg)) for ctg in categories]
 
     return messages, categories
+
+def levenshtein(str1, str2, normalise=False):
+    tmp = Levenshtein.distance(str1, str2)
+    if(normalise): tmp /= (len(str1) + len(str2))
+
+    return tmp
+
+def levenshtein_normalised(str1, str2):
+    return levenshtein(str1, str2, normalise=True)
 
 def jaccard(seq1, seq2):
     cnt1, cnt2 = Counter(seq1), Counter(seq2)
@@ -51,12 +60,14 @@ def main(args):
 
     messages, categories = read_csv(args.message_dump_file)
     l_cor = compute_correlation(messages, categories).correlation
+    l_n_cor = compute_correlation(messages, categories, message_distance=levenshtein_normalised).correlation
     j_cor = compute_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False).correlation
     if args.simple_display:
         print(args.message_dump_file, l_cor, j_cor, sep='\t')
     else:
         print(
             'file: %s' % args.message_dump_file,
-            'levenshtein: %f' % l_cor,
-            'jaccard: %f' % j_cor,
+            'Levenshtein: %f' % l_cor,
+            'Levenshtein (normalised): %f' % l_n_cor,
+            'Jaccard: %f' % j_cor,
             sep='\t')
