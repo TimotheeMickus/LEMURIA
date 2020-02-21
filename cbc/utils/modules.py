@@ -112,7 +112,7 @@ class MessageDecoder(nn.Module):
 
         # converts output to tensor
         message = torch.stack(message, dim=1)
-        message_len = (message != self.padding_idx).cumsum(dim=1)[:,-1,None]
+        message_len = (message != self.padding_idx).sum(dim=1)[:,None]
         log_probs = torch.stack(log_probs, dim=1)
 
         # average entropy over timesteps, hence ignore padding

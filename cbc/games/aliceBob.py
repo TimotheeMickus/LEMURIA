@@ -10,6 +10,7 @@ import tqdm
 from collections import defaultdict
 from deprecated import deprecated
 import random
+import time
 
 from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, build_optimizer
@@ -268,7 +269,7 @@ class AliceBob(Game):
         batch_numbers = range(nb_batch)
         messages = []
         categories = []
-        if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch))
+        if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
         for _ in batch_numbers:
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
@@ -276,7 +277,7 @@ class AliceBob(Game):
                 sender_outcome = sender(self._alice_input(batch))
                 receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
-                messages.extend([msg.tolist() for msg in sender_outcome.action[0]])
+                messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
                 categories.extend([x.category for x in batch.original])
 
                 receiver_pointing = pointing(receiver_outcome.scores)
@@ -316,8 +317,8 @@ class AliceBob(Game):
             print('Accuracy eval-d %s' % accuracy_eval_d)
 
             # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
-            failure_matrix_eval_td = failure_matrix[eval_categories, eval_categories]
-            counts_matrix_eval_td = counts_matrix[eval_categories, eval_categories]
+            failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
+            counts_matrix_eval_td = counts_matrix[np.ix_(eval_categories, eval_categories)]
 
             counts = counts_matrix_eval_td.sum()
             accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
@@ -326,8 +327,6 @@ class AliceBob(Game):
 
         # Computes compositionality measures
         # First selects a sample of (message, category) pairs
-        print(messages[:100])
-        print(len(messages[:100]))
         size_sample = (100 * data_iterator.nb_categories)
 
         sample = list(zip(messages, categories))
@@ -351,14 +350,27 @@ class AliceBob(Game):
         else:
             sample_messages, sample_categories = zip(*sample)
 
+            timepoint = time.time() 
             l_cor = compute_correlation.compute_correlation(sample_messages, sample_categories).correlation
             print('Levenshtein: %f' % l_cor)
+
+            timepoint2 = time.time()
+            print(timepoint2 - timepoint)
+            timepoint2 = timepoint
 
             l_n_cor = compute_correlation.compute_correlation(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised).correlation
             print('Levenshtein (normalised): %f' % l_n_cor)
 
+            timepoint2 = time.time()
+            print(timepoint2 - timepoint)
+            timepoint2 = timepoint
+
             j_cor = compute_correlation.compute_correlation(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False).correlation
             print('Jaccard: %f' % j_cor)
+
+            timepoint2 = time.time()
+            print(timepoint2 - timepoint)
+            timepoint2 = timepoint
 
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
