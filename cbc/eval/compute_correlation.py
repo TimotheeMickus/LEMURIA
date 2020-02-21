@@ -79,7 +79,10 @@ def score(cor, μ, σ):
     return (cor - μ) / σ
 
 def analyze_correlation(messages, categories, scrambling_pool_size, **kwargs):
-    cor = compute_correlation(messages, categories, **kwargs)
+    cor = compute_correlation(messages, categories, **kwargs).correlation
+    μ, σ = compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs)
+    impr = score(cor, μ, σ)
+    return cor, μ, σ, impr 
 
 def main(args):
     assert args.message_dump_file is not None, "Messages are required."
