@@ -1,10 +1,9 @@
 import itertools as it
 import functools as ft
 import csv
-from collections import Counter
+import collections
 import random
 
-from Levenshtein import hamming as _hamming
 import Levenshtein
 from scipy.stats import spearmanr as spearman
 import numpy as np
@@ -28,27 +27,52 @@ def read_csv(csv_filename):
 
     return messages, categories
 
-@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=1024)
 def levenshtein(str1, str2, normalise=False):
     tmp = Levenshtein.distance(str1, str2)
     if(normalise): tmp /= (len(str1) + len(str2))
 
     return tmp
 
-@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=1024)
 def hamming(str1, str2):
-    return _hamming(str1, str2)
+    return Levenshtein.hamming(str1, str2)
 
-@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=1024)
 def levenshtein_normalised(str1, str2):
     return levenshtein(str1, str2, normalise=True)
 
-@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=1024)
 def jaccard(seq1, seq2):
-    cnt1, cnt2 = Counter(seq1), Counter(seq2)
-    intersection = len(cnt1 & cnt2)
-    union = (len(cnt1) + len(cnt2) - intersection)
-    return 1.0 - intersection / union
+    union = len(seq1)
+    intersection = 0
+    d = collections.defaultdict(int)
+    for i in seq1:
+        d[i] += 1
+    for i in seq2:
+        x = d[i]
+        if(x > 0):
+            d[i] -= 1
+            intersection += 1
+        else:
+            union += 1
+    return 1 - (intersection / union)
+
+"""
+@ft.lru_cache(maxsize=1024)
+def jaccard2(seq1, seq2):
+    proto_union = len(seq1) + len(seq2)
+    intersection = 0
+    d = collections.defaultdict(int)
+    for i in seq1:
+        d[i] += 1
+    for i in seq2:
+        x = d[i]
+        if(x > 0):
+            d[i] -= 1
+            intersection += 1
+    return 1 - (intersection / (proto_union - intersection))
+"""
 
 def compute_correlation(messages, categories, message_distance=levenshtein, meaning_distance=hamming, map_msg_to_str=True, map_ctg_to_str=True):
     """
@@ -95,8 +119,8 @@ def main(args):
 
     messages, categories = read_csv(args.message_dump_file)
 
-    l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories, 10)
-    l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, 10, message_distance=levenshtein_normalised)
+    #l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories, 10)
+    #l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, 10, message_distance=levenshtein_normalised)
     j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, 10, message_distance=jaccard, map_msg_to_str=False)
 
     if args.simple_display:
@@ -104,7 +128,7 @@ def main(args):
     else:
         print(
             'file: %s' % args.message_dump_file,
-            'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, l_bi),
-            'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, l_n_bi),
+            #'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, l_bi),
+            #'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, l_n_bi),
             'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, j_bi),
             sep='\t')

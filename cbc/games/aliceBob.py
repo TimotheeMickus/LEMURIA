@@ -349,28 +349,30 @@ class AliceBob(Game):
             print('Compositionality measures cannot be computed (%i messages and %i different categories in the sample).' % (len(mes), len(cat)))
         else:
             sample_messages, sample_categories = zip(*sample)
+            sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
 
-            timepoint = time.time()
+
+            #timepoint = time.time()
             l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories)
             print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
 
-            timepoint2 = time.time()
-            print(timepoint2 - timepoint)
-            timepoint2 = timepoint
+            #timepoint2 = time.time()
+            #print(timepoint2 - timepoint)
+            #timepoint2 = timepoint
 
             l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=100, message_distance=compute_correlation.levenshtein_normalised)
             print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
 
-            timepoint2 = time.time()
-            print(timepoint2 - timepoint)
-            timepoint2 = timepoint
+            #timepoint2 = time.time()
+            #print(timepoint2 - timepoint)
+            #timepoint2 = timepoint
 
             j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=100, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
             print('Jaccard: %f - %f' % (j_cor, j_cor_n))
 
-            timepoint2 = time.time()
-            print(timepoint2 - timepoint)
-            timepoint2 = timepoint
+            #timepoint2 = time.time()
+            #print(timepoint2 - timepoint)
+            #timepoint2 = timepoint
 
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
