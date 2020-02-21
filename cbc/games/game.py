@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import collections
 
-from ..utils.logging import AutoLogger
+from ..utils.logging import NotALogger
 
 class Game(metaclass=ABCMeta):
 
@@ -74,7 +74,7 @@ class Game(metaclass=ABCMeta):
             agent.eval()
 
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, autologger=AutoLogger()):
+    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, autologger=NotALogger()):
         """
             Model training function
             Input:
@@ -85,7 +85,6 @@ class Game(metaclass=ABCMeta):
                 `steps_per_epoch`: number of steps for epoch
                 `event_writer`: tensorboard writer to log evolution of values
         """
-
         with autologger:
 
             start_i = (epoch * steps_per_epoch)

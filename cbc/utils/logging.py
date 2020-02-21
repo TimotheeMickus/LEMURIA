@@ -62,6 +62,18 @@ class Progress:
     def __exit__(self, type, value, traceback):
         if(not self.simple_display): self.pbar.close()
 
+class NotALogger(object):
+    """
+        Place holder class
+    """
+    def __enter__(self):
+        pass
+    def __exit__(self, *vargs, **kwargs):
+        pass
+    def update(self, *vargs, **kwargs):
+        pass
+
+
 class AutoLogger(object):
     def __init__(self, simple_display=False, steps_per_epoch=1000, debug=False, log_lang_progress=False, log_entropy=False, base_alphabet_size=10, device='cpu',no_summary=False, summary_dir=None, default_period=10):
         self.simple_display = simple_display
@@ -81,7 +93,8 @@ class AutoLogger(object):
         if no_summary:
             self.summary_writer = None
         else:
-             self.summary_writer = AverageSummaryWriter(log_dir=summary_dir, default_period=default_period)
+            import pdb; pdb.set_trace()
+            self.summary_writer = AverageSummaryWriter(log_dir=summary_dir, default_period=default_period)
         self._pbar = None
 
         self._state = {}
