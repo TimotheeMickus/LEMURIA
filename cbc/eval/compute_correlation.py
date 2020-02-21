@@ -68,6 +68,6 @@ def main(args):
         print(
             'file: %s' % args.message_dump_file,
             'Levenshtein: %f' % l_cor,
-            'Levenshtein (normalised): %f' % l_n_cor,
+            'Levenshtein (normalized): %f' % l_n_cor,
             'Jaccard: %f' % j_cor,
             sep='\t')

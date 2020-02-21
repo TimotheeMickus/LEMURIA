@@ -59,7 +59,7 @@ if(__name__ == "__main__"):
         from .eval.visualize import main
         main(args)
     elif args.compute_correlation:
-        from .eval.lang_metric import main
+        from .eval.compute_correlation import main
         main(args)
     else:
         train(args)
