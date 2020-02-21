@@ -351,23 +351,22 @@ class AliceBob(Game):
             sample_messages, sample_categories = zip(*sample)
 
             timepoint = time.time()
-            # TODO Use analyze_correction(sample_messages, sample_categories, scrambling_pool_size=100) instead
-            l_cor = compute_correlation.compute_correlation(sample_messages, sample_categories).correlation
-            print('Levenshtein: %f' % l_cor)
+            l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories)
+            print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
 
             timepoint2 = time.time()
             print(timepoint2 - timepoint)
             timepoint2 = timepoint
 
-            l_n_cor = compute_correlation.compute_correlation(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised).correlation
-            print('Levenshtein (normalised): %f' % l_n_cor)
+            l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=100, message_distance=compute_correlation.levenshtein_normalised)
+            print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
 
             timepoint2 = time.time()
             print(timepoint2 - timepoint)
             timepoint2 = timepoint
 
-            j_cor = compute_correlation.compute_correlation(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False).correlation
-            print('Jaccard: %f' % j_cor)
+            j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=100, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
+            print('Jaccard: %f - %f' % (j_cor, j_cor_n))
 
             timepoint2 = time.time()
             print(timepoint2 - timepoint)
@@ -375,8 +374,11 @@ class AliceBob(Game):
 
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Lev-based comp (normalised)', l_cor_n, epoch, period=1)
                 event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Normalised Lev-based comp (normalised)', l_n_cor_n, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Jaccard-based comp (normalised)', j_cor_n, epoch, period=1)
 
     @property
     def num_batches_per_episode(self):
