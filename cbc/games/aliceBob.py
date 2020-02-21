@@ -350,7 +350,8 @@ class AliceBob(Game):
         else:
             sample_messages, sample_categories = zip(*sample)
 
-            timepoint = time.time() 
+            timepoint = time.time()
+            # TODO Use analyze_correction(sample_messages, sample_categories, scrambling_pool_size=100) instead
             l_cor = compute_correlation.compute_correlation(sample_messages, sample_categories).correlation
             print('Levenshtein: %f' % l_cor)
 
