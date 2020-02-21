@@ -7,7 +7,7 @@ import os
 
 OUTPUT_DIR = 'data/gen-langs'
 NUMBER_MSG_PER_CATEGORY = 10
-MAX_SWAP = 5
+MAX_SWAP = 2
 MAX_SYNONYMS = 3
 MAX_UPPER_MWE_LEN = 3
 
@@ -61,12 +61,27 @@ with open(os.path.join(OUTPUT_DIR, 'regular.tsv'), 'w') as ostr:
             print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
 
 for synonyms in range(1, MAX_SYNONYMS + 1):
+
     for upper_mwe_len in range(1, MAX_UPPER_MWE_LEN + 1):
-        synonym_table, base_alphabet_size = generate_synonym_table(synonyms, upper_mwe_len)
+
         base_name = 'syn-%i_mwe-%i_' % (synonyms, upper_mwe_len)
+
         for swaps in range(MAX_SWAP + 1):
-            # total random scramble
+
+            synonym_table, base_alphabet_size = generate_synonym_table(synonyms, upper_mwe_len)
             if swaps == 0:
+                # no scramble
+                with open(os.path.join(OUTPUT_DIR, base_name + 'strict-order.tsv'), 'w') as ostr:
+                    idx = 0
+                    for i in range(NUMBER_MSG_PER_CATEGORY):
+                        for category in it.product([True, False], repeat=5):
+                            message = _base_msg(category)
+                            message = _pretty(message, synonym_table, base_alphabet_size)
+                            print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
+                            idx += 1
+
+                synonym_table, base_alphabet_size = generate_synonym_table(synonyms, upper_mwe_len)
+                # total random scramble
                 with open(os.path.join(OUTPUT_DIR, base_name + 'random-order.tsv'), 'w') as ostr:
                     idx = 0
                     for i in range(NUMBER_MSG_PER_CATEGORY):
@@ -76,6 +91,7 @@ for synonyms in range(1, MAX_SYNONYMS + 1):
                             message = _pretty(message, synonym_table, base_alphabet_size)
                             print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
                             idx += 1
+
             # random inversion of `swap` pairs
             else:
                 with open(os.path.join(OUTPUT_DIR, base_name + 'swap-%i.tsv' % swaps), 'w') as ostr:
