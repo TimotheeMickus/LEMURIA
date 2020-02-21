@@ -4,7 +4,7 @@ import csv
 from collections import Counter
 import random
 
-from Levenshtein import hamming
+from Levenshtein import hamming as _hamming
 import Levenshtein
 from scipy.stats import spearmanr as spearman
 import numpy as np
@@ -20,29 +20,35 @@ def read_csv(csv_filename):
 
     messages = map(str.strip, messages)
     messages = map(str.split, messages)
-    messages = [list(map(int, msg)) for msg in messages]
+    messages = [tuple(map(int, msg)) for msg in messages]
 
     categories = map(str.strip, categories)
     categories = map(str.split, categories)
-    categories = [list(map(int, ctg)) for ctg in categories]
+    categories = [tuple(map(int, ctg)) for ctg in categories]
 
     return messages, categories
 
-#@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=128)
 def levenshtein(str1, str2, normalise=False):
     tmp = Levenshtein.distance(str1, str2)
     if(normalise): tmp /= (len(str1) + len(str2))
 
     return tmp
 
-#@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=128)
+def hamming(str1, str2):
+    return _hamming(str1, str2)
+
+@ft.lru_cache(maxsize=128)
 def levenshtein_normalised(str1, str2):
     return levenshtein(str1, str2, normalise=True)
 
-#@ft.lru_cache(maxsize=128)
+@ft.lru_cache(maxsize=128)
 def jaccard(seq1, seq2):
     cnt1, cnt2 = Counter(seq1), Counter(seq2)
-    return 1.0 - len(cnt1 & cnt2) / len(cnt1 | cnt2)
+    intersection = len(cnt1 & cnt2)
+    union = (len(cnt1) + len(cnt2) - intersection)
+    return 1.0 - intersection / union
 
 def compute_correlation(messages, categories, message_distance=levenshtein, meaning_distance=hamming, map_msg_to_str=True, map_ctg_to_str=True):
     """
@@ -73,7 +79,7 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
         remapped_categories = list(map(mapping.__getitem__, map(tuple, categories)))
         results.append(compute_correlation(messages, remapped_categories, **kwargs).correlation)
     results = np.array(results)
-    return results.mean(), results.std(), (results.mean() / results.std())
+    return results.mean(), results.std()
 
 def score(cor, μ, σ):
     return (cor - μ) / σ
@@ -82,28 +88,23 @@ def analyze_correlation(messages, categories, scrambling_pool_size, **kwargs):
     cor = compute_correlation(messages, categories, **kwargs).correlation
     μ, σ = compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs)
     impr = score(cor, μ, σ)
-    return cor, μ, σ, impr 
+    return cor, μ, σ, impr
 
 def main(args):
     assert args.message_dump_file is not None, "Messages are required."
 
     messages, categories = read_csv(args.message_dump_file)
 
-    l_cor = compute_correlation(messages, categories).correlation
-    l_bμ, l_bσ = compute_correlation_baseline(messages, categories, 10)
-
-    l_n_cor = compute_correlation(messages, categories, message_distance=levenshtein_normalised).correlation
-    l_n_bμ, l_n_bσ = compute_correlation_baseline(messages, categories, 10, message_distance=levenshtein_normalised)
-
-    j_cor = compute_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False).correlation
-    j_bμ, j_bσ = compute_correlation_baseline(messages, categories, 10, message_distance=jaccard, map_msg_to_str=False)
+    l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories, 10)
+    l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, 10, message_distance=levenshtein_normalised)
+    j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, 10, message_distance=jaccard, map_msg_to_str=False)
 
     if args.simple_display:
-        print(args.message_dump_file, l_cor, score(l_cor, l_bμ, l_bσ), l_n_cor, score(l_n_cor, l_n_bμ, l_n_bσ), j_cor, score(j_cor, j_bμ, j_bσ), sep='\t')
+        print(args.message_dump_file, l_cor, l_bi, l_n_cor, l_n_bi, j_cor, j_bi, sep='\t')
     else:
         print(
             'file: %s' % args.message_dump_file,
-            'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, score(l_cor, l_bμ, l_bσ)),
-            'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, score(l_n_cor, l_n_bμ, l_n_bσ)),
-            'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, score(j_cor, j_bμ, j_bσ)),
+            'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, l_bi),
+            'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, l_n_bi),
+            'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, j_bi),
             sep='\t')
