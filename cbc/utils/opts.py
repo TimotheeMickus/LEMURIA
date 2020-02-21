@@ -35,6 +35,7 @@ def get_args():
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
     group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
     group.add_argument('--logging_period', help='how often counts of logged variables are accumulated', type=int, default=10)
+    group.add_argument('--quiet', help='display less information', action='store_true')
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
     group.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
@@ -80,9 +81,9 @@ def get_args():
     group.add_argument('--load_model', help='the path to the model to load')
     # For evaluate_language.py
     group.add_argument('--load_other_model', help='path to a second model to load')
-    group.add_argument('--message_dump_file', help='output file for messages produced by model')
-    group.add_argument('--messages_file', help='input file containing messages paired with their categories')
+    group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
 
     args = arg_parser.parse_args()
-    print(args)
+    if not args.quiet:
+        print(args)
     return args

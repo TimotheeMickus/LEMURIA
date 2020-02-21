@@ -33,8 +33,8 @@ def compute_correlation(messages, categories):
     return spearman(categories, messages)
 
 def main(args):
-    assert args.messages_file is not None, "Messages are required."
+    assert args.message_dump_file is not None, "Messages are required."
 
-    messages, categories = read_csv(args.messages_file)
+    messages, categories = read_csv(args.message_dump_file)
 
     print(compute_correlation(messages, categories))
