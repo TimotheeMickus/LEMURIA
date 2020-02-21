@@ -9,9 +9,13 @@ import tqdm
 
 from collections import defaultdict
 from deprecated import deprecated
+import random
 
 from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, build_optimizer
+from ..utils import misc
+
+from ..eval import lang_metric
 
 from .game import Game
 
@@ -262,6 +266,8 @@ class AliceBob(Game):
         nb_batch = int(np.ceil(len(data_iterator) / batch_size)) # Doing so makes us see on average at least each data point once; this also means that each cell of the failure matrix is updated (len(data_iterator) / ((nb_categories) * (nb_categories - 1))) time, which can be quite low (~10)
 
         batch_numbers = range(nb_batch)
+        messages = []
+        categories = []
         if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch))
         for _ in batch_numbers:
             with torch.no_grad():
@@ -269,6 +275,9 @@ class AliceBob(Game):
                 sender, receiver = self.agents
                 sender_outcome = sender(self._alice_input(batch))
                 receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
+
+                messages.extend([msg.tolist() for msg in sender_outcome.action[0]])
+                categories.extend([x.category for x in batch.original])
 
                 receiver_pointing = pointing(receiver_outcome.scores)
                 failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
@@ -305,6 +314,56 @@ class AliceBob(Game):
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
             if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-d', accuracy_eval_d, epoch, period=1)
             print('Accuracy eval-d %s' % accuracy_eval_d)
+
+            # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
+            failure_matrix_eval_td = failure_matrix[eval_categories, eval_categories]
+            counts_matrix_eval_td = counts_matrix[eval_categories, eval_categories]
+
+            counts = counts_matrix_eval_td.sum()
+            accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-td', accuracy_eval_td, epoch, period=1)
+            print('Accuracy eval-td %s' % accuracy_eval_td)
+
+        # Computes compositionality measures
+        # First selects a sample of (message, category) pairs
+        print(messages[:100])
+        print(len(messages[:100]))
+        size_sample = (100 * data_iterator.nb_categories)
+
+        sample = list(zip(messages, categories))
+        random.shuffle(sample)
+        sample = sample[:size_sample]
+        # (To sample from each category instead, start with: d = misc.group_by(messages, categories))
+
+        # Checks that the sample contains at least two differents categories and two differents messages
+        ok = False
+        mes = set()
+        cat = set()
+        for m, c in sample:
+            mes.add(tuple(m))
+            cat.add(tuple(c))
+            if((len(mes) > 1) and (len(cat) > 1)):
+                ok = True
+                break
+
+        if(ok == False):
+            print('Compositionality measures cannot be computed (%i messages and %i different categories in the sample).' % (len(mes), len(cat)))
+        else:
+            sample_messages, sample_categories = zip(*sample)
+
+            l_cor = lang_metric.compute_correlation(sample_messages, sample_categories).correlation
+            print('Levenshtein: %f' % l_cor)
+            
+            l_n_cor = lang_metric.compute_correlation(sample_messages, sample_categories, message_distance=lang_metric.levenshtein_normalised).correlation
+            print('Levenshtein (normalised): %f' % l_n_cor)
+            
+            j_cor = lang_metric.compute_correlation(sample_messages, sample_categories, message_distance=lang_metric.jaccard, map_msg_to_str=False).correlation
+            print('Jaccard: %f' % j_cor)
+            
+            if(event_writer is not None):
+                event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
 
     @property
     def num_batches_per_episode(self):

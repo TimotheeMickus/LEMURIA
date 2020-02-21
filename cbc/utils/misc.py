@@ -7,6 +7,15 @@ from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import torchvision
 
+import collections
+
+# Accepts either a list `l1` of pairs (element, key) or a list `l1` of elements and a list `l2` of keys
+def group_by(l1, l2=None):
+    if(l2 is not None): l1 = zip(l1, l2)
+    d = collections.defaultdict(list)
+    for e, k in l1: d[k].append(e)
+
+    return d
 
 # A simple class the purpose of which is to assign ids to object
 class Vocabulary:
