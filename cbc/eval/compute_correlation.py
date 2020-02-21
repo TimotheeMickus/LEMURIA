@@ -108,7 +108,7 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
 def score(cor, μ, σ):
     return (cor - μ) / σ
 
-def analyze_correlation(messages, categories, scrambling_pool_size, **kwargs):
+def analyze_correlation(messages, categories, scrambling_pool_size=10, **kwargs):
     cor = compute_correlation(messages, categories, **kwargs).correlation
     μ, σ = compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs)
     impr = score(cor, μ, σ)
@@ -119,9 +119,9 @@ def main(args):
 
     messages, categories = read_csv(args.message_dump_file)
 
-    l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories, 10)
-    l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, 10, message_distance=levenshtein_normalised)
-    j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, 10, message_distance=jaccard, map_msg_to_str=False)
+    l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories)
+    l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, message_distance=levenshtein_normalised)
+    j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False)
 
     if args.simple_display:
         print(args.message_dump_file, l_cor, l_bi, l_n_cor, l_n_bi, j_cor, j_bi, sep='\t')
