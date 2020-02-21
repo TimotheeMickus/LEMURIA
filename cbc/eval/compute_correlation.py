@@ -27,22 +27,22 @@ def read_csv(csv_filename):
 
     return messages, categories
 
-@ft.lru_cache(maxsize=1024)
+@ft.lru_cache(maxsize=32768)
 def levenshtein(str1, str2, normalise=False):
     tmp = Levenshtein.distance(str1, str2)
     if(normalise): tmp /= (len(str1) + len(str2))
 
     return tmp
 
-@ft.lru_cache(maxsize=1024)
+@ft.lru_cache(maxsize=32768)
 def hamming(str1, str2):
     return Levenshtein.hamming(str1, str2)
 
-@ft.lru_cache(maxsize=1024)
+@ft.lru_cache(maxsize=32768)
 def levenshtein_normalised(str1, str2):
     return levenshtein(str1, str2, normalise=True)
 
-@ft.lru_cache(maxsize=1024)
+@ft.lru_cache(maxsize=32768)
 def jaccard(seq1, seq2):
     union = len(seq1)
     intersection = 0
@@ -59,7 +59,7 @@ def jaccard(seq1, seq2):
     return 1 - (intersection / union)
 
 """
-@ft.lru_cache(maxsize=1024)
+@ft.lru_cache(maxsize=32768)
 def jaccard2(seq1, seq2):
     proto_union = len(seq1) + len(seq2)
     intersection = 0

@@ -327,7 +327,7 @@ class AliceBob(Game):
 
         # Computes compositionality measures
         # First selects a sample of (message, category) pairs
-        size_sample = (100 * data_iterator.nb_categories)
+        size_sample = (30 * data_iterator.nb_categories)
 
         sample = list(zip(messages, categories))
         random.shuffle(sample)
@@ -353,21 +353,21 @@ class AliceBob(Game):
 
 
             #timepoint = time.time()
-            l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories)
+            l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30)
             print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=100, message_distance=compute_correlation.levenshtein_normalised)
+            l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.levenshtein_normalised)
             print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=100, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
+            j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
             print('Jaccard: %f - %f' % (j_cor, j_cor_n))
 
             #timepoint2 = time.time()
