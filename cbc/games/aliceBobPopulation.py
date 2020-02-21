@@ -73,3 +73,20 @@ class AliceBobPopulation(AliceBob):
     @property
     def optims(self):
         return (self.optim,)
+
+    def save(self, path):
+        state = {
+            'agents_state_dicts':[agent.state_dict() for agent in self._agents],
+            'optims':[optim for optim in self.optims],
+        }
+        torch.save(state, path)
+
+
+    @classmethod
+    def load(cls, path, args, _old_model=False):
+        checkpoint = torch.load(path, map_location=args.device)
+        instance = cls(args)
+        for agent, state_dict in zip(instance._agents, checkpoint['agents_state_dicts']):
+            agent.load_state_dict(state_dict)
+        instance._optim = checkpoint['optims'][0]
+        return instance

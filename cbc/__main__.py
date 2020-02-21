@@ -48,7 +48,9 @@ def train(args):
             model.train_epoch(data_loader, epoch=epoch, autologger=autologger, steps_per_epoch=args.steps_per_epoch)
             model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
 
-            if(args.save_model): torch.save(model.state_dict(), os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
+            if(args.save_model):
+                model.save(os.path.join(run_models_dir, "model_e%i.pt" % epoch))
+                AliceBob.load(os.path.join(run_models_dir, "model_e%i.pt" % epoch), args)
 
 if(__name__ == "__main__"):
     args = get_args()

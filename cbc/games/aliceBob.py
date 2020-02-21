@@ -393,3 +393,22 @@ class AliceBob(Game):
     @property
     def optims(self):
         return (self.optim,)
+
+    @classmethod
+    def load(cls, path, args, _old_model=False):
+        checkpoint = torch.load(path, map_location=args.device)
+        instance = cls(args)
+        if _old_model:
+            sender_state_dict = {
+                k[len('sender.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('sender.')
+            }
+            instance.sender.load_state_dict(sender_state_dict)
+            receiver_state_dict = {
+                k[len('receiver.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('receiver.')
+            }
+            instance.receiver.load_state_dict(receiver_state_dict)
+        else:
+            for agent, state_dict in zip(instance.agents, checkpoint['agents_state_dicts']):
+                agent.load_state_dict(state_dict)
+            instance.optim = checkpoint['optims'][0]
+        return instance

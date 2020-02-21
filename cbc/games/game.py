@@ -3,6 +3,7 @@ import itertools as it
 import more_itertools as m_it
 import torch
 import torch.nn as nn
+import collections
 
 from ..utils.logging import AutoLogger
 
@@ -124,3 +125,15 @@ class Game(metaclass=ABCMeta):
                 )
 
                 self.end_episode()
+
+    def save(self, path):
+        state = {
+            'agents_state_dicts':[ agent.state_dict() for agent in self.agents],
+            'optims':[optim for optim in self.optims],
+        }
+        torch.save(state, path)
+
+    @classmethod
+    @abstractmethod
+    def load(cls, path, args, _old_model=False):
+        pass

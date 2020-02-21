@@ -228,3 +228,8 @@ class AliceBobCharlie(nn.Module, Game):
     def evaluate(self):
         #TODO
         raise NotImplemented
+
+    @classmethod
+    def load(cls, path, args, _old_model=False):
+        #TODO
+        raise NotImplemented
