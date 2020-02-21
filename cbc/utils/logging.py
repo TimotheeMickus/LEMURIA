@@ -93,7 +93,6 @@ class AutoLogger(object):
         if no_summary:
             self.summary_writer = None
         else:
-            import pdb; pdb.set_trace()
             self.summary_writer = AverageSummaryWriter(log_dir=summary_dir, default_period=default_period)
         self._pbar = None
 
