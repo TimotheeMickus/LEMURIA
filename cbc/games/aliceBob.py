@@ -334,7 +334,7 @@ class AliceBob(Game):
         sample = sample[:size_sample]
         # (To sample from each category instead, start with: d = misc.group_by(messages, categories))
 
-        # Checks that the sample contains at least two differents categories and two differents messages
+        # Checks that the sample contains at least two different categories and two differents messages
         ok = False
         mes = set()
         cat = set()
