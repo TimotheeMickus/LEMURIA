@@ -1,10 +1,12 @@
 import itertools as it
 import csv
 from collections import Counter
+import random
 
 from Levenshtein import hamming
 import Levenshtein
 from scipy.stats import spearmanr as spearman
+import numpy as np
 
 def read_csv(csv_filename):
     """
@@ -55,19 +57,43 @@ def compute_correlation(messages, categories, message_distance=levenshtein, mean
 
     return spearman(categories, messages)
 
+def compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs):
+    """
+    Compute baseline for correlation of message distance and meaning distance.
+    """
+    uniq_cats = list(set(map(tuple, categories)))
+    num_cats = len(uniq_cats)
+    results = []
+    for _ in range(scrambling_pool_size):
+        mapping = dict(zip(uniq_cats, random.sample(uniq_cats, num_cats)))
+        remapped_categories = list(map(mapping.__getitem__, map(tuple, categories)))
+        results.append(compute_correlation(messages, remapped_categories, **kwargs).correlation)
+    results = np.array(results)
+    return results.mean(), results.std()
+
+def score(cor, μ, σ):
+    return (cor - μ) / σ
+
 def main(args):
     assert args.message_dump_file is not None, "Messages are required."
 
     messages, categories = read_csv(args.message_dump_file)
+
     l_cor = compute_correlation(messages, categories).correlation
+    l_bμ, l_bσ = compute_correlation_baseline(messages, categories, 10)
+
     l_n_cor = compute_correlation(messages, categories, message_distance=levenshtein_normalised).correlation
+    l_n_bμ, l_n_bσ = compute_correlation_baseline(messages, categories, 10, message_distance=levenshtein_normalised)
+
     j_cor = compute_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False).correlation
+    j_bμ, j_bσ = compute_correlation_baseline(messages, categories, 10, message_distance=jaccard, map_msg_to_str=False)
+
     if args.simple_display:
-        print(args.message_dump_file, l_cor, l_n_cor, j_cor, sep='\t')
+        print(args.message_dump_file, l_cor, score(l_cor, l_bμ, l_bσ), l_n_cor, score(l_n_cor, l_n_bμ, l_n_bσ), j_cor, score(j_cor, j_bμ, j_bσ), sep='\t')
     else:
         print(
             'file: %s' % args.message_dump_file,
-            'Levenshtein: %f' % l_cor,
-            'Levenshtein (normalized): %f' % l_n_cor,
-            'Jaccard: %f' % j_cor,
+            'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, score(l_cor, l_bμ, l_bσ)),
+            'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, score(l_n_cor, l_n_bμ, l_n_bσ)),
+            'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, score(j_cor, j_bμ, j_bσ)),
             sep='\t')
