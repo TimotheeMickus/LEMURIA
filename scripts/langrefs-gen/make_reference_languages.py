@@ -56,7 +56,7 @@ def generate_synonym_table(num_synonyms, upper_mwe_len):
 
 #1. Generate regular language
 with open(os.path.join(OUTPUT_DIR, 'regular.tsv'), 'w') as ostr:
-    for id, category in enumerate(it.product([True, False], repeat=5)):
+    for id, category in enumerate(it.product([0, 1], repeat=5)):
             message = _base_msg(category) + [10]
             print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
 
@@ -74,7 +74,7 @@ for synonyms in range(1, MAX_SYNONYMS + 1):
                 with open(os.path.join(OUTPUT_DIR, base_name + 'strict-order.tsv'), 'w') as ostr:
                     idx = 0
                     for i in range(NUMBER_MSG_PER_CATEGORY):
-                        for category in it.product([True, False], repeat=5):
+                        for category in it.product([0, 1], repeat=5):
                             message = _base_msg(category)
                             message = _pretty(message, synonym_table, base_alphabet_size)
                             print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
@@ -85,7 +85,7 @@ for synonyms in range(1, MAX_SYNONYMS + 1):
                 with open(os.path.join(OUTPUT_DIR, base_name + 'random-order.tsv'), 'w') as ostr:
                     idx = 0
                     for i in range(NUMBER_MSG_PER_CATEGORY):
-                        for category in it.product([True, False], repeat=5):
+                        for category in it.product([0, 1], repeat=5):
                             message = _base_msg(category)
                             random.shuffle(message)
                             message = _pretty(message, synonym_table, base_alphabet_size)
@@ -97,7 +97,7 @@ for synonyms in range(1, MAX_SYNONYMS + 1):
                 with open(os.path.join(OUTPUT_DIR, base_name + 'swap-%i.tsv' % swaps), 'w') as ostr:
                     idx = 0
                     for i in range(NUMBER_MSG_PER_CATEGORY):
-                        for category in it.product([True, False], repeat=5):
+                        for category in it.product([0, 1], repeat=5):
                             message = _base_msg(category)
                             for _ in range(swaps):
                                 i1, i2 = random.sample(range(5), 2)

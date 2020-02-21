@@ -21,7 +21,7 @@ def read_csv(csv_filename):
 
     categories = map(str.strip, categories)
     categories = map(str.split, categories)
-    categories = [list(map(eval, ctg)) for ctg in categories]
+    categories = [list(map(int, ctg)) for ctg in categories]
 
     return messages, categories
 
