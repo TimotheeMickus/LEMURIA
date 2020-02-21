@@ -47,7 +47,7 @@ def compute_correlation(messages, categories, message_distance=levenshtein, mean
     if map_msg_to_str:
         messages = [''.join(map(chr, msg)) for msg in messages]
     if map_ctg_to_str:
-        categories = [''.join(map(chr, map(int, ctg))) for ctg in categories]
+        categories = [''.join(map(chr, ctg)) for ctg in categories]
 
     # Compute pairwise distances
     messages = list(it.starmap(message_distance, it.combinations(messages, 2)))
