@@ -21,14 +21,12 @@ def main(args):
     assert args.message_dump_file is not None, "a valid output file is required."
 
     if(args.population is not None): model = AliceBobPopulation(args)
-    else: model = AliceBob(args)
-    model.load_state_dict(torch.load(args.load_model, map_location=args.device))
-    model = model.to(args.device)
+    else: model = AliceBob.load(args.load_model, args)
     #print(model)
 
     data_loader = get_data_loader(args)
 
-    model.eval()
+    #model.eval()
     counts = torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     if args.load_other_model is not None:
