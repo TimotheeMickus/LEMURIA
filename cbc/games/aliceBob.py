@@ -94,7 +94,7 @@ class AliceBob(Game):
 
         batch.require_grad()
 
-        sender_outcome, receiver_outcome = self([batch])
+        sender_outcome, receiver_outcome = self(batch)
 
         # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
         pseudo_optimizer = torch.optim.Optimizer(batch.get_images(), {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
