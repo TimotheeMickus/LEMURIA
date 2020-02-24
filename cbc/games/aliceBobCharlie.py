@@ -30,12 +30,20 @@ class AliceBobCharlie(Game):
 
         self._current_step = 0
         self._running_average_success = 0
+        self.default_adv_train = not args.adv_pointer_training
+        self._ignore_charlie = args.ignore_charlie
 
     def _charlie_turn(self):
         return self._current_step % 2 != 0
 
-    def _bob_input(self, batch, drawer_outcome):
-        return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), drawer_outcome.image.unsqueeze(1)], dim=1)
+    def _alice_input(self, batch):
+        return batch.original_img(stack=True)
+
+    def _bob_input(self, batch, drawer_outcome=None):
+        if drawer_outcome is not None:
+            return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), drawer_outcome.image.unsqueeze(1)], dim=1)
+        else:
+            return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
     def __call__(self, batch, sender_no_grad=False, drawer_no_grad=False):
         """
@@ -46,12 +54,13 @@ class AliceBobCharlie(Game):
             `receiver_outcome`, receiver.Outcome
         """
         with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
-            sender_outcome = self.sender(batch.original_img(stack=True))
+            sender_outcome = self.sender(self._alice_input(batch))
 
         with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not drawer_no_grad)):
             drawer_outcome = self.drawer(*sender_outcome.action)
 
-        receiver_outcome = self.receiver(self._bob_input(batch, drawer_outcome), *sender_outcome.action)
+        drawer_outcome_ = None if (not self._charlie_turn() and self._ignore_charlie) else drawer_outcome # Set dummy drawer_outcome if Bob is not trained on Charlie output
+        receiver_outcome = self.receiver(self._bob_input(batch, drawer_outcome_), *sender_outcome.action)
 
         return sender_outcome, drawer_outcome, receiver_outcome
 
@@ -91,7 +100,7 @@ class AliceBobCharlie(Game):
         log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
         return log_prob
 
-    def compute_interaction(self, batch, default_adv_train=True, **supplementary_info):
+    def compute_interaction(self, batch, **supplementary_info):
         if not self._charlie_turn():
             rewards, successes, message_length, loss, charlie_acc = self._train_step_alice_bob(batch, self._running_average_success)
         else:
@@ -137,106 +146,37 @@ class AliceBobCharlie(Game):
 
         return rewards, successes, message_length, loss, charlie_acc
 
-    def _train_step_charlie(self, batch, running_avg_success, default_adv_train=True):
+    def _train_step_charlie(self, batch, running_avg_success):
         #optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self(batch, sender_no_grad=self._charlie_turn())
 
-        bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
-        bob_dist = Categorical(bob_probs)
-        bob_action = bob_dist.sample()
-        bob_entropy = bob_dist.entropy()
-        bob_log_prob = bob_dist.log_prob(bob_action)
+        bob_action = Categorical(F.softmax(receiver_outcome.scores, dim=-1)).sample()
 
-        if default_adv_train:
-            fake_image_score = receiver_outcome.scores[:,1 + batch.base_distractors.size(1)]
+        total_items = self._bob_input(batch, drawer_outcome).size(1)
+        charlie_idx = total_items - 1 # By design, Charlie's image is the last one presented to Bob
+
+        if self.default_adv_train:
+            fake_image_score = receiver_outcome.scores[:,charlie_idx]
             target = torch.ones_like(fake_image_score)
             loss = F.binary_cross_entropy(torch.sigmoid(fake_image_score), target)
             # Or, more simply in our case: loss = torch.log(fake_image_score)
         else:
-            target = torch.ones_like(bob_action) * (1 + batch.base_distractors.size(1))
-            loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
-
-        # backprop
-        #loss.backward()
-
-        # Gradient clipping and scaling
-        #if(self.grad_clipping  > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
-        #if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
-
-        #optim.step()
+            target = torch.ones_like(bob_action) * charlie_idx
+            loss = F.nll_loss(F.log_softmax(receiver_outcome.scores, dim=1), target)
 
         message_length = sender_outcome.action[1]
 
-        charlie_acc = (bob_action == (1 + batch.base_distractors.size(1))).float().sum() / bob_action.numel()
-        chance_perf = (1 / (batch.base_distractors.size(1) + 1)) # The chance performance is 1 over the number of images shown to Bob
+        chance_perf = 1. / total_items
+        charlie_acc = (bob_action == charlie_idx).float().sum() / bob_action.numel()
+
         (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
 
         return rewards, successes, message_length, loss, charlie_acc
 
-        def end_episode(self, **kwargs):
-            self.eval()
-            self._current_step += 1
-            self._running_average_success = kwargs.get('running_average_success', None)
-
-    """def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, **unimplemented_options):
-        #
-            Model training function
-            Input:
-                `data_iterator`, an infinite iterator over (batched) data
-                `optim_alice_bob`, the optimizer
-            Optional arguments:
-                `epoch`: epoch number to display in progressbar
-                `steps_per_epoch`: number of steps for epoch
-                `event_writer`: tensorboard writer to log evolution of values
-        #
-        optim_alice_bob, optim_charlie = optimizers
-        self.train() # Sets the model in training mode
-
-        with Progress(simple_display, steps_per_epoch, epoch) as pbar:
-            total_reward = 0.0 # sum of the rewards since the beginning of the epoch
-            total_success = 0.0 # sum of the successes since the beginning of the epoch
-            total_items = 0 # number of training instances since the beginning of the epoch
-            running_avg_reward = 0.0
-            running_avg_success = 0.0
-            start_i = ((epoch - 1) * steps_per_epoch) + 1 # (the first epoch is numbered 1, and the first iteration too)
-            end_i = start_i + steps_per_epoch
-
-            for i, batch in zip(range(start_i, end_i), data_iterator):
-                generator_step = (i%2 == 0) # TODO Il faudrait un paramètre à la place du 2
-                if generator_step:
-                    rewards, successes, message_length, loss, charlie_acc = self.train_step_alice_bob(batch, optim_alice_bob, running_avg_success)
-                else:
-                    rewards, successes, message_length, loss, charlie_acc = self.train_step_charlie(batch, optim_charlie, running_avg_success)
-
-                avg_reward = rewards.mean().item() # average reward of the batch
-                avg_success = successes.mean().item() # average success of the batch
-                avg_msg_length = message_length.float().mean().item() # average message length of the batch
-
-                # updates running average reward
-                total_reward += rewards.sum().item()
-                total_success += successes.sum().item()
-                total_items += batch.size
-                running_avg_reward = total_reward / total_items
-                running_avg_success = total_success / total_items
-
-                pbar.update(R=running_avg_success)
-
-                # logs some values
-                if(event_writer is not None):
-                    number_ex_seen = i * batch.size
-                    event_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
-                    event_writer.add_scalar('train/success', avg_success, number_ex_seen)
-                    if generator_step:
-                        event_writer.add_scalar('train/loss_charlie', loss.item(), number_ex_seen)
-                    else:
-                        event_writer.add_scalar('train/loss_alice_bob', loss.item(), number_ex_seen)
-                    event_writer.add_scalar('train/msg_length', avg_msg_length, number_ex_seen)
-                    event_writer.add_scalar('train/charlie_acc', charlie_acc.item(), number_ex_seen)
-                    if debug:
-                        log_grads_tensorboard(list(self.parameters()), event_writer)
-
-        self.eval()"""
-
+    def end_episode(self, **kwargs):
+        self.eval()
+        self._current_step += 1
+        self._running_average_success = kwargs.get('running_average_success', None)
 
     def test_visualize(self, data_iterator, learning_rate):
         #TODO

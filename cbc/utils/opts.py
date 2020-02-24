@@ -58,6 +58,8 @@ def get_args():
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
     group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
+    group.add_argument('--adv_pointer_training', help='non-standard pointer-based adversary_training', action='store_true')
+    group.add_argument('--ignore_charlie', help='do not train bob on charlie output', action='store_true')
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
