@@ -58,7 +58,7 @@ class AliceBob(Game):
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
         # Alice's part
-        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, state_info['running_avg_success'])
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, state_info.get('running_avg_success', None))
 
         # Bob's part
         receiver_loss = self.compute_receiver_loss(receiver_outcome.scores)
@@ -215,7 +215,7 @@ class AliceBob(Game):
 
         rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
 
-        if(self.penalty > 0.0):
+        if(self.penalty > 0.0 and running_avg_success is not None): # TODO: tmp quickfix
             length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
             # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
