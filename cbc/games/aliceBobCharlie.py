@@ -13,6 +13,7 @@ from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.logging import Progress
 from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing
+from ..eval import compute_correlation
 
 class AliceBobCharlie(Game):
     def __init__(self, args):
@@ -108,7 +109,7 @@ class AliceBobCharlie(Game):
             rewards, successes, message_length, loss, charlie_acc = self._train_step_alice_bob(batch, self._running_average_success)
         else:
             rewards, successes, message_length, loss, charlie_acc = self._train_step_charlie(batch, self._running_average_success)
-        return loss.mean(), rewards, successes, message_length.float().mean().item(), charlie_acc
+        return loss.mean(), rewards, successes, message_length.float().mean().item(), charlie_acc, self._charlie_turn()
 
 
     def _train_step_alice_bob(self, batch, running_avg_success):
@@ -160,9 +161,9 @@ class AliceBobCharlie(Game):
 
         if self.default_adv_train:
             fake_image_score = receiver_outcome.scores[:,charlie_idx]
-            target = torch.ones_like(fake_image_score)
-            loss = F.binary_cross_entropy(torch.sigmoid(fake_image_score), target)
-            # Or, more simply in our case: loss = torch.log(fake_image_score)
+            #target = torch.ones_like(fake_image_score)
+            #loss = F.binary_cross_entropy(torch.sigmoid(fake_image_score), target)
+            loss = torch.sigmoid(fake_image_score).log() # Or, more simply in our case: loss = fake_image_score)
         else:
             target = torch.ones_like(bob_action) * charlie_idx
             loss = F.nll_loss(F.log_softmax(receiver_outcome.scores, dim=1), target)
@@ -201,7 +202,9 @@ class AliceBobCharlie(Game):
         for _ in batch_numbers:
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
-                sender_outcome, drawer_outcome, receiver_outcome = self(batch)
+                sender_outcome = self.sender(self._alice_input(batch))
+                receiver_outcome = self.receiver(self._bob_input(batch, None), *sender_outcome.action)
+
 
                 messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
                 categories.extend([x.category for x in batch.original])

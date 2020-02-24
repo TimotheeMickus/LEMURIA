@@ -62,7 +62,7 @@ class Progress:
     def __exit__(self, type, value, traceback):
         if(not self.simple_display): self.pbar.close()
 
-class NotALogger(object):
+class DummyLogger(object):
     """
         Place holder class
     """
@@ -152,14 +152,21 @@ class AutoLogger(object):
             avg_success = successes.mean().item() # average success of the batch
             number_ex_seen = supplementary_info['index'] * supplementary_info['batch'].size
             self._state['number_ex_seen'] = number_ex_seen
-            self.summary_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
-            self.summary_writer.add_scalar('train/success', avg_success, number_ex_seen)
-            self.summary_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
+            if self.log_charlie_acc:
+                charlie_acc, charlie_turn = external_output
+                tag = 'charlie' if charlie_turn else 'alice-bob'
+                self.summary_writer.add_scalar('train-%s/reward' % tag, avg_reward, number_ex_seen)
+                self.summary_writer.add_scalar('train-%s/success' % tag, avg_success, number_ex_seen)
+                self.summary_writer.add_scalar('train-%s/loss' % tag, loss.item(), number_ex_seen)
+            else:
+                self.summary_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
+                self.summary_writer.add_scalar('train/success', avg_success, number_ex_seen)
+                self.summary_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
             self.summary_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
 
             if self.log_charlie_acc:
-                charlie_acc = external_output[0].mean().item()
-                self.summary_writer.add_scalar('train/charlie_acc', charlie_acc, number_ex_seen)
+                charlie_acc = charlie_acc.mean().item()
+                self.summary_writer.add_scalar('train-%s/charlie_acc' % tag, charlie_acc, number_ex_seen)
 
             if self.log_lang_progress:
                 for batch in supplementary_info['batches']:

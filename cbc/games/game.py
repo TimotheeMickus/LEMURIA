@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import collections
 
-from ..utils.logging import NotALogger
+from ..utils.logging import DummyLogger
 
 class Game(metaclass=ABCMeta):
 
@@ -72,7 +72,7 @@ class Game(metaclass=ABCMeta):
         self.eval()
 
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, autologger=NotALogger()):
+    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, autologger=DummyLogger()):
         """
             Model training function
             Input:
