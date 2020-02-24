@@ -24,24 +24,19 @@ class AliceBobCharlie(Game):
         self.grad_scaling = args.grad_scaling or 0
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
+
         self._optim_alice_bob = build_optimizer(it.chain(self.sender.parameters(), self.receiver.parameters()), args.learning_rate)
         self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
+        self._current_step = 0
+
+    def _charlie_turn(self):
+        return self._current_step % 2 != 0
+
     def _bob_input(self, batch, drawer_outcome):
-        return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors, drawer_outcome.image.unsqueeze(1)], dim=1)
+        return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), drawer_outcome.image.unsqueeze(1)], dim=1)
 
-    def _compute_interaction(self, batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
-        with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
-            sender_outcome = sender(batch.original_img)
-
-        with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not drawer_no_grad)):
-            drawer_outcome = drawer(*sender_outcome.action)
-
-        receiver_outcome = receiver(self._bob_input(batch, drawer_outcome), *sender_outcome.action)
-
-        return sender_outcome, drawer_outcome, receiver_outcome
-
-    def __call__(self, batch):
+    def __call__(self, batch, sender_no_grad=False, drawer_no_grad=False):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -49,7 +44,15 @@ class AliceBobCharlie(Game):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self._compute_interaction(batch, self.sender, self.drawer, self.receiver)
+        with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
+            sender_outcome = self.sender(batch.original_img(stack=True))
+
+        with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not drawer_no_grad)):
+            drawer_outcome = self.drawer(*sender_outcome.action)
+
+        receiver_outcome = self.receiver(self._bob_input(batch, drawer_outcome), *sender_outcome.action)
+
+        return sender_outcome, drawer_outcome, receiver_outcome
 
     def to(self, *vargs, **kwargs):
         self.sender, self.receiver, self.drawer = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs), self.drawer.to(*vargs, **kwargs)
@@ -87,15 +90,17 @@ class AliceBobCharlie(Game):
         log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
         return log_prob
 
-    def compute_interaction(self, batches, sender, receiver, drawer, default_adv_train=True, **supplementary_info):
-        batch_alice_bob, batch_charlie = batches
-        rewards_alice_bob, successes_alice_bob, message_length_alice_bob, loss_alice_bob, charlie_acc_alice_bob = self._train_step_alice_bob(batch_alice_bob, supplementary_info['running_avg_success'])
-        rewards_charlie, successes_charlie, message_length_charlie, loss_charlie, charlie_acc_charlie = self._train_step_charlie(batch_charlie, supplementary_info['running_avg_success'])
+    def compute_interaction(self, batch, default_adv_train=True, **supplementary_info):
+        if not self._charlie_turn():
+            rewards, successes, message_length, loss, charlie_acc = self._train_step_alice_bob(batch, supplementary_info['running_avg_success'])
+        else:
+            rewards, successes, message_length, loss, charlie_acc = self._train_step_charlie(batch, supplementary_info['running_avg_success'])
+        return rewards, successes, message_length.float().mean().item(), loss.mean()#, charlie_acc
 
 
     def _train_step_alice_bob(self, batch, running_avg_success):
         #optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self.compute_interaction(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
+        sender_outcome, drawer_outcome, receiver_outcome = self(batch, drawer_no_grad=not self._charlie_turn())
 
         bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
         bob_dist = Categorical(bob_probs)
@@ -126,13 +131,14 @@ class AliceBobCharlie(Game):
 
         message_length = sender_outcome.action[1]
 
-        charlie_acc = (bob_action == (1 + batch.base_distractors.size(1))).float().sum() / bob_action.numel()
+        charlie_idx = self._bob_input(batch, drawer_outcome).size(1)
+        charlie_acc = (bob_action == charlie_idx).float().sum() / bob_action.numel()
 
         return rewards, successes, message_length, loss, charlie_acc
 
     def _train_step_charlie(self, batch, running_avg_success, default_adv_train=True):
         #optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self._compute_interaction(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
+        sender_outcome, drawer_outcome, receiver_outcome = self(batch, sender_no_grad=self._charlie_turn())
 
         bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
         bob_dist = Categorical(bob_probs)
@@ -229,23 +235,33 @@ class AliceBobCharlie(Game):
 
     def test_visualize(self, data_iterator, learning_rate):
         #TODO
-        raise NotImplemented
+        pass
+        
+    def evaluate(self, *vargs, **kwargs):
+        pass
+        #TODO
 
     @property
     def agents(self):
         return self.sender, self.receiver, self.drawer
 
     @property
-    def optims(self):
-        return self._optim_alice_bob, self._optim_charlie
+    def optim(self):
+        if self._charlie_turn:
+            return self._optim_charlie
+        else:
+            return self._optim_alice_bob
 
-    @property
-    def num_batches_per_episode(self):
-        return 2
-
-    def evaluate(self):
-        #TODO
-        raise NotImplemented
+    def save(self, path):
+        """
+        Save model to file `path`
+        """
+        state = {
+            'agents_state_dicts': [agent.state_dict() for agent in self.agents],
+            'optims': [self._optim_alice_bob, self._optim_charlie],
+            'current_step': self._current_step,
+        }
+        torch.save(state, path)
 
     @classmethod
     def load(cls, path, args, _old_model=False):
@@ -268,5 +284,6 @@ class AliceBobCharlie(Game):
         else:
             for agent, state_dict in zip(instance.agents, checkpoint['agents_state_dicts']):
                 agent.load_state_dict(state_dict)
-            instance.optim = checkpoint['optims'][0]
+            instance._optim_alice_bob, instance._optim_charlie = checkpoint['optims']
+            instance._current_step = checkpoint['current_step']
         return instance

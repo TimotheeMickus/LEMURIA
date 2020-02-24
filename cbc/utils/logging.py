@@ -50,14 +50,14 @@ class Progress:
 
         return self
 
-    def update(self, num_batches_per_episode, **logged_items):
+    def update(self, **logged_items):
         if(self.simple_display):
             postfix = " ".join(("%s: %f" % (k, logged_items[k])) for k in sorted(logged_items))
             print(('%i/%i - %s' % (self.i, self.steps_per_epoch, postfix)), flush=True)
-            self.i += num_batches_per_episode
+            self.i += 1
         else:
             self.pbar.set_postfix(logged_items, refresh=False)
-            self.pbar.update(num_batches_per_episode)
+            self.pbar.update()
 
     def __exit__(self, type, value, traceback):
         if(not self.simple_display): self.pbar.close()
@@ -138,14 +138,14 @@ class AutoLogger(object):
         # updates running average reward
         self._state['total_reward'] += rewards.sum().item()
         self._state['total_success'] += successes.sum().item()
-        self._state['total_items'] += sum(batch.size for batch in supplementary_info['batches'])
+        self._state['total_items'] += supplementary_info['batch'].size
         self._state['running_avg_reward'] = self._state['total_reward'] / self._state['total_items']
         self._state['running_avg_success'] = self._state['total_success'] / self._state['total_items']
 
         if self.summary_writer is not None:
             avg_reward = rewards.mean().item() # average reward of the batch
             avg_success = successes.mean().item() # average success of the batch
-            number_ex_seen = supplementary_info['indices'][-1] * supplementary_info['batches'][0].size
+            number_ex_seen = supplementary_info['index'] * supplementary_info['batch'].size
             self._state['number_ex_seen'] = number_ex_seen
             self.summary_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
             self.summary_writer.add_scalar('train/success', avg_success, number_ex_seen)
@@ -166,7 +166,7 @@ class AutoLogger(object):
                 selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
                 self._state['symbol_counts'] += selected_symbols.sum(dim=0)
 
-            if self.log_lang_progress and any(lambda i:i % 100 == 0, supplementary_info.get('indices', [])):
+            if self.log_lang_progress and index % 100 == 0:
                 if self._state['past_dist'] is None:
                     self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(self.device)
                 else:
@@ -179,7 +179,7 @@ class AutoLogger(object):
             if self.log_debug:
                 self.log_grads_tensorboard(list(supplementary_info['parameters']))
 
-        self._pbar.update(supplementary_info['num_batches_per_episode'], S=self._state['running_avg_success'])
+        self._pbar.update(S=self._state['running_avg_success'])
 
         return self._state['running_avg_success']
 

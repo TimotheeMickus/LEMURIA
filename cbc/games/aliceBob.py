@@ -51,9 +51,7 @@ class AliceBob(Game):
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
-    def compute_interaction(self, batch, *agents, **state_info):
-        sender, receiver = agents
-
+    def compute_interaction(self, batch, **state_info):
         sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
@@ -74,7 +72,7 @@ class AliceBob(Game):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
         return self
 
-    def __call__(self, batch, *agents):
+    def __call__(self, batch):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -383,10 +381,6 @@ class AliceBob(Game):
                 event_writer.add_scalar('eval/Normalised Lev-based comp (normalised)', l_n_cor_n, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp (normalised)', j_cor_n, epoch, period=1)
-
-    @property
-    def num_batches_per_episode(self):
-        return 1
 
     @property
     def agents(self):

@@ -40,21 +40,13 @@ class Game(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def compute_interaction(self, batches, *agents, **state_info):
+    def compute_interaction(self, batches, **state_info):
         """
         Computes one round of the game.
         Input:
             batches as required, agents
         Output:
             rewards, successes, avg_msg_length, losses
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def num_batches_per_episode(self):
-        """
-        Number of batches required to complete one round of the game.
         """
         pass
 
@@ -96,13 +88,13 @@ class Game(metaclass=ABCMeta):
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
             running_avg_success = 0.
-            for indices in range(start_i, end_i):
+            for index in range(start_i, end_i):
                 batch = data_iterator.get_batch(keep_category=autologger.log_lang_progress)
                 self.start_episode()
 
                 self.optim.zero_grad()
 
-                rewards, successes, avg_msg_length, loss = self.compute_interaction(batch, *self.agents, running_avg_success=running_avg_success)
+                rewards, successes, avg_msg_length, loss = self.compute_interaction(batch, running_avg_success=running_avg_success)
 
                 loss.backward() # Backpropagation
 
@@ -119,17 +111,19 @@ class Game(metaclass=ABCMeta):
                 running_avg_success = autologger.update(
                     rewards, successes, avg_msg_length, loss,
                     parameters=(p for a in self.agents for p in a.parameters()),
-                    num_batches_per_episode=self.num_batches_per_episode,
-                    batches=[batch],
-                    indices=[indices],
+                    batch=batch,
+                    index=index,
                 )
 
                 self.end_episode()
 
     def save(self, path):
+        """
+        Save model to file `path`
+        """
         state = {
-            'agents_state_dicts':[ agent.state_dict() for agent in self.agents],
-            'optims':[optim for optim in self.optims],
+            'agents_state_dicts': [agent.state_dict() for agent in self.agents],
+            'optims': [self.optim],
         }
         torch.save(state, path)
 
