@@ -275,9 +275,7 @@ class AliceBob(Game):
         for _ in batch_numbers:
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
-                sender, receiver = self.agents
-                sender_outcome = sender(self._alice_input(batch))
-                receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
+                sender_outcome, receiver_outcome = self(batch)
 
                 messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
                 categories.extend([x.category for x in batch.original])

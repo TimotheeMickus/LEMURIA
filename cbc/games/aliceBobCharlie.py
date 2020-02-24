@@ -1,15 +1,18 @@
 import itertools as it
+import random
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
+import tqdm
 
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.logging import Progress
-from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer
+from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing
 
 class AliceBobCharlie(Game):
     def __init__(self, args):
@@ -182,9 +185,128 @@ class AliceBobCharlie(Game):
         #TODO
         pass
 
-    def evaluate(self, *vargs, **kwargs):
-        pass
-        #TODO
+    def evaluate(self, data_iterator, epoch, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
+        self.eval()
+
+        counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
+        failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
+
+        batch_size = 256
+        nb_batch = int(np.ceil(len(data_iterator) / batch_size)) # Doing so makes us see on average at least each data point once; this also means that each cell of the failure matrix is updated (len(data_iterator) / ((nb_categories) * (nb_categories - 1))) time, which can be quite low (~10)
+
+        batch_numbers = range(nb_batch)
+        messages = []
+        categories = []
+        if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
+        for _ in batch_numbers:
+            with torch.no_grad():
+                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
+                sender_outcome, drawer_outcome, receiver_outcome = self(batch)
+
+                messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
+                categories.extend([x.category for x in batch.original])
+
+                receiver_pointing = pointing(receiver_outcome.scores)
+                failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
+
+                target_category = [data_iterator.category_idx(x.category) for x in batch.original]
+                distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
+
+                data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
+
+                np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
+                np.add.at(failure_matrix, (target_category, distractor_category), failure)
+
+        # Computes the accuracy when the target is selected from any category
+        accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
+        if(event_writer is not None): event_writer.add_scalar('eval/accuracy', accuracy_all, epoch, period=1)
+        print('Accuracy: %s' % accuracy_all)
+
+        eval_categories = data_iterator.evaluation_categories_idx
+        if(eval_categories != []):
+            # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
+            failure_matrix_eval_t = failure_matrix[eval_categories, :]
+            counts_matrix_eval_t = counts_matrix[eval_categories, :]
+
+            counts = counts_matrix_eval_t.sum()
+            accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-t', accuracy_eval_t, epoch, period=1)
+            print('Accuracy eval-t: %s' % accuracy_eval_t)
+
+            # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
+            failure_matrix_eval_d = failure_matrix[:, eval_categories]
+            counts_matrix_eval_d = counts_matrix[:, eval_categories]
+
+            counts = counts_matrix_eval_d.sum()
+            accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-d', accuracy_eval_d, epoch, period=1)
+            print('Accuracy eval-d %s' % accuracy_eval_d)
+
+            # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
+            failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
+            counts_matrix_eval_td = counts_matrix[np.ix_(eval_categories, eval_categories)]
+
+            counts = counts_matrix_eval_td.sum()
+            accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-td', accuracy_eval_td, epoch, period=1)
+            print('Accuracy eval-td %s' % accuracy_eval_td)
+
+        # Computes compositionality measures
+        # First selects a sample of (message, category) pairs
+        size_sample = (30 * data_iterator.nb_categories)
+
+        sample = list(zip(messages, categories))
+        random.shuffle(sample)
+        sample = sample[:size_sample]
+        # (To sample from each category instead, start with: d = misc.group_by(messages, categories))
+
+        # Checks that the sample contains at least two different categories and two differents messages
+        ok = False
+        mes = set()
+        cat = set()
+        for m, c in sample:
+            mes.add(tuple(m))
+            cat.add(tuple(c))
+            if((len(mes) > 1) and (len(cat) > 1)):
+                ok = True
+                break
+
+        if(ok == False):
+            print('Compositionality measures cannot be computed (%i messages and %i different categories in the sample).' % (len(mes), len(cat)))
+        else:
+            sample_messages, sample_categories = zip(*sample)
+            sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
+
+
+            #timepoint = time.time()
+            l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30)
+            print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
+
+            #timepoint2 = time.time()
+            #print(timepoint2 - timepoint)
+            #timepoint2 = timepoint
+
+            l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.levenshtein_normalised)
+            print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
+
+            #timepoint2 = time.time()
+            #print(timepoint2 - timepoint)
+            #timepoint2 = timepoint
+
+            j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
+            print('Jaccard: %f - %f' % (j_cor, j_cor_n))
+
+            #timepoint2 = time.time()
+            #print(timepoint2 - timepoint)
+            #timepoint2 = timepoint
+
+            if(event_writer is not None):
+                event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Lev-based comp (normalised)', l_cor_n, epoch, period=1)
+                event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Normalised Lev-based comp (normalised)', l_n_cor_n, epoch, period=1)
+                event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
+                event_writer.add_scalar('eval/Jaccard-based comp (normalised)', j_cor_n, epoch, period=1)
 
     @property
     def agents(self):
