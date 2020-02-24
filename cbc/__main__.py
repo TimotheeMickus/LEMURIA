@@ -50,7 +50,6 @@ def train(args):
 
             if(args.save_model):
                 model.save(os.path.join(run_models_dir, "model_e%i.pt" % epoch))
-                AliceBob.load(os.path.join(run_models_dir, "model_e%i.pt" % epoch), args)
 
 if(__name__ == "__main__"):
     args = get_args()
