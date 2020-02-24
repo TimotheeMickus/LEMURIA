@@ -411,5 +411,5 @@ class AliceBob(Game):
         else:
             for agent, state_dict in zip(instance.agents, checkpoint['agents_state_dicts']):
                 agent.load_state_dict(state_dict)
-            instance.optim = checkpoint['optims'][0]
+            instance._optim = checkpoint['optims'][0]
         return instance
