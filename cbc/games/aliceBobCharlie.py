@@ -29,6 +29,7 @@ class AliceBobCharlie(Game):
         self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
         self._current_step = 0
+        self._running_average_success = 0
 
     def _charlie_turn(self):
         return self._current_step % 2 != 0
@@ -92,10 +93,10 @@ class AliceBobCharlie(Game):
 
     def compute_interaction(self, batch, default_adv_train=True, **supplementary_info):
         if not self._charlie_turn():
-            rewards, successes, message_length, loss, charlie_acc = self._train_step_alice_bob(batch, supplementary_info['running_avg_success'])
+            rewards, successes, message_length, loss, charlie_acc = self._train_step_alice_bob(batch, self._running_average_success)
         else:
-            rewards, successes, message_length, loss, charlie_acc = self._train_step_charlie(batch, supplementary_info['running_avg_success'])
-        return rewards, successes, message_length.float().mean().item(), loss.mean()#, charlie_acc
+            rewards, successes, message_length, loss, charlie_acc = self._train_step_charlie(batch, self._running_average_success)
+        return loss.mean(), rewards, successes, message_length.float().mean().item(), charlie_acc
 
 
     def _train_step_alice_bob(self, batch, running_avg_success):
@@ -172,6 +173,10 @@ class AliceBobCharlie(Game):
 
         return rewards, successes, message_length, loss, charlie_acc
 
+        def end_episode(self, **kwargs):
+            self.eval()
+            self._current_step += 1
+            self._running_average_success = kwargs.get('running_average_success', None)
 
     """def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, **unimplemented_options):
         #
@@ -236,7 +241,7 @@ class AliceBobCharlie(Game):
     def test_visualize(self, data_iterator, learning_rate):
         #TODO
         pass
-        
+
     def evaluate(self, *vargs, **kwargs):
         pass
         #TODO

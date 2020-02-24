@@ -44,6 +44,7 @@ class AliceBob(Game):
         self.adaptative_penalty = args.adaptative_penalty
 
         self._optim = build_optimizer(parameters, args.learning_rate)
+        self._running_average_success =  0.
 
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
@@ -51,11 +52,11 @@ class AliceBob(Game):
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
-    def compute_interaction(self, batch, **state_info):
+    def compute_interaction(self, batch):
         sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
-        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, state_info.get('running_avg_success', None))
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, self._running_average_success)
 
         # Bob's part
         receiver_loss = self.compute_receiver_loss(receiver_outcome.scores)
@@ -64,9 +65,8 @@ class AliceBob(Game):
 
         rewards, successes = sender_rewards, sender_successes
         avg_msg_length = sender_outcome.action[1].float().mean().item()
-        losses = loss
 
-        return rewards, successes, avg_msg_length, losses
+        return loss, rewards, successes, avg_msg_length
 
     def to(self, *vargs, **kwargs):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
@@ -408,3 +408,7 @@ class AliceBob(Game):
                 agent.load_state_dict(state_dict)
             instance._optim = checkpoint['optims'][0]
         return instance
+
+    def end_episode(self, **kwargs):
+        self.eval()
+        self._running_average_success = kwargs.get('running_average_success', None)

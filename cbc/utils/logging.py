@@ -75,7 +75,11 @@ class NotALogger(object):
 
 
 class AutoLogger(object):
-    def __init__(self, simple_display=False, steps_per_epoch=1000, debug=False, log_lang_progress=False, log_entropy=False, base_alphabet_size=10, device='cpu',no_summary=False, summary_dir=None, default_period=10):
+    def __init__(self, simple_display=False, steps_per_epoch=1000, debug=False,
+        log_lang_progress=False, log_entropy=False, base_alphabet_size=10,
+        device='cpu',no_summary=False, summary_dir=None, default_period=10,
+        log_charlie_acc=False):
+
         self.simple_display = simple_display
         self.steps_per_epoch = steps_per_epoch
 
@@ -89,6 +93,8 @@ class AutoLogger(object):
 
         self.device = device
         self.base_alphabet_size = base_alphabet_size
+
+        self.log_charlie_acc = log_charlie_acc
 
         if no_summary:
             self.summary_writer = None
@@ -131,9 +137,8 @@ class AutoLogger(object):
         self._state = {}
 
 
-    def update(self, *outcomes, **supplementary_info):
-        rewards, successes, avg_msg_length, loss = outcomes
-
+    def update(self, loss, *external_output, **supplementary_info):
+        rewards, successes, avg_msg_length, *external_output = external_output
 
         # updates running average reward
         self._state['total_reward'] += rewards.sum().item()
@@ -151,6 +156,10 @@ class AutoLogger(object):
             self.summary_writer.add_scalar('train/success', avg_success, number_ex_seen)
             self.summary_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
             self.summary_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
+
+            if self.log_charlie_acc:
+                charlie_acc = external_output[0].mean().item()
+                self.summary_writer.add_scalar('train/charlie_acc', charlie_acc, number_ex_seen)
 
             if self.log_lang_progress:
                 for batch in supplementary_info['batches']:
@@ -181,7 +190,7 @@ class AutoLogger(object):
 
         self._pbar.update(S=self._state['running_avg_success'])
 
-        return self._state['running_avg_success']
+        return {'running_avg_success': self._state['running_avg_success']}
 
     def log_grads_tensorboard(self, parameter_list):
         """

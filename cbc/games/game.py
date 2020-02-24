@@ -65,7 +65,7 @@ class Game(metaclass=ABCMeta):
         self.train() # Sets the current agents in training mode
 
 
-    def end_episode(self):
+    def end_episode(self, **kwargs):
         """
         Called after finishing a round of the game. Override for cleanup behavior.
         """
@@ -94,7 +94,7 @@ class Game(metaclass=ABCMeta):
 
                 self.optim.zero_grad()
 
-                rewards, successes, avg_msg_length, loss = self.compute_interaction(batch, running_avg_success=running_avg_success)
+                loss, *external_output  = self.compute_interaction(batch)
 
                 loss.backward() # Backpropagation
 
@@ -108,14 +108,13 @@ class Game(metaclass=ABCMeta):
 
                 self.optim.step()
 
-                running_avg_success = autologger.update(
-                    rewards, successes, avg_msg_length, loss,
+                udpated_state = autologger.update(
+                    loss, *external_output,
                     parameters=(p for a in self.agents for p in a.parameters()),
                     batch=batch,
                     index=index,
                 )
-
-                self.end_episode()
+                self.end_episode(**udpated_state)
 
     def save(self, path):
         """
