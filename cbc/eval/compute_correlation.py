@@ -4,6 +4,7 @@ import csv
 import collections
 import random
 
+import torch
 import Levenshtein
 from scipy.stats import spearmanr as spearman
 import numpy as np
@@ -116,19 +117,19 @@ def analyze_correlation(messages, categories, scrambling_pool_size=10, **kwargs)
 
 def main(args):
     assert args.message_dump_file is not None, "Messages are required."
+    with torch.no_grad():
+        messages, categories = read_csv(args.message_dump_file)
 
-    messages, categories = read_csv(args.message_dump_file)
+        l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories)
+        l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, message_distance=levenshtein_normalised)
+        j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False)
 
-    l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories)
-    l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, message_distance=levenshtein_normalised)
-    j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False)
-
-    if args.simple_display:
-        print(args.message_dump_file, l_cor, l_bi, l_n_cor, l_n_bi, j_cor, j_bi, sep='\t')
-    else:
-        print(
-            'file: %s' % args.message_dump_file,
-            'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, l_bi),
-            'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, l_n_bi),
-            'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, j_bi),
-            sep='\t')
+        if args.simple_display:
+            print(args.message_dump_file, l_cor, l_bi, l_n_cor, l_n_bi, j_cor, j_bi, sep='\t')
+        else:
+            print(
+                'file: %s' % args.message_dump_file,
+                'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, l_bi),
+                'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, l_n_bi),
+                'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, j_bi),
+                sep='\t')
