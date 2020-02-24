@@ -39,6 +39,7 @@ class AliceBobPopulation(AliceBob):
 
         parameters = [p for a in self._agents for p in a.parameters()]
         self._optim = build_optimizer(nn.ParameterList(parameters), args.learning_rate)
+        self._running_average_success = 0
 
     def to(self, *vargs, **kwargs):
         #self = super().to(*vargs, **kwargs)
@@ -58,13 +59,12 @@ class AliceBobPopulation(AliceBob):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-
-        return self.compute_interaction(batch, sender, receiver)
+        return AliceBob.__call__(self, batch, sender=self._sender, receiver=self._receiver)
 
     def start_episode(self):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
-        self._sender.train(), self._receiver.train()
+        self.train()
 
     @property
     def agents(self):

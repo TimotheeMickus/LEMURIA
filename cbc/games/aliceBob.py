@@ -72,7 +72,7 @@ class AliceBob(Game):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
         return self
 
-    def __call__(self, batch):
+    def __call__(self, batch, sender=None, receiver=None):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -80,8 +80,10 @@ class AliceBob(Game):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        sender_outcome = self.sender(self._alice_input(batch))
-        receiver_outcome = self.receiver(self._bob_input(batch), *sender_outcome.action)
+        sender = sender or self.sender
+        receiver = receiver or self.receiver
+        sender_outcome = sender(self._alice_input(batch))
+        receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
         return sender_outcome, receiver_outcome
 
     def test_visualize(self, data_iterator, learning_rate):
