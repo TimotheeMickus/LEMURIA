@@ -58,20 +58,26 @@ class Game(metaclass=ABCMeta):
         """
         pass
 
+    def train(self):
+        for agent in self.agents:  # Sets the agents in training mode
+            agent.train()
+
+    def eval(self):
+        for agent in self.agents:  # Sets the agents in evaluation mode
+            agent.eval()
+
     def start_episode(self):
         """
         Called before starting a new round of the game. Override for setup behavior.
         """
-        for agent in self.agents:  # Sets the current agents in training mode
-            agent.train()
+        self.train() # Sets the current agents in training mode
 
 
     def end_episode(self):
         """
         Called after finishing a round of the game. Override for cleanup behavior.
         """
-        for agent in self.agents:
-            agent.eval()
+        self.eval()
 
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, autologger=NotALogger()):

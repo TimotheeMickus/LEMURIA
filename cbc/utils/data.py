@@ -46,16 +46,16 @@ class Batch():
         if(not flat):
             tmp = [[f(x.img) for x in base_distractor] for base_distractor in self.base_distractors]
             if(stack): tmp = list(map(torch.stack, tmp))
-        else: tmp = [f(x.img) for base_distractor in self.distractors for x in base_distractor]
+        else: tmp = [f(x.img) for base_distractor in self.base_distractors for x in base_distractor]
 
         if(stack): return torch.stack(tmp)
         else: return tmp
 
     def get_images(self, original=True, target=True, base_distractors=True):
         images = []
-        if(for_original): images.extend(self.original_img())
-        if(for_target): images.extend(self.target_img())
-        if(for_base_distractors): images.extend(self.base_distractors_img(flat=True))
+        if(original): images.extend(self.original_img())
+        if(target): images.extend(self.target_img())
+        if(base_distractors): images.extend(self.base_distractors_img(flat=True))
 
         return images
 

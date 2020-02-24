@@ -13,6 +13,7 @@ from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer
 from ..utils.data import get_data_loader
 
+from .decision_tree import decision_tree
 
 def main(args):
     if(not os.path.isdir(args.data_set)):
@@ -24,14 +25,12 @@ def main(args):
         print("'load_model' must be indicated")
         sys.exit()
 
-    if(args.population is not None): model = AliceBobPopulation(args)
-    else: model = AliceBob(args)
-    model.load_state_dict(torch.load(args.load_model, map_location=args.device))
-    model = model.to(args.device)
+    if(args.population is not None): model = AliceBobPopulation.load_model(args.load_model, args)
+    else: model = AliceBob.load(args.load_model, args)
     #print(model)
 
     data_loader = get_data_loader(args)
 
-    model.decision_tree(data_loader)
+    decision_tree(model, data_loader)
     while(True):
         model.test_visualize(data_loader, args.learning_rate)

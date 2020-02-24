@@ -1,7 +1,12 @@
 import itertools
+import torch
+
+import torch.nn as nn
 import tqdm
 import sklearn.tree
 import matplotlib.pyplot as plt
+
+from collections import defaultdict
 
 def decision_tree(model, data_iterator):
     model.eval()

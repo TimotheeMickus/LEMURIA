@@ -93,7 +93,7 @@ class AliceBob(Game):
 
         batch.require_grad()
 
-        sender_outcome, receiver_outcome = self(batch)
+        sender_outcome, receiver_outcome = self([batch])
 
         # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
         pseudo_optimizer = torch.optim.Optimizer(batch.get_images(), {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
@@ -258,7 +258,7 @@ class AliceBob(Game):
         return loss
 
     def evaluate(self, data_iterator, epoch, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
-        for agent in self.agents: agent.eval()
+        self.eval()
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
