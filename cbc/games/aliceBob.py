@@ -138,6 +138,7 @@ class AliceBob(Game):
         receiver_dream = torch.stack([data_iterator.average_image() for _ in range(batch_size)]) # Starts with the average of the dataset
         #show_imgs([data_iterator.average_image()], 1)
         receiver_dream = receiver_dream.unsqueeze(axis=1) # Because the receiver expect a 1D array of images per batch instance; shape: [batch_size, 1, 3, height, width]
+        receiver_dream = receiver_dream.clone().detach() # Creates a leaf that is a copy of `receiver_dream`
         receiver_dream.requires_grad = True
 
         encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
@@ -191,13 +192,13 @@ class AliceBob(Game):
             imgs.append(batch.target[i].img)
             imgs.append(receiver_part_target_img[i])
 
-            for j in range(batch.base_distractors.size(1)):
+            for j in range(len(batch.base_distractors[i])):
                 imgs.append(batch.base_distractors[i][j].img)
                 imgs.append(receiver_part_base_distractors[i][j])
 
-            imgs.append(receiver_dream[i].detach())
+            imgs.append(receiver_dream[i])
         #for img in imgs: print(img.shape)
-        show_imgs(imgs, nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
+        show_imgs([img.detach() for img in imgs], nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
 
     def compute_sender_rewards(self, sender_action, receiver_scores, running_avg_success):
         """
