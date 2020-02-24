@@ -20,7 +20,7 @@ def main(args):
     assert args.load_model is not None, "a valid path to a trained model is required."
     assert args.message_dump_file is not None, "a valid output file is required."
 
-    if(args.population is not None): model = AliceBobPopulation(args)
+    if(args.population is not None): model = AliceBobPopulation.load(args.load_model, args)
     else: model = AliceBob.load(args.load_model, args)
     #print(model)
 
@@ -30,9 +30,7 @@ def main(args):
     counts = torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     if args.load_other_model is not None:
-        other_model = type(model)()
-        other_model.load_state_dict(torch.load(args.load_other_model, map_location=args.device))
-        other_model.to(args.device)
+        other_model = type(model).load(args.load_other_model, args)
         counts_other_model == torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     with open(args.message_dump_file, 'w') as ostr:
