@@ -1,3 +1,5 @@
+import itertools as it
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,9 +9,9 @@ from torch.utils.tensorboard import SummaryWriter
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.logging import Progress
-from ..utils.misc import show_imgs, max_normalize_, to_color
+from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer
 
-class AliceBobCharlie(nn.Module, Game):
+class AliceBobCharlie(Game):
     def __init__(self, args):
         super(Game, self).__init__()
         self.sender = Sender.from_args(args)
@@ -22,11 +24,13 @@ class AliceBobCharlie(nn.Module, Game):
         self.grad_scaling = args.grad_scaling or 0
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
+        self._optim_alice_bob = build_optimizer(it.chain(self.sender.parameters(), self.receiver.parameters()), args.learning_rate)
+        self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
     def _bob_input(self, batch, drawer_outcome):
         return torch.cat([batch.target_img.unsqueeze(1), batch.base_distractors, drawer_outcome.image.unsqueeze(1)], dim=1)
 
-    def compute_interaction(self, batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
+    def _compute_interaction(self, batch, sender, drawer, receiver, sender_no_grad=False, drawer_no_grad=False):
         with torch.autograd.set_grad_enabled(torch.is_grad_enabled() and (not sender_no_grad)):
             sender_outcome = sender(batch.original_img)
 
@@ -37,7 +41,7 @@ class AliceBobCharlie(nn.Module, Game):
 
         return sender_outcome, drawer_outcome, receiver_outcome
 
-    def forward(self, batch):
+    def __call__(self, batch):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -45,7 +49,11 @@ class AliceBobCharlie(nn.Module, Game):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self.compute_interaction(batch, self.sender, self.drawer, self.receiver)
+        return self._compute_interaction(batch, self.sender, self.drawer, self.receiver)
+
+    def to(self, *vargs, **kwargs):
+        self.sender, self.receiver, self.drawer = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs), self.drawer.to(*vargs, **kwargs)
+        return self
 
     def compute_rewards(self, sender_action, receiver_action, running_avg_success, chance_perf):
         """
@@ -79,8 +87,14 @@ class AliceBobCharlie(nn.Module, Game):
         log_prob = sender_log_prob.sum(dim=1) + receiver_log_prob
         return log_prob
 
-    def train_step_alice_bob(self, batch, optim, running_avg_success):
-        optim.zero_grad()
+    def compute_interaction(self, batches, sender, receiver, drawer, default_adv_train=True, **supplementary_info):
+        batch_alice_bob, batch_charlie = batches
+        rewards_alice_bob, successes_alice_bob, message_length_alice_bob, loss_alice_bob, charlie_acc_alice_bob = self._train_step_alice_bob(batch_alice_bob, supplementary_info['running_avg_success'])
+        rewards_charlie, successes_charlie, message_length_charlie, loss_charlie, charlie_acc_charlie = self._train_step_charlie(batch_charlie, supplementary_info['running_avg_success'])
+
+
+    def _train_step_alice_bob(self, batch, running_avg_success):
+        #optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self.compute_interaction(batch, self.sender, self.drawer, self.receiver, drawer_no_grad=True)
 
         bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
@@ -96,19 +110,19 @@ class AliceBobCharlie(nn.Module, Game):
         log_prob = self.compute_log_prob(sender_outcome.log_prob, bob_log_prob)
         loss = -(rewards * log_prob)
 
-        loss = loss.mean()
+        #loss = loss.mean()
         # entropy penalties
         loss = loss - (self.beta_sender * sender_outcome.entropy.mean())
         loss = loss - (self.beta_receiver * bob_entropy.mean())
 
         # backprop
-        loss.backward()
+        #loss.backward()
 
         # Gradient clipping and scaling
-        if(self.grad_clipping > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
-        if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
+        #if(self.grad_clipping > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
+        #if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
 
-        optim.step()
+        #optim.step()
 
         message_length = sender_outcome.action[1]
 
@@ -116,9 +130,9 @@ class AliceBobCharlie(nn.Module, Game):
 
         return rewards, successes, message_length, loss, charlie_acc
 
-    def train_step_charlie(self, batch, optim, running_avg_success, default_adv_train=True):
-        optim.zero_grad()
-        sender_outcome, drawer_outcome, receiver_outcome = self.compute_interaction(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
+    def _train_step_charlie(self, batch, running_avg_success, default_adv_train=True):
+        #optim.zero_grad()
+        sender_outcome, drawer_outcome, receiver_outcome = self._compute_interaction(batch, self.sender, self.drawer, self.receiver, sender_no_grad=True)
 
         bob_probs = F.softmax(receiver_outcome.scores, dim=-1)
         bob_dist = Categorical(bob_probs)
@@ -136,13 +150,13 @@ class AliceBobCharlie(nn.Module, Game):
             loss = F.nll_loss(F.log_softmax(bob_scores, dim=1), target)
 
         # backprop
-        loss.backward()
+        #loss.backward()
 
         # Gradient clipping and scaling
-        if(self.grad_clipping  > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
-        if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
+        #if(self.grad_clipping  > 0): torch.nn.utils.clip_grad_value_(self.parameters(), self.grad_clipping)
+        #if(self.grad_scaling > 0): torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_scaling)
 
-        optim.step()
+        #optim.step()
 
         message_length = sender_outcome.action[1]
 
@@ -153,8 +167,8 @@ class AliceBobCharlie(nn.Module, Game):
         return rewards, successes, message_length, loss, charlie_acc
 
 
-    def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, **unimplemented_options):
-        """
+    """def train_epoch(self, data_iterator, optimizers, epoch=1, steps_per_epoch=1000, event_writer=None, simple_display=False, debug=False, **unimplemented_options):
+        #
             Model training function
             Input:
                 `data_iterator`, an infinite iterator over (batched) data
@@ -163,7 +177,7 @@ class AliceBobCharlie(nn.Module, Game):
                 `epoch`: epoch number to display in progressbar
                 `steps_per_epoch`: number of steps for epoch
                 `event_writer`: tensorboard writer to log evolution of values
-        """
+        #
         optim_alice_bob, optim_charlie = optimizers
         self.train() # Sets the model in training mode
 
@@ -210,7 +224,7 @@ class AliceBobCharlie(nn.Module, Game):
                     if debug:
                         log_grads_tensorboard(list(self.parameters()), event_writer)
 
-        self.eval()
+        self.eval()"""
 
 
     def test_visualize(self, data_iterator, learning_rate):
@@ -222,6 +236,10 @@ class AliceBobCharlie(nn.Module, Game):
         return self.sender, self.receiver, self.drawer
 
     @property
+    def optims(self):
+        return self._optim_alice_bob, self._optim_charlie
+
+    @property
     def num_batches_per_episode(self):
         return 2
 
@@ -231,5 +249,24 @@ class AliceBobCharlie(nn.Module, Game):
 
     @classmethod
     def load(cls, path, args, _old_model=False):
-        #TODO
-        raise NotImplemented
+        checkpoint = torch.load(path, map_location=args.device)
+        instance = cls(args)
+        instance = cls(args)
+        if _old_model:
+            sender_state_dict = {
+                k[len('sender.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('sender.')
+            }
+            instance.sender.load_state_dict(sender_state_dict)
+            receiver_state_dict = {
+                k[len('receiver.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('receiver.')
+            }
+            instance.receiver.load_state_dict(receiver_state_dict)
+            drawer_state_dict = {
+                k[len('drawer.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('drawer.')
+            }
+            instance.drawer.load_state_dict(drawer_state_dict)
+        else:
+            for agent, state_dict in zip(instance.agents, checkpoint['agents_state_dicts']):
+                agent.load_state_dict(state_dict)
+            instance.optim = checkpoint['optims'][0]
+        return instance

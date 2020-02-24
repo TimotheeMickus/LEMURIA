@@ -43,7 +43,7 @@ class AliceBob(Game):
         self.penalty = args.penalty
         self.adaptative_penalty = args.adaptative_penalty
 
-        self.optim = build_optimizer(parameters, args.learning_rate)
+        self._optim = build_optimizer(parameters, args.learning_rate)
 
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
@@ -51,11 +51,10 @@ class AliceBob(Game):
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
-    def compute_interaction(self, batches, *agents, **state_info):
-        batch = batches[0]
+    def compute_interaction(self, batch, *agents, **state_info):
         sender, receiver = agents
-        sender_outcome = sender(self._alice_input(batch))
-        receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
+
+        sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
         (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, state_info.get('running_avg_success', None))
@@ -67,7 +66,7 @@ class AliceBob(Game):
 
         rewards, successes = sender_rewards, sender_successes
         avg_msg_length = sender_outcome.action[1].float().mean().item()
-        losses = (loss,)
+        losses = loss
 
         return rewards, successes, avg_msg_length, losses
 
@@ -75,7 +74,7 @@ class AliceBob(Game):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
         return self
 
-    def __call__(self, batch):
+    def __call__(self, batch, *agents):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -83,7 +82,9 @@ class AliceBob(Game):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        return self.compute_interaction(batch, self.sender, self.receiver)
+        sender_outcome = self.sender(self._alice_input(batch))
+        receiver_outcome = self.receiver(self._bob_input(batch), *sender_outcome.action)
+        return sender_outcome, receiver_outcome
 
     def test_visualize(self, data_iterator, learning_rate):
         self.eval() # Sets the model in evaluation mode; good idea or not?
@@ -391,8 +392,8 @@ class AliceBob(Game):
         return self.sender, self.receiver
 
     @property
-    def optims(self):
-        return (self.optim,)
+    def optim(self):
+        return self._optim
 
     @classmethod
     def load(cls, path, args, _old_model=False):

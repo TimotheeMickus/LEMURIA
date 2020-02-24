@@ -26,9 +26,9 @@ class Game(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def optims(self):
+    def optim(self):
         """
-        List optimizers involved in the current round of the game
+        Optimizer involved in the current round of the game
         """
         pass
 
@@ -95,20 +95,16 @@ class Game(metaclass=ABCMeta):
 
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
-            raw_batches = range(start_i, end_i)
             running_avg_success = 0.
-            for indices in m_it.chunked(raw_batches, self.num_batches_per_episode):
-                indices = list(indices)
-                batches = [data_iterator.get_batch(keep_category=autologger.log_lang_progress) for _ in indices]
+            for indices in range(start_i, end_i):
+                batch = data_iterator.get_batch(keep_category=autologger.log_lang_progress)
                 self.start_episode()
 
-                for optim in self.optims:
-                    optim.zero_grad()
+                self.optim.zero_grad()
 
-                rewards, successes, avg_msg_length, losses = self.compute_interaction(batches, *self.agents, running_avg_success=running_avg_success)
+                rewards, successes, avg_msg_length, loss = self.compute_interaction(batch, *self.agents, running_avg_success=running_avg_success)
 
-                for loss in losses:
-                    loss.backward() # Backpropagation
+                loss.backward() # Backpropagation
 
                 # Gradient clipping and scaling
                 if self.grad_clipping > 0:
@@ -118,15 +114,14 @@ class Game(metaclass=ABCMeta):
                     for agent in self.agents:
                         torch.nn.utils.clip_grad_norm_(agent.parameters(), self.grad_scaling)
 
-                for optim in self.optims:
-                    optim.step()
+                self.optim.step()
 
                 running_avg_success = autologger.update(
-                    rewards, successes, avg_msg_length, losses,
+                    rewards, successes, avg_msg_length, loss,
                     parameters=(p for a in self.agents for p in a.parameters()),
                     num_batches_per_episode=self.num_batches_per_episode,
-                    indices=indices,
-                    batches=batches,
+                    batches=[batch],
+                    indices=[indices],
                 )
 
                 self.end_episode()

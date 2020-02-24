@@ -132,7 +132,7 @@ class AutoLogger(object):
 
 
     def update(self, *outcomes, **supplementary_info):
-        rewards, successes, avg_msg_length, losses = outcomes
+        rewards, successes, avg_msg_length, loss = outcomes
 
 
         # updates running average reward
@@ -145,11 +145,6 @@ class AutoLogger(object):
         if self.summary_writer is not None:
             avg_reward = rewards.mean().item() # average reward of the batch
             avg_success = successes.mean().item() # average success of the batch
-            if len(losses) > 1 :
-                loss = sum(l.item() for l in losses) / len(losses)
-            else:
-                loss = losses[0]
-
             number_ex_seen = supplementary_info['indices'][-1] * supplementary_info['batches'][0].size
             self._state['number_ex_seen'] = number_ex_seen
             self.summary_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
@@ -171,7 +166,7 @@ class AutoLogger(object):
                 selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
                 self._state['symbol_counts'] += selected_symbols.sum(dim=0)
 
-            if self.log_lang_progress and any(lambda i:i % 100 == 0, supplementary_info['indices']):
+            if self.log_lang_progress and any(lambda i:i % 100 == 0, supplementary_info.get('indices', [])):
                 if self._state['past_dist'] is None:
                     self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(self.device)
                 else:
