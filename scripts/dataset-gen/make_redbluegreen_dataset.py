@@ -4,13 +4,11 @@ from random import uniform
 
 scene = vp.canvas(width=128, height=128)
 
-NUMBER_IMGS = (3 ** 5) * 300
+NUMBER_IMGS = (3 ** 5) * 150
 
 SPHERE = vp.sphere(visible=False)
 CUBE = vp.box(visible=False)
 RING = vp.ring(visible=False, thickness=0.2)
-
-TERNARY = [0,1,2]
 
 def hide_all():
     for obj in [SPHERE, CUBE, RING]:
@@ -114,7 +112,7 @@ _big = {
     "small":0,
 }
 
-def screenshot(fname, buffertime=.2):
+def screenshot(fname, buffertime=.25):
     sleep(buffertime)
     scene.capture("%s.png" % fname)
     sleep(buffertime)
@@ -122,6 +120,15 @@ def screenshot(fname, buffertime=.2):
 scene.camera.pos = vp.vector(0,0,-3)
 scene.center = vp.vector(0,0,0)
 scene.autoscale=False
+
+import os
+# change path below as appropriate
+PATH = '../Downloads/rgb_dataset'
+DATASET = {
+    os.path.splitext(f)[0]
+    for f in os.listdir(PATH)
+    if os.path.isfile(os.path.join(PATH, f))
+}
 
 i = 0
 while True:
@@ -132,12 +139,27 @@ while True:
                     for bigness in _big:
                         hide_all()
                         fname = "%i_%s_%s_%s_%s_%s" % (i, obj, color, upness, rightness, bigness)
+                        if fname in DATASET:
+                            # ignore file previously generated
+                            i += 1
+                            continue
+                        if i >= NUMBER_IMGS:
+                            from rm_dups import rm_dups
+                            deleted = rm_dups()
+                            if deleted:
+                                DATASET = {
+                                    os.path.splitext(f)[0]
+                                    for f in os.listdir(PATH)
+                                    if os.path.isfile(os.path.join(PATH, f))
+                                }
+                                i = 0
+                            else:
+                                exit(0)
                         vp_obj = random_obj(_objs[obj], _up[upness], _right[rightness], _big[bigness], _colors[color])
                         scene.background = vp.color.gray(uniform(0.3, 1.))
                         for l in scene.lights:
                             l.color = vp.color.gray(uniform(0.4, 1.))
                             l.pos = vp.vector(uniform(-5, 5),uniform(-5, 5),uniform(-5, 5))
+
                         screenshot(fname)
                         i += 1
-                        if i == NUMBER_IMGS:
-                            exit(0)
