@@ -254,7 +254,7 @@ class AliceBobCharlie(Game):
 
         # Computes compositionality measures
         # First selects a sample of (message, category) pairs
-        size_sample = (30 * data_iterator.nb_categories)
+        size_sample = 1024
 
         sample = list(zip(messages, categories))
         random.shuffle(sample)
