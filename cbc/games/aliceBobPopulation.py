@@ -92,5 +92,5 @@ class AliceBobPopulation(AliceBob):
         return instance
 
     def pretrain_CNNs(self, data_iterator, args):
-        for i,agents in enumerate(self._agents):
+        for i, agent in enumerate(self._agents):
             self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)

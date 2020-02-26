@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import collections
 
 from ..utils.logging import DummyLogger, Progress
+from ..utils.misc import build_optimizer
 
 class Game(metaclass=ABCMeta):
 
@@ -142,6 +143,7 @@ class Game(metaclass=ABCMeta):
             agent.image_encoder,
             nn.Linear(args.hidden_size, num_cats),
             nn.LogSoftmax(dim=1)).to(args.device)
+        optimizer = build_optimizer(model.parameters(), args.learning_rate)
 
         print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
@@ -158,4 +160,4 @@ class Game(metaclass=ABCMeta):
                     total_items += tgt.size(0)
                     pbar.update(L=loss.item(), acc=avg_acc / total_items)
                     loss.backward()
-                    self.optim.step()
+                    optimizer.step()
