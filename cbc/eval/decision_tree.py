@@ -77,14 +77,14 @@ def decision_tree(model, data_iterator):
             #print([data_iterator.concept_names[idx] for idx in concept_indices])
 
             # For each selected concept, we pick a value
-            conjunctions = itertools.product(*[data_iterator._concepts[idx].keys() for idx in concept_indices])
+            conjunctions = itertools.product(*[data_iterator.concepts[idx].keys() for idx in concept_indices])
 
             for conjunction in conjunctions:
                 #print('\t class: %s' % str(conjunction))
 
                 def in_class(category):
                     for i, idx in enumerate(concept_indices):
-                        if(category[idx] != data_iterator._concepts[idx][conjunction[i]]): return False
+                        if(category[idx] != data_iterator.concepts[idx][conjunction[i]]): return False
 
                     return True
 

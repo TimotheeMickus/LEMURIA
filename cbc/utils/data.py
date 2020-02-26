@@ -125,7 +125,7 @@ class DistinctTargetClassDataLoader():
     def category_tuple(self, category_idx):
         ks = []
         k = 1
-        for i, concept in enumerate(self._concepts):
+        for i, concept in enumerate(self.concepts):
             ks.append(k)
             k *= len(concept)
         ks.reverse()
@@ -146,7 +146,7 @@ class DistinctTargetClassDataLoader():
     def category_idx(self, category_tuple):
         category_idx = 0
         k = 1
-        for i, concept in enumerate(self._concepts):
+        for i, concept in enumerate(self.concepts):
             category_idx += category_tuple[i] * k
             k *= len(concept)
 
@@ -166,19 +166,19 @@ class DistinctTargetClassDataLoader():
         if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities] 
         assert all([(x >= 1) for x in constrain_dim])
 
-        self._concepts = []
+        self.concepts = []
         for i, nb_values in enumerate(constrain_dim):
             values = possibilities[i]
             random.shuffle(values)
             values = values[:nb_values]
             
-            self._concepts.append({v: i for (i, v) in enumerate(values)})
+            self.concepts.append({v: i for (i, v) in enumerate(values)})
 
-        self.nb_categories = np.prod([len(concept) for concept in self._concepts])
-        self.nb_concepts = len(self._concepts)
+        self.nb_categories = np.prod([len(concept) for concept in self.concepts])
+        self.nb_concepts = len(self.concepts)
         self.concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
 
-        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self._concepts[i]))
+        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
 
         self.device = device
         self.noise = noise
@@ -190,7 +190,7 @@ class DistinctTargetClassDataLoader():
         # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         self.training_categories = set()
         self.evaluation_categories = set()
-        ref_category = np.array([np.random.randint(len(concept)) for concept in self._concepts])
+        ref_category = np.array([np.random.randint(len(concept)) for concept in self.concepts])
         category = np.full(self.nb_concepts, 0)
         while(True): # Enumerates all categories to sort them
             dist = (category != ref_category).sum()
@@ -200,7 +200,7 @@ class DistinctTargetClassDataLoader():
                 self.training_categories.add(tuple(category))
 
             # Let's go to the next category
-            for i, concept in enumerate(self._concepts):
+            for i, concept in enumerate(self.concepts):
                 if(category[i] < (len(concept) - 1)):
                     category[i] += 1
                     break
@@ -219,7 +219,7 @@ class DistinctTargetClassDataLoader():
             infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
 
             idx = int(infos[0])
-            category = tuple(map(dict.__getitem__, self._concepts, infos[1:]))
+            category = tuple(map(dict.__getitem__, self.concepts, infos[1:]))
 
             return (idx, category)
 
