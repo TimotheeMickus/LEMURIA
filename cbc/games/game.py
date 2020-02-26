@@ -138,7 +138,7 @@ class Game(metaclass=ABCMeta):
             self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)
 
     def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
-        num_cats = (3 if args.ternary_dataset else 2) ** 5
+        num_cats = (2 if args.binary_dataset else 3) ** 5
         model = nn.Sequential(
             agent.image_encoder,
             nn.Linear(args.hidden_size, num_cats),
