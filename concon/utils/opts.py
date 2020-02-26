@@ -76,7 +76,7 @@ def get_args():
     group.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
     group.add_argument('--strides', help='stride at each convolution layer', type=int, nargs='+', default=[2, 2, 1, 2, 1, 2, 1, 2]) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
     group.add_argument('--pretrain_CNNs', help='pretrain CNNs on classification', action='store_true')
-    group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=2)
+    group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
