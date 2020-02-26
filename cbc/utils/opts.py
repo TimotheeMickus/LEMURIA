@@ -11,7 +11,7 @@ def get_args():
 
     arg_parser = argparse.ArgumentParser()
 
-    default_data_set = os.path.join('data', 'cbc')
+    default_data_set = os.path.join('data', 'concon')
     default_models = os.path.join('[summary]', 'models')
     default_summary = os.path.join('runs', 'cbc', ('[now]_' + socket.gethostname()))
 

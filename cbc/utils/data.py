@@ -154,7 +154,7 @@ class DistinctTargetClassDataLoader():
 
         return category_idx
 
-    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
+    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
         # The concepts
         possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
         possible_colours = ['blue', 'red'] if binary else ['blue', 'red', 'green']
@@ -186,7 +186,7 @@ class DistinctTargetClassDataLoader():
         self.sampling_strategies = sampling_strategies
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
-        # If `evaluation_categories` is None, all categories are used during training
+        # If `evaluation_categories` is -1, all categories are used during training
         # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         self.training_categories = set()
         self.evaluation_categories = set()
@@ -194,7 +194,7 @@ class DistinctTargetClassDataLoader():
         category = np.full(self.nb_concepts, 0)
         while(True): # Enumerates all categories to sort them
             dist = (category != ref_category).sum()
-            if((evaluation_categories is not None) and ((dist % evaluation_categories) == 0)):
+            if((evaluation_categories >= 0) and ((dist % evaluation_categories) == 0)):
                 self.evaluation_categories.add(tuple(category))
             else:
                 self.training_categories.add(tuple(category))
@@ -211,8 +211,8 @@ class DistinctTargetClassDataLoader():
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
 
-        print('Training categories: %s' % self.training_categories)
-        print('Evaluation categories: %s' % self.evaluation_categories)
+        print('Training categories: %s' % sorted(self.training_categories))
+        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
 
         def analyse_filename(filename):
             name, ext = os.path.splitext(filename)
