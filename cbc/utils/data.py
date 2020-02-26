@@ -219,7 +219,7 @@ class DistinctTargetClassDataLoader():
             infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
 
             idx = int(infos[0])
-            category = tuple(map(dict.__getitem__, self.concepts, infos[1:]))
+            category = tuple([concept.get(value) for (concept, value) in zip(self.concepts, infos[1:])])
 
             if(None in category): category = None # The value for one of the concepts is not accepted
 
