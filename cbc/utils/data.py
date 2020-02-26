@@ -159,7 +159,7 @@ class DistinctTargetClassDataLoader():
         self.shapes = {'cube': 0, 'sphere': 1} if binary else {'cube': 0, 'ring': 1, 'sphere': 2}
         self.colours = {'blue': 0, 'red': 1} if binary else {'blue': 0, 'green': 1, 'red': 2}
         self.v_positions = {'down': 0, 'up': 1} if binary else {'down': 0, 'mid': 1, 'up': 2}
-        self.h_positions = {'left': 0, 'right': 1} if binary else {'left': 0, 'center': 1, 'rigth': 2}
+        self.h_positions = {'left': 0, 'right': 1} if binary else {'left': 0, 'center': 1, 'right': 2}
         self.sizes = {'small': 0, 'big': 1} if binary else {'small': 0, 'medium': 1, 'big': 2}
 
         self._concepts = [self.shapes, self.colours, self.v_positions, self.h_positions, self.sizes]
