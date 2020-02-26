@@ -4,7 +4,7 @@ from random import uniform
 
 scene = vp.canvas(width=128, height=128)
 
-NUMBER_IMGS = (3 ** 5) * 150
+NUMBER_IMGS = (3 ** 5) * 300
 
 SPHERE = vp.sphere(visible=False)
 CUBE = vp.box(visible=False)
@@ -43,7 +43,6 @@ def random_size(bigness):
         s = uniform(1.5, 2)
     return vp.vector(s, s, s)
 
-
 def random_radius(bigness):
     if bigness == 2:
         s = uniform(4.25, 5.0)
@@ -67,8 +66,6 @@ def random_color(blueness):
         g = uniform(0., min(r - 0.1, 0.5))
         b = uniform(0., min(r - 0.1, 0.5))
     return vp.vector(r, g, b)
-
-
 
 def random_obj(obj, upness, rightness, bigness, blueness):
     obj.up = random_orientation()
