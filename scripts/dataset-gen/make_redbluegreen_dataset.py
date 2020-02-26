@@ -93,13 +93,13 @@ _colors = {
 
 _up = {
     "up":2,
-    "mid":1,
+    "v-mid":1,
     "down":0,
 }
 
 _right = {
     "right":2,
-    "center":1,
+    "h-mid":1,
     "left":0,
 }
 
