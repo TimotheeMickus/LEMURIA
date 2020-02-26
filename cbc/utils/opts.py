@@ -17,7 +17,8 @@ def get_args():
 
     group = arg_parser.add_argument_group(title='data', description='arguments relative to data handling')
     group.add_argument('--data_set', help='the path to the data set', default=default_data_set)
-    group.add_argument('--ternary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
+    group.add_argument('--binary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
+    group.add_argument('--constrain_dim', help='restrict specific dimensions in dataset', nargs=5, choices=[1,2,3], default=None, type=int)
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
     group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty)', default='difficulty')
@@ -79,7 +80,6 @@ def get_args():
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
-
     group.add_argument('--evaluate_language', help='evaluate language instead of training', action='store_true')
     group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
     group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')

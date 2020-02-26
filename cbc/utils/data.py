@@ -154,7 +154,7 @@ class DistinctTargetClassDataLoader():
 
         return category_idx
 
-    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=True, constrain_dim=None):
+    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
         # The concepts
         possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
         possible_colours = ['blue', 'red'] if binary else ['blue', 'red', 'green']
@@ -162,8 +162,8 @@ class DistinctTargetClassDataLoader():
         possible_h_positions = ['left', 'right'] if binary else ['left', 'right', 'h-mid']
         possible_sizes = ['small', 'big'] if binary else ['small', 'big', 'medium']
         possibilities = [possible_shapes, possible_colours, possible_v_positions, possible_h_positions, possible_sizes]
-        
-        if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities] 
+
+        if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities]
         assert all([(x >= 1) for x in constrain_dim])
 
         self.concepts = []
@@ -171,7 +171,7 @@ class DistinctTargetClassDataLoader():
             values = possibilities[i]
             random.shuffle(values)
             values = values[:nb_values]
-            
+
             self.concepts.append({v: i for (i, v) in enumerate(values)})
 
         self.nb_categories = np.prod([len(concept) for concept in self.concepts])
@@ -220,7 +220,7 @@ class DistinctTargetClassDataLoader():
 
             idx = int(infos[0])
             category = tuple(map(dict.__getitem__, self.concepts, infos[1:]))
-            
+
             if(None in category): category = None # The value for one of the concepts is not accepted
 
             return (idx, category)
@@ -367,4 +367,4 @@ class DistinctTargetClassDataLoader():
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    return DistinctTargetClassDataLoader(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=not args.ternary_dataset)
+    return DistinctTargetClassDataLoader(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
