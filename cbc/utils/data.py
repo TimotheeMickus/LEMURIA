@@ -220,6 +220,8 @@ class DistinctTargetClassDataLoader():
 
             idx = int(infos[0])
             category = tuple(map(dict.__getitem__, self.concepts, infos[1:]))
+            
+            if(None in category): category = None # The value for one of the concepts is not accepted
 
             return (idx, category)
 
@@ -235,6 +237,7 @@ class DistinctTargetClassDataLoader():
             if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
 
             idx, category = analyse_filename(filename)
+            if(category is None): continue
 
             pil_img = PIL.Image.open(full_path).convert('RGB')
             #torchvision.transforms.ToTensor
