@@ -155,7 +155,7 @@ class DistinctTargetClassDataLoader():
         return category_idx
 
     def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=True):
-        # The binary concepts
+        # The concepts
         self.shapes = {'cube': 0, 'sphere': 1} if binary else {'cube': 0, 'ring': 1, 'sphere': 2}
         self.colours = {'blue': 0, 'red': 1} if binary else {'blue': 0, 'green': 1, 'red': 2}
         self.v_positions = {'down': 0, 'up': 1} if binary else {'down': 0, 'mid': 1, 'up': 2}
