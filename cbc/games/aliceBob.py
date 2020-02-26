@@ -1,14 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
-from torch.distributions.categorical import Categorical
 import numpy as np
 import itertools as it
 import tqdm
 
 from collections import defaultdict
-from deprecated import deprecated
 import random
 import time
 
@@ -412,3 +408,11 @@ class AliceBob(Game):
     def end_episode(self, **kwargs):
         self.eval()
         self._running_average_success = kwargs.get('running_average_success', None)
+
+    def pretrain_CNNs(self, data_iterator, args):
+        if args.shared:
+            named_agents = [['sender-receiver', self.sender],]
+        else:
+            named_agents = [['sender', self.sender], ['receiver', self.receiver]]
+        for name, agent in named_agents:
+            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name=name)

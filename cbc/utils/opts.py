@@ -17,6 +17,7 @@ def get_args():
 
     group = arg_parser.add_argument_group(title='data', description='arguments relative to data handling')
     group.add_argument('--data_set', help='the path to the data set', default=default_data_set)
+    group.add_argument('--ternary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
     group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty)', default='difficulty')
@@ -73,6 +74,9 @@ def get_args():
     group.add_argument('--filters', help='number of filters per convolution layers', type=int, default=32)
     group.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
     group.add_argument('--strides', help='stride at each convolution layer', type=int, nargs='+', default=[2, 2, 1, 2, 1, 2, 1, 2]) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
+    group.add_argument('--pretrain_CNNs', help='pretrain CNNs on classification', action='store_true')
+    group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=2)
+    group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
 

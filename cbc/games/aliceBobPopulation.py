@@ -90,3 +90,7 @@ class AliceBobPopulation(AliceBob):
             agent.load_state_dict(state_dict)
         instance._optim = checkpoint['optims'][0]
         return instance
+
+    def pretrain_CNNs(self, data_iterator, args):
+        for i,agents in enumerate(self._agents):
+            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)

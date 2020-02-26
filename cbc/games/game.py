@@ -3,9 +3,10 @@ import itertools as it
 import more_itertools as m_it
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import collections
 
-from ..utils.logging import DummyLogger
+from ..utils.logging import DummyLogger, Progress
 
 class Game(metaclass=ABCMeta):
 
@@ -130,3 +131,31 @@ class Game(metaclass=ABCMeta):
     @abstractmethod
     def load(cls, path, args, _old_model=False):
         pass
+
+    def pretrain_CNNs(self, data_iterator, args):
+        for i,agents in enumerate(self.agents):
+            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)
+
+    def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
+        num_cats = (3 if args.ternary_dataset else 2) ** 5
+        model = nn.Sequential(
+            agent.image_encoder,
+            nn.Linear(args.hidden_size, num_cats),
+            nn.LogSoftmax(dim=1)).to(args.device)
+
+        print("Training agent: %s" % agent_name)
+        for epoch in range(args.pretrain_epochs):
+            pbar = Progress(args.simple_display, args.steps_per_epoch, epoch, logged_items={'L', 'acc'})
+            avg_acc, total_items = 0., 0.
+            with pbar:
+                for _ in range(args.steps_per_epoch):
+                    self.optim.zero_grad()
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval)
+                    pred = model(batch.target_img(stack=True))
+                    tgt = batch.category(stack=True, f=data_iterator.category_idx).to(args.device)
+                    loss = F.nll_loss(pred, tgt)
+                    avg_acc += (pred.argmax(dim=1) == tgt).float().sum().item()
+                    total_items += tgt.size(0)
+                    pbar.update(L=loss.item(), acc=avg_acc / total_items)
+                    loss.backward()
+                    self.optim.step()

@@ -41,6 +41,9 @@ def train(args):
 
         data_loader = get_data_loader(args)
 
+        if args.pretrain_CNNs:
+            model.pretrain_CNNs(data_loader, args)
+
         autologger = AutoLogger(simple_display=args.simple_display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, base_alphabet_size=args.base_alphabet_size, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period, log_charlie_acc=args.charlie)
 
         print(("[%s] training start..." % datetime.now()), flush=True)

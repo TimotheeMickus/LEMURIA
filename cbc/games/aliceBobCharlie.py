@@ -6,12 +6,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
-from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
-from ..utils.logging import Progress
 from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing
 from ..eval import compute_correlation
 
@@ -357,3 +355,7 @@ class AliceBobCharlie(Game):
             instance._optim_alice_bob, instance._optim_charlie = checkpoint['optims']
             instance._current_step = checkpoint['current_step']
         return instance
+
+    def pretrain_CNNs(self, data_iterator, args):
+        for name, agent in [['sender', self.sender], ['receiver', self.receiver]]:
+            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name=name)
