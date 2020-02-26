@@ -154,18 +154,31 @@ class DistinctTargetClassDataLoader():
 
         return category_idx
 
-    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=True):
+    def __init__(self, same_img=False, evaluation_categories=None, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=True, constrain_dim=None):
         # The concepts
-        self.shapes = {'cube': 0, 'sphere': 1} if binary else {'cube': 0, 'ring': 1, 'sphere': 2}
-        self.colours = {'blue': 0, 'red': 1} if binary else {'blue': 0, 'green': 1, 'red': 2}
-        self.v_positions = {'down': 0, 'up': 1} if binary else {'down': 0, 'mid': 1, 'up': 2}
-        self.h_positions = {'left': 0, 'right': 1} if binary else {'left': 0, 'center': 1, 'right': 2}
-        self.sizes = {'small': 0, 'big': 1} if binary else {'small': 0, 'medium': 1, 'big': 2}
+        possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
+        possible_colours = ['blue', 'red'] if binary else ['blue', 'red', 'green']
+        possible_v_positions = ['down', 'up'] if binary else ['down', 'up', 'v-mid']
+        possible_h_positions = ['left', 'right'] if binary else ['left', 'right', 'h-mid']
+        possible_sizes = ['small', 'big'] if binary else ['small', 'big', 'medium']
+        possibilities = [possible_shapes, possible_colours, possible_v_positions, possible_h_positions, possible_sizes]
+        
+        if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities] 
+        assert all([(x >= 1) for x in constrain_dim])
 
-        self._concepts = [self.shapes, self.colours, self.v_positions, self.h_positions, self.sizes]
+        self._concepts = []
+        for i, nb_values in enumerate(constrain_dim):
+            values = possibilities[i]
+            random.shuffle(values)
+            values = values[:nb_values]
+            
+            self._concepts.append({v: i for (i, v) in enumerate(values)})
+
         self.nb_categories = np.prod([len(concept) for concept in self._concepts])
         self.nb_concepts = len(self._concepts)
         self.concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
+
+        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self._concepts[i]))
 
         self.device = device
         self.noise = noise
@@ -206,7 +219,7 @@ class DistinctTargetClassDataLoader():
             infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
 
             idx = int(infos[0])
-            category = tuple(map(dict.__getitem__, self._concepts, infos[1:])) # equivalent to (self.shapes[infos[1]], self.colours[infos[2]], self.v_positions[infos[3]], self.h_positions[infos[4]], self.sizes[infos[5]])
+            category = tuple(map(dict.__getitem__, self._concepts, infos[1:]))
 
             return (idx, category)
 
