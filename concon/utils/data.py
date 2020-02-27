@@ -190,7 +190,7 @@ class DistinctTargetClassDataLoader():
         # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         self.training_categories = set()
         self.evaluation_categories = set()
-        ref_category = np.array([np.random.randint(len(concept)) for concept in self.concepts])
+        ref_category = np.array([np.random.randint(len(concept)) for concept in self.concepts]) # np.full(len(self.concepts), 0)
         category = np.full(self.nb_concepts, 0)
         while(True): # Enumerates all categories to sort them
             dist = (category != ref_category).sum()
@@ -211,8 +211,10 @@ class DistinctTargetClassDataLoader():
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
 
+        print('Total number of categories: %i' % self.nb_categories)
         print('Training categories: %s' % sorted(self.training_categories))
         print('Evaluation categories: %s' % sorted(self.evaluation_categories))
+        #print('(reference category: %s)' % ref_category)
 
         def analyse_filename(filename):
             name, ext = os.path.splitext(filename)
