@@ -255,7 +255,7 @@ class AliceBob(Game):
 
         return loss
 
-    def evaluate(self, data_iterator, epoch, event_writer=None, simple_display=False, debug=False, log_lang_progress=True):
+    def evaluate(self, data_iterator, epoch, event_writer=None, display='tqdm', debug=False, log_lang_progress=True):
         self.eval()
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
@@ -267,7 +267,7 @@ class AliceBob(Game):
         batch_numbers = range(nb_batch)
         messages = []
         categories = []
-        if(not simple_display): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
+        if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
         for _ in batch_numbers:
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
@@ -290,7 +290,7 @@ class AliceBob(Game):
         # Computes the accuracy when the target is selected from any category
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
         if(event_writer is not None): event_writer.add_scalar('eval/accuracy', accuracy_all, epoch, period=1)
-        print('Accuracy: %s' % accuracy_all)
+        if(display != 'minimal'): print('Accuracy: %s' % accuracy_all)
 
         eval_categories = data_iterator.evaluation_categories_idx
         if(eval_categories != []):
@@ -301,7 +301,7 @@ class AliceBob(Game):
             counts = counts_matrix_eval_t.sum()
             accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
             if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-t', accuracy_eval_t, epoch, period=1)
-            print('Accuracy eval-t: %s' % accuracy_eval_t)
+            if(display != 'minimal'): print('Accuracy eval-t: %s' % accuracy_eval_t)
 
             # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
             failure_matrix_eval_d = failure_matrix[:, eval_categories]
@@ -310,7 +310,7 @@ class AliceBob(Game):
             counts = counts_matrix_eval_d.sum()
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
             if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-d', accuracy_eval_d, epoch, period=1)
-            print('Accuracy eval-d %s' % accuracy_eval_d)
+            if(display != 'minimal'): print('Accuracy eval-d %s' % accuracy_eval_d)
 
             # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
             failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
@@ -319,7 +319,7 @@ class AliceBob(Game):
             counts = counts_matrix_eval_td.sum()
             accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
             if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-td', accuracy_eval_td, epoch, period=1)
-            print('Accuracy eval-td %s' % accuracy_eval_td)
+            if(display != 'minimal'): print('Accuracy eval-td %s' % accuracy_eval_td)
 
         # Computes compositionality measures
         # First selects a sample of (message, category) pairs
@@ -350,21 +350,21 @@ class AliceBob(Game):
 
             #timepoint = time.time()
             l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30)
-            print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
+            if(display != 'minimal'): print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
             l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.levenshtein_normalised)
-            print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
+            if(display != 'minimal'): print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
             j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
-            print('Jaccard: %f - %f' % (j_cor, j_cor_n))
+            if(display != 'minimal'): print('Jaccard: %f - %f' % (j_cor, j_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)

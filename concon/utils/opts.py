@@ -31,7 +31,7 @@ def get_args():
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
-    group.add_argument('--simple_display', '-simple_display', help='displays the information in a simple way (not using tqdm)', action='store_true')
+    group.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
     group.add_argument('--debug', '-d', help='log more stuff', action='store_true')
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')

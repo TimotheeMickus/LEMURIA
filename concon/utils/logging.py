@@ -38,49 +38,51 @@ class AverageSummaryWriter:
             self.add_scalar(key, value, global_step)
 
 class Progress:
-    def __init__(self, simple_display, steps_per_epoch, epoch, logged_items={"R"}):
-        self.simple_display = simple_display
+    def __init__(self, display, steps_per_epoch, epoch, logged_items={"R"}):
+        self.display = display
         self.steps_per_epoch = steps_per_epoch
         self.epoch = epoch
         self._logged_items = logged_items
 
     def __enter__(self):
-        if(self.simple_display): self.i = 0
-        else: self.pbar = tqdm.tqdm(total=self.steps_per_epoch, postfix={i: 0.0 for i in self._logged_items}, unit="B", desc=("Epoch %i" % self.epoch)) # Do not forget to close it at the end
+        if(self.display == 'normal'): self.i = 0
+        elif(self.display == 'tqdm'): self.pbar = tqdm.tqdm(total=self.steps_per_epoch, postfix={i: 0.0 for i in self._logged_items}, unit="B", desc=("Epoch %i" % self.epoch)) # Do not forget to close it at the end
 
         return self
 
     def update(self, **logged_items):
-        if(self.simple_display):
+        if(self.display == 'normal'):
             postfix = " ".join(("%s: %f" % (k, logged_items[k])) for k in sorted(logged_items))
             print(('%i/%i - %s' % (self.i, self.steps_per_epoch, postfix)), flush=True)
             self.i += 1
-        else:
+        elif(self.display == 'tqdm'):
             self.pbar.set_postfix(logged_items, refresh=False)
             self.pbar.update()
 
     def __exit__(self, type, value, traceback):
-        if(not self.simple_display): self.pbar.close()
+        if(self.display == 'tqdm'): self.pbar.close()
 
 class DummyLogger(object):
     """
         Place holder class
     """
+
     def __enter__(self):
         pass
+
     def __exit__(self, *vargs, **kwargs):
         pass
+
     def update(self, *vargs, **kwargs):
         pass
 
-
 class AutoLogger(object):
-    def __init__(self, simple_display=False, steps_per_epoch=1000, debug=False,
+    def __init__(self, display=False, steps_per_epoch=1000, debug=False,
         log_lang_progress=False, log_entropy=False, base_alphabet_size=10,
         device='cpu',no_summary=False, summary_dir=None, default_period=10,
         log_charlie_acc=False):
 
-        self.simple_display = simple_display
+        self.display = display
         self.steps_per_epoch = steps_per_epoch
 
         self.current_epoch = 0
@@ -105,7 +107,7 @@ class AutoLogger(object):
         self._state = {}
 
     def new_progress_bar(self):
-        self._pbar = Progress(self.simple_display, self.steps_per_epoch, self.current_epoch, self.logged_items)
+        self._pbar = Progress(self.display, self.steps_per_epoch, self.current_epoch, self.logged_items)
         self.current_epoch += 1
 
     def __enter__(self):

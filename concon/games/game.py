@@ -147,7 +147,7 @@ class Game(metaclass=ABCMeta):
 
         print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
-            pbar = Progress(args.simple_display, args.steps_per_epoch, epoch, logged_items={'L', 'acc'})
+            pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L', 'acc'})
             avg_acc, total_items = 0., 0.
             with pbar:
                 for _ in range(args.steps_per_epoch):

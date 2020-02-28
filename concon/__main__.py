@@ -45,12 +45,12 @@ def train(args):
         if args.pretrain_CNNs:
             model.pretrain_CNNs(data_loader, args)
 
-        autologger = AutoLogger(simple_display=args.simple_display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, base_alphabet_size=args.base_alphabet_size, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period, log_charlie_acc=args.charlie)
+        autologger = AutoLogger(display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, base_alphabet_size=args.base_alphabet_size, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period, log_charlie_acc=args.charlie)
 
         print(("[%s] training start..." % datetime.now()), flush=True)
         for epoch in range(args.epochs):
             model.train_epoch(data_loader, epoch=epoch, autologger=autologger, steps_per_epoch=args.steps_per_epoch)
-            model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, simple_display=args.simple_display, debug=args.debug)
+            model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, display=args.display, debug=args.debug)
 
             if(args.save_model):
                 model.save(os.path.join(run_models_dir, "model_e%i.pt" % epoch))

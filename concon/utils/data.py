@@ -154,7 +154,7 @@ class DistinctTargetClassDataLoader():
 
         return category_idx
 
-    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, simple_display=False, noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
+    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
         # The concepts
         possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
         possible_colours = ['blue', 'red'] if binary else ['blue', 'red', 'green']
@@ -233,7 +233,7 @@ class DistinctTargetClassDataLoader():
         dataset = [] # Will end as a Numpy array of DataPoint·s
         #for filename in os.listdir(data_set):
         tmp_data = os.listdir(data_set)
-        if(not simple_display): tmp_data = tqdm.tqdm(tmp_data)
+        if(display == 'tqdm'): tmp_data = tqdm.tqdm(tmp_data)
         for filename in tmp_data:
             full_path = os.path.join(data_set, filename)
             if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
@@ -257,7 +257,7 @@ class DistinctTargetClassDataLoader():
         # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
         self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
 
-        if(simple_display): print('Loading done')
+        if(display != 'tqdm'): print('Loading done')
 
     def __len__(self):
         return len(self.dataset)
@@ -369,4 +369,4 @@ class DistinctTargetClassDataLoader():
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    return DistinctTargetClassDataLoader(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, simple_display=args.simple_display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+    return DistinctTargetClassDataLoader(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
