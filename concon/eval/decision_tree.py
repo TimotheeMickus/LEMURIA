@@ -23,6 +23,7 @@ def decision_tree(model, data_iterator):
     # As features, we will use the presence of n-grams
     import numpy as np
 
+    # TODO Add one OUT_OF_SENTENCE pseudo-word to the alphabet
     n = 3
     alphabet_size = model.base_alphabet_size + 1
     nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
@@ -51,7 +52,7 @@ def decision_tree(model, data_iterator):
         # We could consider adding the BOM symbol
         v = np.zeros(nb_ngrams, dtype=bool)
         s = set()
-        for l in range(1, (n + 1)):
+        for l in range(1, (n + 1)): # Length on the n-gram
             for i in range(len(message) - l + 1):
                 ngram = tuple(message[i:(i + l)])
                 s.add(ngram)
