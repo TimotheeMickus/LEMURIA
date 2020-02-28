@@ -37,6 +37,7 @@ class AverageSummaryWriter:
         for key, value in l:
             self.add_scalar(key, value, global_step)
 
+# TODO Instead of having one class Progress with a `display` parameter, it might be more elegant to have different classes. The AutoLogger would chose which one to use dependeing on the `display` parameter.
 class Progress:
     def __init__(self, display, steps_per_epoch, epoch, logged_items={"R"}):
         self.display = display
@@ -76,8 +77,9 @@ class DummyLogger(object):
     def update(self, *vargs, **kwargs):
         pass
 
+# TODO Could have a 'print(self, message, flush, type)' method
 class AutoLogger(object):
-    def __init__(self, display=False, steps_per_epoch=1000, debug=False,
+    def __init__(self, display='tqdm', steps_per_epoch=1000, debug=False,
         log_lang_progress=False, log_entropy=False, base_alphabet_size=10,
         device='cpu',no_summary=False, summary_dir=None, default_period=10,
         log_charlie_acc=False):
