@@ -55,14 +55,14 @@ class AliceBob(Game):
         (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, self._running_average_success)
 
         # Bob's part
-        receiver_loss = self.compute_receiver_loss(receiver_outcome.scores)
+        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
         loss = sender_loss + receiver_loss
 
         rewards, successes = sender_rewards, sender_successes
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
-        return loss, rewards, successes, avg_msg_length
+        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
     def to(self, *vargs, **kwargs):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
@@ -236,7 +236,7 @@ class AliceBob(Game):
 
         return (loss, successes, rewards)
 
-    def compute_receiver_loss(self, receiver_scores):
+    def compute_receiver_loss(self, receiver_scores, return_entropy=False):
         receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
 
         # By design, the target is the first image
@@ -252,7 +252,8 @@ class AliceBob(Game):
         loss = -(rewards * log_prob).mean()
 
         loss = loss - (self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
-
+        if return_entropy:
+            return loss, receiver_pointing['dist'].entropy().mean()
         return loss
 
     def evaluate(self, data_iterator, epoch, event_writer=None, display='tqdm', debug=False, log_lang_progress=True):

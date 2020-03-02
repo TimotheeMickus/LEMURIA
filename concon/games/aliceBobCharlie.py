@@ -104,10 +104,10 @@ class AliceBobCharlie(Game):
 
     def compute_interaction(self, batch, **supplementary_info):
         if not self._charlie_turn():
-            rewards, successes, message_length, loss, charlie_acc = self._train_step_alice_bob(batch, self._running_average_success)
+            rewards, successes, message_length, loss, sender_entropy, receiver_entropy, charlie_acc = self._train_step_alice_bob(batch, self._running_average_success)
         else:
-            rewards, successes, message_length, loss, charlie_acc = self._train_step_charlie(batch, self._running_average_success)
-        return loss.mean(), rewards, successes, message_length.float().mean().item(), charlie_acc, self._charlie_turn()
+            rewards, successes, message_length, loss, sender_entropy, receiver_entropy, charlie_acc = self._train_step_charlie(batch, self._running_average_success)
+        return loss.mean(), rewards, successes, message_length.float().mean().item(), sender_entropy, receiver_entropy, charlie_acc, self._charlie_turn()
 
 
     def _train_step_alice_bob(self, batch, running_avg_success):
@@ -146,13 +146,14 @@ class AliceBobCharlie(Game):
         charlie_idx = self._bob_input(batch, drawer_outcome).size(1)
         charlie_acc = (bob_action == charlie_idx).float().sum() / bob_action.numel()
 
-        return rewards, successes, message_length, loss, charlie_acc
+        return rewards, successes, message_length, loss, sender_outcome.entropy.mean(),  bob_entropy.mean(), charlie_acc
 
     def _train_step_charlie(self, batch, running_avg_success):
         #optim.zero_grad()
         sender_outcome, drawer_outcome, receiver_outcome = self(batch, sender_no_grad=self._charlie_turn())
 
-        bob_action = Categorical(F.softmax(receiver_outcome.scores, dim=-1)).sample()
+        bob_dist = Categorical(F.softmax(receiver_outcome.scores, dim=-1))
+        bob_action = bob_dist.sample()
 
         total_items = self._bob_input(batch, drawer_outcome).size(1)
         charlie_idx = total_items - 1 # By design, Charlie's image is the last one presented to Bob
@@ -173,7 +174,7 @@ class AliceBobCharlie(Game):
 
         (rewards, successes) = self.compute_rewards(sender_outcome.action, bob_action, running_avg_success, chance_perf)
 
-        return rewards, successes, message_length, loss, charlie_acc
+        return rewards, successes, message_length, loss, sender_outcome.entropy.mean(),  bob_dist.entropy().mean(), charlie_acc
 
     def end_episode(self, **kwargs):
         self.eval()

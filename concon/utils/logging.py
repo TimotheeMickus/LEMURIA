@@ -135,14 +135,14 @@ class AutoLogger(object):
 
     def __exit__(self, type, value, traceback):
         if self.log_entropy and self.summary_writer is not None:
-            self.summary_writer.writer.add_scalar('llp/entropy', compute_entropy(self._state['symbol_counts']), self._state['number_ex_seen'])
+            self.summary_writer.writer.add_scalar('llp/language_entropy', compute_entropy(self._state['symbol_counts']), self._state['number_ex_seen'])
 
         self._pbar.__exit__(type, value, traceback)
         self._state = {}
 
 
     def update(self, loss, *external_output, **supplementary_info):
-        rewards, successes, avg_msg_length, *external_output = external_output
+        rewards, successes, avg_msg_length, sender_entropy, receiver_entropy, *external_output = external_output
 
         # updates running average reward
         self._state['total_reward'] += rewards.sum().item()
@@ -162,10 +162,14 @@ class AutoLogger(object):
                 self.summary_writer.add_scalar('train-%s/reward' % tag, avg_reward, number_ex_seen)
                 self.summary_writer.add_scalar('train-%s/success' % tag, avg_success, number_ex_seen)
                 self.summary_writer.add_scalar('train-%s/loss' % tag, loss.item(), number_ex_seen)
+                self.summary_writer.add_scalar('train-%s/sender_entropy' % tag, sender_entropy.item(), number_ex_seen)
+                self.summary_writer.add_scalar('train-%s/receiver_entropy' % tag, receiver_entropy.item(), number_ex_seen)
             else:
                 self.summary_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
                 self.summary_writer.add_scalar('train/success', avg_success, number_ex_seen)
                 self.summary_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
+                self.summary_writer.add_scalar('train/sender_entropy', sender_entropy.item(), number_ex_seen)
+                self.summary_writer.add_scalar('train/receiver_entropy', receiver_entropy.item(), number_ex_seen)
             self.summary_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
 
             if self.log_charlie_acc:
