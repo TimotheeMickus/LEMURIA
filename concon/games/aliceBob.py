@@ -242,7 +242,7 @@ class AliceBob(Game):
         # By design, the target is the first image
         if(self.use_expectation):
             successes = receiver_pointing['dist'].probs[:, 0].detach()
-            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0).to(probs.device))
+            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0).to(receiver_scores.device))
         else: # Plays dice
             successes = (receiver_pointing['action'] == 0).float()
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
