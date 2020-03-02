@@ -200,18 +200,18 @@ if __name__ == "__main__":
 		if torch.cuda.is_available():
 			resnet = resnet.cuda()
 			meanings_idx = [
-				resnet(img.cuda().unsqueeze(0)).view(-1).cpu().numpy()
-				for img, defs in dataset
-				for d in defs # repeat for coindexation
+				i # repeat for coindexation
+				for img, defs in dataset 
+				for i in [resnet(img.cuda().unsqueeze(0)).view(-1).cpu().numpy()] * len(defs)
 			]
 			resnet = resnet.cpu()
 		else:
 			meanings_idx = [
-				resnet(img.unsqueeze(0)).view(-1).numpy()
-				for img, defs in dataset
-				for d in defs # repeat for coindexation
+				i # repeat for coindexation
+				for img, defs in dataset 
+				for i in [resnet(img.unsqueeze(0)).view(-1).numpy()] * len(defs) 
 			]
-		sentences = [[str(t) for t in nlp(d)] for _, defs in dataset for d in defs]
+		sentences = [tuple([str(t) for t in nlp(d)]) for _, defs in dataset for d in defs]
 
 	print('sampling', file=sys.stderr)
 
@@ -242,3 +242,4 @@ if __name__ == "__main__":
 	print(json.dumps(json_output))
 	with open(args.output_file, "w") as ostr:
 		json.dump(json_output, ostr)
+
