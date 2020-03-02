@@ -97,10 +97,10 @@ def correlation_fn(single_arg):
 		mapping = dict(zip(uniq_cats, random.sample(uniq_cats, num_cats)))
 	vals = []
 	for idx1, idx2 in sample:
-		if remap:				
+		if remap:
 			meaning_1 = meanings_idx[mapping[idx1]]
 			meaning_2 = meanings_idx[mapping[idx2]]
-		else:				
+		else:
 			meaning_1 = meanings_idx[idx1]
 			meaning_2 = meanings_idx[idx2]
 
@@ -109,7 +109,7 @@ def correlation_fn(single_arg):
 
 		sentence_1 = sentences[idx1]
 		sentence_2 = sentences[idx2]
-		
+
 		chars_1 = ''.join(chr(w2c[w]) for w in sentence_1)
 		chars_2 = ''.join(chr(w2c[w]) for w in sentence_2)
 
@@ -156,7 +156,7 @@ def correlation_fn(single_arg):
 			k = '%s / %s' % (m_d_name, t_d_name)
 			v = scipy.stats.spearmanr(m_d, t_d).correlation
 			results[k] = v
-		
+
 	return results
 
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
 	args = p.parse_args()
 
 	print('loading models', file=sys.stderr)
-	
+
 	predictor = Predictor.from_path("https://s3-us-west-2.amazonaws.com/allennlp/models/elmo-constituency-parser-2018.03.14.tar.gz")
 	if args.with_embs:
 		import gensim
@@ -200,15 +200,15 @@ if __name__ == "__main__":
 		if torch.cuda.is_available():
 			resnet = resnet.cuda()
 			meanings_idx = [
-				resnet(img.cuda().unsqueeze(0)).view(-1).cpu().numpy() 
-				for img, defs in dataset 
+				resnet(img.cuda().unsqueeze(0)).view(-1).cpu().numpy()
+				for img, defs in dataset
 				for d in defs # repeat for coindexation
 			]
 			resnet = resnet.cpu()
 		else:
 			meanings_idx = [
-				resnet(img.unsqueeze(0)).view(-1).numpy() 
-				for img, defs in dataset 
+				resnet(img.unsqueeze(0)).view(-1).numpy()
+				for img, defs in dataset
 				for d in defs # repeat for coindexation
 			]
 		sentences = [[str(t) for t in nlp(d)] for _, defs in dataset for d in defs]
@@ -223,7 +223,7 @@ if __name__ == "__main__":
 		for p in sample for i in p
 	}
 	tree_idx = {
-		i:to_brkt(predictor.predict(sentence=' '.join(tree_idx[i]))['trees']) 
+		i:to_brkt(predictor.predict(sentence=' '.join(tree_idx[i]))['trees'])
 		for i in tree_idx
 	}
 
@@ -232,7 +232,7 @@ if __name__ == "__main__":
 	print('computing correlations', file=sys.stderr)
 
 	true_score_results = correlation_fn([sentences, tree_idx, meanings_idx, w2c, False])
-
+	print(json.dumps(true_score_results))
 
 	pool = multiprocessing.Pool(multiprocessing.cpu_count())
 	single_arg = [sentences, tree_idx, meanings_idx, w2c, True]
@@ -242,4 +242,3 @@ if __name__ == "__main__":
 	print(json.dumps(json_output))
 	with open(args.output_file, "w") as ostr:
 		json.dump(json_output, ostr)
-
