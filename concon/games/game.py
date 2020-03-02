@@ -138,12 +138,29 @@ class Game(metaclass=ABCMeta):
             self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)
 
     def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
-        num_cats = (2 if args.binary_dataset else 3) ** 5
-        model = nn.Sequential(
-            agent.image_encoder,
-            nn.Linear(args.hidden_size, num_cats),
-            nn.LogSoftmax(dim=1)).to(args.device)
+        default_constrain_dim = [2 if args.binary_dataset else 3] * 5
+        constrain_dim = args.constrain_dim or default_constrain_dim
+        if args.feature_specific_pretraining:
+            #define as many classification heads as you have distinctive categories
+            heads = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(args.hidden_size, 3),
+                    nn.LogSoftmax(dim=1)
+                ) for cdim in constrain_dim
+                if cdim > 1]).to(args.device)
+            category_filter = lambda x: [c for c, cdim in zip(x, constrain_dim) if cdim > 1]
+        else:
+            heads = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(args.hidden_size, data_iterator.nb_categories),
+                    nn.LogSoftmax(dim=1))
+                ]
+            ).to(args.device)
+            category_filter = lambda x: [data_iterator.category_idx(x)]
+
+        model = agent.image_encoder.to(args.device)
         optimizer = build_optimizer(model.parameters(), args.learning_rate)
+        n_heads = len(heads)
 
         print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
@@ -153,10 +170,16 @@ class Game(metaclass=ABCMeta):
                 for _ in range(args.steps_per_epoch):
                     self.optim.zero_grad()
                     batch = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval)
-                    pred = model(batch.target_img(stack=True))
-                    tgt = batch.category(stack=True, f=data_iterator.category_idx).to(args.device)
-                    loss = F.nll_loss(pred, tgt)
-                    avg_acc += (pred.argmax(dim=1) == tgt).float().sum().item()
+                    activation = model(batch.target_img(stack=True))
+                    tgts = batch.category(stack=True, f=category_filter).to(args.device)
+                    loss = 0.
+                    head_avg_acc = 0.
+                    for head, tgt in zip(heads, torch.unbind(tgts, dim=1)):
+                        pred = head(activation)
+                        loss = F.nll_loss(pred, tgt) + loss
+                        head_avg_acc += (pred.argmax(dim=1) == tgt).float().sum().item()
+                    head_avg_acc /= n_heads
+                    avg_acc += head_avg_acc
                     total_items += tgt.size(0)
                     pbar.update(L=loss.item(), acc=avg_acc / total_items)
                     loss.backward()

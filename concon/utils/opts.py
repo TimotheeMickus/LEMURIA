@@ -78,6 +78,7 @@ def get_args():
     group.add_argument('--pretrain_CNNs', help='pretrain CNNs on classification', action='store_true')
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
+    group.add_argument('--feature_specific_pretraining', help='pretrain CNNs on feature-level classification tasks', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--evaluate_language', help='evaluate language instead of training', action='store_true')
