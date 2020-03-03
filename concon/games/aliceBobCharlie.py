@@ -179,7 +179,7 @@ class AliceBobCharlie(Game):
     def end_episode(self, **kwargs):
         self.eval()
         self._current_step += 1
-        self._running_average_success = kwargs.get('running_average_success', None)
+        self._running_average_success = kwargs.get('running_avg_success', None)
 
     def test_visualize(self, data_iterator, learning_rate):
         #TODO

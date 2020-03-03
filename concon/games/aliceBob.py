@@ -408,7 +408,7 @@ class AliceBob(Game):
 
     def end_episode(self, **kwargs):
         self.eval()
-        self._running_average_success = kwargs.get('running_average_success', None)
+        self._running_average_success = kwargs.get('running_avg_success', None)
 
     def pretrain_CNNs(self, data_iterator, args):
         if args.shared:
