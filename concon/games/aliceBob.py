@@ -37,10 +37,8 @@ class AliceBob(Game):
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
         self.penalty = args.penalty
-        self.adaptative_penalty = args.adaptative_penalty
 
         self._optim = build_optimizer(parameters, args.learning_rate)
-        self._running_average_success =  0.
 
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
@@ -52,7 +50,7 @@ class AliceBob(Game):
         sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
-        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, self._running_average_success)
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
 
         # Bob's part
         receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
@@ -196,7 +194,7 @@ class AliceBob(Game):
         #for img in imgs: print(img.shape)
         show_imgs([img.detach() for img in imgs], nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
 
-    def compute_sender_rewards(self, sender_action, receiver_scores, running_avg_success):
+    def compute_sender_rewards(self, sender_action, receiver_scores):
         """
             returns the reward as well as the success for each element of a batch
         """
@@ -213,21 +211,15 @@ class AliceBob(Game):
 
         rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
 
-        if(self.penalty > 0.0 and running_avg_success is not None): # TODO: tmp quickfix
+        if(self.penalty > 0.0):
             length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
-
-            # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
-            if(self.adaptative_penalty):
-                chance_perf = (1 / receiver_scores.size(1))
-                improvement_factor = (running_avg_success - chance_perf) / (1 - chance_perf) # Equals 0 when running average equals chance performance, reaches 1 when running average reaches 1
-                length_penalties = (length_penalties * min(0.0, improvement_factor))
 
             rewards = (rewards - length_penalties)
 
         return (rewards, successes)
 
-    def compute_sender_loss(self, sender_outcome, receiver_scores, running_avg_success):
-        (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores, running_avg_success)
+    def compute_sender_loss(self, sender_outcome, receiver_scores):
+        (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores)
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
         loss = -(rewards * log_prob).mean()
@@ -405,10 +397,6 @@ class AliceBob(Game):
                 agent.load_state_dict(state_dict)
             instance._optim = checkpoint['optims'][0]
         return instance
-
-    def end_episode(self, **kwargs):
-        self.eval()
-        self._running_average_success = kwargs.get('running_avg_success', None)
 
     def pretrain_CNNs(self, data_iterator, args):
         if args.shared:

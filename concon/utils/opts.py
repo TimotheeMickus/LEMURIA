@@ -41,7 +41,7 @@ def get_args():
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
     group.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.01, type=float)
-    group.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true')
+    group.add_argument('--adaptative_penalty', '-ap', help='use an adaptative penalty, that depends on the performance of the agents', action='store_true') # TODO DELETE
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument('--beta_sender', help='sender entropy penalty coefficient', type=float, default=0.01)
     group.add_argument('--beta_receiver', help='sender entropy penalty coefficient', type=float, default=0.001)

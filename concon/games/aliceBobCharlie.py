@@ -83,6 +83,7 @@ class AliceBobCharlie(Game):
             length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
             # TODO J'ai peur que ce système soit un peu trop basique et qu'il encourage le système à être sous-performant - qu'on puisse obtenir plus de reward en faisant exprès de se tromper.
+            # TODO DELETE
             if(self.adaptative_penalty):
                 improvement_factor = (running_avg_success - chance_perf) / (1 - chance_perf) # Equals 0 when running average equals chance performance, reaches 1 when running average reaches 1
                 length_penalties = (length_penalties * min(0.0, improvement_factor))
