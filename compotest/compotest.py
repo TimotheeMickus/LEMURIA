@@ -25,9 +25,6 @@ def cdist(v1, v2):
 def l2(v1, v2) :
 	return np.linalg.norm(v1 - v2)
 
-def l1(v1, v2) :
-	return (v1 - v2).sum()
-
 
 #### Text distances
 @functools.lru_cache(maxsize=524288)
@@ -63,6 +60,7 @@ def levenshtein(str1, str2, normalise=False):
 @functools.lru_cache(maxsize=524288)
 def levenshtein_normalised(str1, str2):
     return levenshtein(str1, str2, normalise=True)
+
 
 #### Misc functions
 @functools.lru_cache(maxsize=524288)
@@ -122,8 +120,6 @@ def correlation_fn(single_arg):
 
 		cdist_score = cdist(meaning_1, meaning_2)
 		l2_score = l2(meaning_1, meaning_2)
-		l1_score = l1(meaning_1, meaning_2)
-
 
 		levenshtein_score = levenshtein(chars_1, chars_2)
 		levenshtein_pos_score = levenshtein(chars_pos_1, chars_pos_2)
@@ -136,7 +132,6 @@ def correlation_fn(single_arg):
 			'meaning_scores': {
 				'cdist': cdist_score,
 				'l2': l2_score,
-				'l1': l1_score,
 			},
 			'text_scores': {
 				'levenshtein': levenshtein_score,
@@ -150,7 +145,6 @@ def correlation_fn(single_arg):
 		vals.append(tmp_results)
 	cdist_scores = [r['meaning_scores']['cdist'] for r in vals]
 	l2_scores = [r['meaning_scores']['l2'] for r in vals]
-	l1_scores = [r['meaning_scores']['l1'] for r in vals]
 
 	levenshtein_scores = [r['text_scores']['levenshtein'] for r in vals]
 	levenshtein_pos_scores = [r['text_scores']['levenshtein_pos'] for r in vals]
@@ -160,7 +154,7 @@ def correlation_fn(single_arg):
 
 
 	results = {}
-	for m_d, m_d_name in ((cdist_scores, 'cdist'), (l2_scores, 'l2'), (l1_scores, 'l1')):
+	for m_d, m_d_name in ((cdist_scores, 'cdist'), (l2_scores, 'l2')):
 		for t_d, t_d_name in ((levenshtein_scores, 'levenshtein'), (levenshtein_pos_scores, 'levenshtein_pos'), (levenshtein_n_scores, 'levenshtein_n'), (jaccard_scores, 'jaccard'), (apted_scores, 'apted')
 			):
 			k = '%s / %s' % (m_d_name, t_d_name)
