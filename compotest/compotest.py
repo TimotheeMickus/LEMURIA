@@ -89,7 +89,7 @@ def correlation_fn(single_arg):
 	"""
 	Compute correlation of text distance and meaning distance
 	"""
-	sentences, tree_idx, meanings_idx, w2c, remap = single_arg
+	sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, remap = single_arg
 
 	if remap:
 		uniq_cats = {i for p in sample for i in p}
@@ -110,8 +110,15 @@ def correlation_fn(single_arg):
 		sentence_1 = sentences[idx1]
 		sentence_2 = sentences[idx2]
 
+		sentence_pos_1 = pos_decored_idx[idx1]
+		sentence_pos_2 = pos_decored_idx[idx2]
+
+
 		chars_1 = ''.join(chr(w2c[w]) for w in sentence_1)
 		chars_2 = ''.join(chr(w2c[w]) for w in sentence_2)
+
+		chars_pos_1 = ''.join(chr(w2c[w]) for w in sentence_pos_1)
+		chars_pos_2 = ''.join(chr(w2c[w]) for w in sentence_pos_2)
 
 		cdist_score = cdist(meaning_1, meaning_2)
 		l2_score = l2(meaning_1, meaning_2)
@@ -119,9 +126,9 @@ def correlation_fn(single_arg):
 
 
 		levenshtein_score = levenshtein(chars_1, chars_2)
+		levenshtein_pos_score = levenshtein(chars_pos_1, chars_pos_2)
 		levenshtein_n_score = levenshtein_normalised(chars_1, chars_2)
 		jaccard_score = jaccard(sentence_1, sentence_2)
-
 		apted_score = apted(tree1, tree2)
 
 		tmp_results = {
@@ -133,6 +140,7 @@ def correlation_fn(single_arg):
 			},
 			'text_scores': {
 				'levenshtein': levenshtein_score,
+				'levenshtein_pos':levenshtein_pos_score,
 				'levenshtein_n': levenshtein_n_score,
 				'jaccard': jaccard_score,
 				'apted': apted_score,
@@ -145,6 +153,7 @@ def correlation_fn(single_arg):
 	l1_scores = [r['meaning_scores']['l1'] for r in vals]
 
 	levenshtein_scores = [r['text_scores']['levenshtein'] for r in vals]
+	levenshtein_pos_scores = [r['text_scores']['levenshtein_pos'] for r in vals]
 	levenshtein_n_scores = [r['text_scores']['levenshtein_n'] for r in vals]
 	jaccard_scores = [r['text_scores']['jaccard'] for r in vals]
 	apted_scores = [r['text_scores']['apted'] for r in vals]
@@ -152,7 +161,8 @@ def correlation_fn(single_arg):
 
 	results = {}
 	for m_d, m_d_name in ((cdist_scores, 'cdist'), (l2_scores, 'l2'), (l1_scores, 'l1')):
-		for t_d, t_d_name in ((levenshtein_scores, 'levenshtein'), (levenshtein_n_scores, 'levenshtein_n'), (jaccard_scores, 'jaccard'), (apted_scores, 'apted')):
+		for t_d, t_d_name in ((levenshtein_scores, 'levenshtein'), (levenshtein_pos_scores, 'levenshtein_pos'), (levenshtein_n_scores, 'levenshtein_n'), (jaccard_scores, 'jaccard'), (apted_scores, 'apted')
+			):
 			k = '%s / %s' % (m_d_name, t_d_name)
 			v = scipy.stats.spearmanr(m_d, t_d).correlation
 			results[k] = v
@@ -201,15 +211,15 @@ if __name__ == "__main__":
 			resnet = resnet.cuda()
 			meanings_idx = [
 				i # repeat for coindexation
-				for img, defs in dataset 
+				for img, defs in dataset
 				for i in [resnet(img.cuda().unsqueeze(0)).view(-1).cpu().numpy()] * len(defs)
 			]
 			resnet = resnet.cpu()
 		else:
 			meanings_idx = [
 				i # repeat for coindexation
-				for img, defs in dataset 
-				for i in [resnet(img.unsqueeze(0)).view(-1).numpy()] * len(defs) 
+				for img, defs in dataset
+				for i in [resnet(img.unsqueeze(0)).view(-1).numpy()] * len(defs)
 			]
 		sentences = [tuple([str(t) for t in nlp(d)]) for _, defs in dataset for d in defs]
 
@@ -218,28 +228,27 @@ if __name__ == "__main__":
 	sample = sample_pairs(sentences, sample_size=args.sample_size, restrict_dataset_size=args.restrict_dataset_size)
 
 
-	tree_idx = {
-		i:sentences[i]
-		for p in sample for i in p
-	}
-	tree_idx = {
-		i:to_brkt(predictor.predict(sentence=' '.join(tree_idx[i]))['trees'])
-		for i in tree_idx
-	}
+	tree_idx = {}
+	pos_decored_idx = {}
+	for p in sample:
+		for i in p:
+			if not i in pos_decored_idx:
+				parse = predictor.predict(sentence=' '.join(sentences[i]))
+				tree_idx[i] = to_brkt(parse['trees'])
+				pos_decored_idx[i] = sentences[i] + tuple(parse['pos_tags'])
 
 	w2c = collections.defaultdict(itertools.count().__next__)
 
 	print('computing correlations', file=sys.stderr)
 
-	true_score_results = correlation_fn([sentences, tree_idx, meanings_idx, w2c, False])
+	true_score_results = correlation_fn([sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, False])
 	print(json.dumps(true_score_results))
 
 	pool = multiprocessing.Pool(multiprocessing.cpu_count())
-	single_arg = [sentences, tree_idx, meanings_idx, w2c, True]
+	single_arg = [sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, True]
 
 	baseline_results = list(pool.map(correlation_fn, itertools.repeat(single_arg, args.baseline_support)))
 	json_output = {'true_score_results':true_score_results, 'baseline_results':baseline_results}
 	print(json.dumps(json_output))
 	with open(args.output_file, "w") as ostr:
 		json.dump(json_output, ostr)
-
