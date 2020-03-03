@@ -27,7 +27,7 @@ def get_args():
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary)
-    group.add_argument('--save_model', '-save_model', help='saves the model after each epoch', action='store_true')
+    group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')

@@ -32,7 +32,7 @@ def train(args):
         run_models_dir = os.path.join(models_dir, str(run))
 
         if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
-        if(args.save_model and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
+        if((args.save_every > 0) and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
         if(args.population is not None): model = AliceBobPopulation(args)
         elif args.charlie: model = AliceBobCharlie(args)
@@ -52,7 +52,7 @@ def train(args):
             model.train_epoch(data_loader, epoch=epoch, autologger=autologger, steps_per_epoch=args.steps_per_epoch)
             model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, display=args.display, debug=args.debug)
 
-            if(args.save_model):
+            if((args.save_every > 0) and (((epoch + 1) % args.save_every) == 0)):
                 model.save(os.path.join(run_models_dir, "model_e%i.pt" % epoch))
 
 if(__name__ == "__main__"):
