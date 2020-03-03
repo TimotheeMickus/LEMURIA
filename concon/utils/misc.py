@@ -119,6 +119,10 @@ def simple_show_img(img):
 def show_imgs(imgs, nrow=8):
     show_img(torchvision.utils.make_grid(imgs, nrow))
 
+class Unflatten(nn.Module):
+    def forward(self, x):
+        return x.unsqueeze(-1).unsqueeze(-1)
+
 def build_optimizer(θ, learning_rate):
     """
     Factory for optimizer

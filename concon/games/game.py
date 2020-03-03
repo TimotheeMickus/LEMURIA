@@ -7,7 +7,8 @@ import torch.nn.functional as F
 import collections
 
 from ..utils.logging import DummyLogger, Progress
-from ..utils.misc import build_optimizer
+from ..utils.misc import build_optimizer, Unflatten
+from ..utils.modules import build_cnn_decoder_from_args
 
 class Game(metaclass=ABCMeta):
 
@@ -137,7 +138,7 @@ class Game(metaclass=ABCMeta):
         for i,agents in enumerate(self.agents):
             self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)
 
-    def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
+    def _pretrain_classif(self, agent, data_iterator, args, agent_name="agent"):
         default_constrain_dim = [2 if args.binary_dataset else 3] * 5
         constrain_dim = args.constrain_dim or default_constrain_dim
         if args.feature_specific_pretraining:
@@ -184,3 +185,37 @@ class Game(metaclass=ABCMeta):
                     pbar.update(L=loss.item(), acc=avg_acc / total_items)
                     loss.backward()
                     optimizer.step()
+
+    def _pretrain_ae(self, agent, data_iterator, args, agent_name="agent"):
+
+
+        model = nn.Sequential(
+            agent.image_encoder,
+            Unflatten(),
+            build_cnn_decoder_from_args(args),
+        ).to(args.device)
+
+        optimizer = build_optimizer(model.parameters(), args.learning_rate)
+        print("Training agent: %s" % agent_name)
+        for epoch in range(args.pretrain_epochs):
+            total_loss, total_items = 0., 0.
+            pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L'})
+            with pbar:
+                for _ in range(args.steps_per_epoch):
+                    self.optim.zero_grad()
+                    batch_img = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval).target_img(stack=True)
+                    output = model(batch_img)
+                    loss = F.mse_loss(output, batch_img, reduction="sum")
+                    total_loss += loss.item()
+                    total_items += batch_img.size(0)
+                    pbar.update(L=total_loss/total_items)
+                    loss.backward()
+                    optimizer.step()
+
+
+    def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
+        assert not (args.feature_specific_pretraining and args.autoencoder_pretraining), 'only one pretraining routine is supported'
+        if not args.autoencoder_pretraining:
+            self._pretrain_classif(agent, data_iterator, args, agent_name)
+        else:
+            self._pretrain_ae(agent, data_iterator, args, agent_name)
