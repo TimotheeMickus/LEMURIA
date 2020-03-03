@@ -24,8 +24,6 @@ class AliceBobPopulation(AliceBob):
 
             self._agents = (self.senders + self.receivers)
 
-        # PyTorch cannot find the parameters of objects that are in a list (like `self.senders` or `self.receivers`)
-
         self.use_expectation = args.use_expectation
         self.grad_scaling = args.grad_scaling or 0
         self.grad_clipping = args.grad_clipping or 0
