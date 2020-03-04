@@ -360,4 +360,4 @@ class AliceBobCharlie(Game):
 
     def pretrain_CNNs(self, data_iterator, summary_writer, args):
         for name, agent in [['sender', self.sender], ['receiver', self.receiver]]:
-            self.pretrain_agent_CNN(agent, data_iterator, args, summary_writer, agent_name=name)
+            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=name)
