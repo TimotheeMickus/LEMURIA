@@ -134,13 +134,16 @@ class Game(metaclass=ABCMeta):
     def load(cls, path, args, _old_model=False):
         pass
 
-    def pretrain_CNNs(self, data_iterator, args):
+    def pretrain_CNNs(self, data_iterator, summary_writer, args):
         for i,agents in enumerate(self.agents):
-            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name="agent %i" %i)
+            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name="agent %i" %i)
 
-    def _pretrain_classif(self, agent, data_iterator, args, agent_name="agent"):
+    def _pretrain_classif(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
+        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
         default_constrain_dim = [2 if args.binary_dataset else 3] * 5
         constrain_dim = args.constrain_dim or default_constrain_dim
+
+
         if args.pretrain_CNNs == 'feature-wise':
             #define as many classification heads as you have distinctive categories
             heads = nn.ModuleList([
@@ -163,6 +166,8 @@ class Game(metaclass=ABCMeta):
         optimizer = build_optimizer(it.chain(model.parameters(), heads.parameters()), args.pretrain_learning_rate or args.learning_rate)
         n_heads = len(heads)
 
+        examples_seen = 0
+
         print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
             pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L', 'acc'})
@@ -182,12 +187,15 @@ class Game(metaclass=ABCMeta):
                     head_avg_acc /= n_heads
                     avg_acc += head_avg_acc
                     total_items += tgt.size(0)
+                    examples_seen += tgt.size(0)
+                    summary_writer.add_scalar(loss_tag, loss.item() / tgt.size(0), examples_seen)
                     pbar.update(L=loss.item(), acc=avg_acc / total_items)
                     loss.backward()
                     optimizer.step()
 
-    def _pretrain_ae(self, agent, data_iterator, args, agent_name="agent"):
+    def _pretrain_ae(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
 
+        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
 
         model = nn.Sequential(
             agent.image_encoder,
@@ -196,6 +204,9 @@ class Game(metaclass=ABCMeta):
         ).to(args.device)
 
         optimizer = build_optimizer(model.parameters(), args.pretrain_learning_rate or args.learning_rate)
+
+        examples_seen = 0
+
         print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
             total_loss, total_items = 0., 0.
@@ -208,16 +219,18 @@ class Game(metaclass=ABCMeta):
                     loss = F.mse_loss(output, batch_img, reduction="sum")
                     total_loss += loss.item()
                     total_items += batch_img.size(0)
+                    examples_seen += batch_img.size(0)
+                    summary_writer.add_scalar(loss_tag, loss.item() / batch_img.size(0), examples_seen)
                     pbar.update(L=total_loss/total_items)
                     loss.backward()
                     optimizer.step()
 
 
-    def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
+    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
         if args.pretrain_CNNs != 'auto-encoder':
-            self._pretrain_classif(agent, data_iterator, args, agent_name)
+            self._pretrain_classif(agent, data_iterator, summary_writer, args, agent_name)
         else:
-            self._pretrain_ae(agent, data_iterator, args, agent_name)
+            self._pretrain_ae(agent, data_iterator, summary_writer, args, agent_name)
         if args.freeze_pretrained_CNNs:
                 for p in agent.image_encoder.parameters():
                     p.requires_grad = False

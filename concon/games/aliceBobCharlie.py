@@ -358,6 +358,6 @@ class AliceBobCharlie(Game):
             instance._current_step = checkpoint['current_step']
         return instance
 
-    def pretrain_CNNs(self, data_iterator, args):
+    def pretrain_CNNs(self, data_iterator, summary_writer, args):
         for name, agent in [['sender', self.sender], ['receiver', self.receiver]]:
-            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name=name)
+            self.pretrain_agent_CNN(agent, data_iterator, args, summary_writer, agent_name=name)

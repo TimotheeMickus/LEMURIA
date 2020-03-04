@@ -398,10 +398,10 @@ class AliceBob(Game):
             instance._optim = checkpoint['optims'][0]
         return instance
 
-    def pretrain_CNNs(self, data_iterator, args):
+    def pretrain_CNNs(self, data_iterator, summary_writer, args):
         if args.shared:
             named_agents = [['sender-receiver', self.sender],]
         else:
             named_agents = [['sender', self.sender], ['receiver', self.receiver]]
         for name, agent in named_agents:
-            self.pretrain_agent_CNN(agent, data_iterator, args, agent_name=name)
+            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=name)
