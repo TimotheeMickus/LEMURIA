@@ -140,9 +140,9 @@ class Game(metaclass=ABCMeta):
 
     def _pretrain_classif(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
+
         default_constrain_dim = [2 if args.binary_dataset else 3] * 5
         constrain_dim = args.constrain_dim or default_constrain_dim
-
 
         if args.pretrain_CNNs == 'feature-wise':
             #define as many classification heads as you have distinctive categories
@@ -175,8 +175,11 @@ class Game(metaclass=ABCMeta):
             with pbar:
                 for _ in range(args.steps_per_epoch):
                     self.optim.zero_grad()
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval)
+
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval, sampling_strategies=[])
+                    
                     activation = model(batch.target_img(stack=True))
+                    
                     tgts = batch.category(stack=True, f=category_filter).to(args.device)
                     loss = 0.
                     head_avg_acc = 0.
@@ -186,15 +189,16 @@ class Game(metaclass=ABCMeta):
                         head_avg_acc += (pred.argmax(dim=1) == tgt).float().sum().item()
                     head_avg_acc /= n_heads
                     avg_acc += head_avg_acc
+                    
                     total_items += tgt.size(0)
                     examples_seen += tgt.size(0)
                     summary_writer.add_scalar(loss_tag, loss.item() / tgt.size(0), examples_seen)
                     pbar.update(L=loss.item(), acc=avg_acc / total_items)
+                    
                     loss.backward()
                     optimizer.step()
 
     def _pretrain_ae(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
-
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
 
         model = nn.Sequential(
@@ -214,14 +218,19 @@ class Game(metaclass=ABCMeta):
             with pbar:
                 for _ in range(args.steps_per_epoch):
                     self.optim.zero_grad()
-                    batch_img = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval).target_img(stack=True)
+
+                    batch_img = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval).target_img(stack=True, sampling_strategies=[])
+                    
                     output = model(batch_img)
+                    
                     loss = F.mse_loss(output, batch_img, reduction="sum")
+                    
                     total_loss += loss.item()
                     total_items += batch_img.size(0)
                     examples_seen += batch_img.size(0)
                     summary_writer.add_scalar(loss_tag, loss.item() / batch_img.size(0), examples_seen)
                     pbar.update(L=total_loss/total_items)
+                    
                     loss.backward()
                     optimizer.step()
 
