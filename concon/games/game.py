@@ -172,7 +172,6 @@ class Game(metaclass=ABCMeta):
 
         examples_seen = 0
 
-        print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
             pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L', 'acc'})
             avg_acc, total_items = 0., 0.
@@ -218,7 +217,6 @@ class Game(metaclass=ABCMeta):
 
         examples_seen = 0
 
-        print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
             total_loss, total_items = 0., 0.
             pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L'})
