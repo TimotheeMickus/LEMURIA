@@ -90,6 +90,7 @@ def get_args():
     # For evaluate_language.py
     group.add_argument('--load_other_model', help='path to a second model to load')
     group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
+    group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
 
     args = arg_parser.parse_args()
     if not args.quiet:
