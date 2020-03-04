@@ -218,3 +218,6 @@ class Game(metaclass=ABCMeta):
             self._pretrain_classif(agent, data_iterator, args, agent_name)
         else:
             self._pretrain_ae(agent, data_iterator, args, agent_name)
+        if args.freeze_pretrained_CNNs:
+                for p in agent.image_encoder.parameters():
+                    p.requires_grad = False
