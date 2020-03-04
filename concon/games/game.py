@@ -141,7 +141,7 @@ class Game(metaclass=ABCMeta):
     def _pretrain_classif(self, agent, data_iterator, args, agent_name="agent"):
         default_constrain_dim = [2 if args.binary_dataset else 3] * 5
         constrain_dim = args.constrain_dim or default_constrain_dim
-        if args.feature_specific_pretraining:
+        if args.pretrain_CNNs == 'feature-wise':
             #define as many classification heads as you have distinctive categories
             heads = nn.ModuleList([
                 nn.Sequential(
@@ -214,8 +214,7 @@ class Game(metaclass=ABCMeta):
 
 
     def pretrain_agent_CNN(self, agent, data_iterator, args, agent_name="agent"):
-        assert not (args.feature_specific_pretraining and args.autoencoder_pretraining), 'only one pretraining routine is supported'
-        if not args.autoencoder_pretraining:
+        if args.pretrain_CNNs != 'auto-encoder':
             self._pretrain_classif(agent, data_iterator, args, agent_name)
         else:
             self._pretrain_ae(agent, data_iterator, args, agent_name)
