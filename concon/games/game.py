@@ -160,7 +160,7 @@ class Game(metaclass=ABCMeta):
             category_filter = lambda x: [data_iterator.category_idx(x)]
 
         model = agent.image_encoder.to(args.device)
-        optimizer = build_optimizer(model.parameters(), args.learning_rate)
+        optimizer = build_optimizer(it.chain(model.parameters(), heads.parameters()), args.pretrain_learning_rate or args.learning_rate)
         n_heads = len(heads)
 
         print("Training agent: %s" % agent_name)
@@ -195,7 +195,7 @@ class Game(metaclass=ABCMeta):
             build_cnn_decoder_from_args(args),
         ).to(args.device)
 
-        optimizer = build_optimizer(model.parameters(), args.learning_rate)
+        optimizer = build_optimizer(model.parameters(), args.pretrain_learning_rate or args.learning_rate)
         print("Training agent: %s" % agent_name)
         for epoch in range(args.pretrain_epochs):
             total_loss, total_items = 0., 0.
