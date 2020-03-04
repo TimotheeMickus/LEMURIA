@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+
 import tqdm
 
 from .misc import compute_entropy
@@ -79,10 +80,13 @@ class DummyLogger(object):
 
 # TODO Could have a 'print(self, message, flush, type)' method
 class AutoLogger(object):
-    def __init__(self, display='tqdm', steps_per_epoch=1000, debug=False,
-        log_lang_progress=False, log_entropy=False, base_alphabet_size=10,
-        device='cpu',no_summary=False, summary_dir=None, default_period=10,
+    def __init__(self, game, data_loader, display='tqdm', steps_per_epoch=1000, debug=False,
+        log_lang_progress=False, log_entropy=False,
+        device='cpu', no_summary=False, summary_dir=None, default_period=10,
         log_charlie_acc=False):
+
+        self.game = game
+        self.data_loader = data_loader
 
         self.display = display
         self.steps_per_epoch = steps_per_epoch
@@ -96,9 +100,8 @@ class AutoLogger(object):
         self.log_entropy = log_entropy
 
         self.device = device
-        self.base_alphabet_size = base_alphabet_size
 
-        self.log_charlie_acc = log_charlie_acc
+        self.log_charlie_acc = log_charlie_acc # C'est variable fait référence à Charlie, qui n'existe pas forcément.
 
         if no_summary:
             self.summary_writer = None
@@ -123,11 +126,11 @@ class AutoLogger(object):
         }
         if self.summary_writer is not None:
             if self.log_lang_progress:
-                self._state['current_dist'] = torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(self.device)
+                self._state['current_dist'] = torch.zeros((self.game.base_alphabet_size, 5), dtype=torch.float).to(self.device)
                 self._state['past_dist'] = None # size of embeddings past_dist, current_dist = None,
 
             if self.log_entropy:
-                self._state['symbol_counts'] = torch.zeros(self.base_alphabet_size, dtype=torch.float).to(self.device)
+                self._state['symbol_counts'] = torch.zeros(self.game.base_alphabet_size, dtype=torch.float).to(self.device)
 
         self._pbar.__enter__()
 
@@ -143,6 +146,10 @@ class AutoLogger(object):
 
     def update(self, loss, *external_output, **supplementary_info):
         rewards, successes, avg_msg_length, sender_entropy, receiver_entropy, *external_output = external_output
+
+        # Computes the minimum length the messages can have in order to get perfect accuracy (approximation when the size of the alphabet >> 1)
+        minimal_compression_len = np.log(self.data_loader.nb_categories) / np.log(self.game.base_alphabet_size + 1) # + 1 because EoM is taken into account
+        length_ratio = (avg_msg_length / minimal_compression_len)
 
         # updates running average reward
         self._state['total_reward'] += rewards.sum().item()
@@ -171,6 +178,7 @@ class AutoLogger(object):
                 self.summary_writer.add_scalar('train/sender_entropy', sender_entropy.item(), number_ex_seen)
                 self.summary_writer.add_scalar('train/receiver_entropy', receiver_entropy.item(), number_ex_seen)
             self.summary_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
+            self.summary_writer.add_scalar('llp/length_ratio', length_ratio, number_ex_seen)
 
             if self.log_charlie_acc:
                 charlie_acc = charlie_acc.mean().item()
@@ -178,27 +186,27 @@ class AutoLogger(object):
 
             if self.log_lang_progress:
                 for batch in supplementary_info['batches']:
-                    batch_msg_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(self.device) # size of embeddings + EOS + PAD
+                    batch_msg_manyhot = torch.zeros((batch.size, self.game.base_alphabet_size + 2), dtype=torch.float).to(self.device) # size of embeddings + EOS + PAD
                     # message -> many-hot
-                    many_hots = batch_msg_manyhot.scatter_(1, sender_outcome.action[0].detach(), 1).narrow(1,1,self.base_alphabet_size).float()
-                    # summation along batch dimension,  and add to counts
+                    many_hots = batch_msg_manyhot.scatter_(1, sender_outcome.action[0].detach(), 1).narrow(1,1,self.game.base_alphabet_size).float()
+                    # summation along batch dimension, and add to counts
                     self._state['current_dist'] += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(self.device)).detach().float()
 
             if self.log_entropy:
                 new_messages = sender_outcome.action[0].view(-1)
-                valid_indices = torch.arange(self.base_alphabet_size).expand(new_messages.size(0), self.base_alphabet_size).to(self.device)
+                valid_indices = torch.arange(self.game.base_alphabet_size).expand(new_messages.size(0), self.game.base_alphabet_size).to(self.device)
                 selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
                 self._state['symbol_counts'] += selected_symbols.sum(dim=0)
 
             if self.log_lang_progress and index % 100 == 0:
                 if self._state['past_dist'] is None:
-                    self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(self.device)
+                    self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.game.base_alphabet_size, 5), dtype=torch.float).to(self.device)
                 else:
                     logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
                     prev_p = (past_dist.view(1, -1) / past_dist.sum())
                     kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
                     self.summary_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
-                    self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.base_alphabet_size, 5), dtype=torch.float).to(self.device)
+                    self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.game.base_alphabet_size, 5), dtype=torch.float).to(self.device)
 
             if self.log_debug:
                 self.log_grads_tensorboard(list(supplementary_info['parameters']))
