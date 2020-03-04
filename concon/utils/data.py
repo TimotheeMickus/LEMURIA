@@ -227,7 +227,7 @@ class DistinctTargetClassDataLoader():
 
             return (idx, category)
 
-        print('Loading data from \'%s\'...' % data_set)
+        print('Loading data from \'%s\'…' % data_set)
 
         # Loads all images from data_set as DataPoint
         dataset = [] # Will end as a Numpy array of DataPoint·s
