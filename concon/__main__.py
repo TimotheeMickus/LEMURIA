@@ -43,8 +43,8 @@ def train(args):
         autologger = AutoLogger(game=model, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period, log_charlie_acc=args.charlie)
 
         if args.pretrain_CNNs:
+            print(("[%s] pretraining start..." % datetime.now()), flush=True)
             model.pretrain_CNNs(data_loader, autologger.summary_writer, args)
-
 
         print(("[%s] training start..." % datetime.now()), flush=True)
         for epoch in range(args.epochs):

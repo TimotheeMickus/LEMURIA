@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import itertools as it
 import tqdm
+from datetime import datetime
 
 from collections import defaultdict
 import random
@@ -403,5 +404,7 @@ class AliceBob(Game):
             named_agents = [['sender-receiver', self.sender],]
         else:
             named_agents = [['sender', self.sender], ['receiver', self.receiver]]
+
         for name, agent in named_agents:
+            print(("[%s] pretraining %s…" % (datetime.now(), name)), flush=True)
             self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=name)

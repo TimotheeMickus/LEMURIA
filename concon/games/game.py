@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import collections
+from datetime import datetime
 
 from ..utils.logging import DummyLogger, Progress
 from ..utils.misc import build_optimizer, Unflatten
@@ -134,15 +135,18 @@ class Game(metaclass=ABCMeta):
     def load(cls, path, args, _old_model=False):
         pass
 
+    # Caution: as this function pretrains all agents, be careful with shared parameters
+    # It is likely that this method should be overriden
     def pretrain_CNNs(self, data_iterator, summary_writer, args):
-        for i,agents in enumerate(self.agents):
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name="agent %i" %i)
+        for i, agents in enumerate(self.agents):
+            print(("[%s] pretraining agent %i…" % (datetime.now(), i)), flush=True)
+            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=("agent %i" % i))
 
     def _pretrain_classif(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
 
         default_constrain_dim = [2 if args.binary_dataset else 3] * 5
-        constrain_dim = args.constrain_dim or default_constrain_dim
+        constrain_dim = args.constrain_dim or default_constrain_dim # TODO peut-être? [len(concept) for concept in data_iterator.concepts]
 
         if args.pretrain_CNNs == 'feature-wise':
             #define as many classification heads as you have distinctive categories
@@ -176,9 +180,10 @@ class Game(metaclass=ABCMeta):
                 for _ in range(args.steps_per_epoch):
                     self.optim.zero_grad()
 
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval, sampling_strategies=[])
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not args.pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch_img = batch.target_img(stack=True)
                     
-                    activation = model(batch.target_img(stack=True))
+                    activation = model(batch_img)
                     
                     tgts = batch.category(stack=True, f=category_filter).to(args.device)
                     loss = 0.
@@ -192,11 +197,13 @@ class Game(metaclass=ABCMeta):
                     
                     total_items += tgt.size(0)
                     examples_seen += tgt.size(0)
-                    summary_writer.add_scalar(loss_tag, loss.item() / tgt.size(0), examples_seen)
-                    pbar.update(L=loss.item(), acc=avg_acc / total_items)
+                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / tgt.size(0)), examples_seen)
+                    pbar.update(L=loss.item(), acc=(avg_acc / total_items))
                     
                     loss.backward()
                     optimizer.step()
+
+                # Here there could an evaluation phase
 
     def _pretrain_ae(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
@@ -219,7 +226,8 @@ class Game(metaclass=ABCMeta):
                 for _ in range(args.steps_per_epoch):
                     self.optim.zero_grad()
 
-                    batch_img = data_iterator.get_batch(keep_category=True, no_evaluation=not args.pretrain_CNNs_on_eval).target_img(stack=True, sampling_strategies=[])
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not args.pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch_img = batch.target_img(stack=True)
                     
                     output = model(batch_img)
                     
@@ -228,18 +236,20 @@ class Game(metaclass=ABCMeta):
                     total_loss += loss.item()
                     total_items += batch_img.size(0)
                     examples_seen += batch_img.size(0)
-                    summary_writer.add_scalar(loss_tag, loss.item() / batch_img.size(0), examples_seen)
-                    pbar.update(L=total_loss/total_items)
+                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), examples_seen)
+                    pbar.update(L=(total_loss / total_items))
                     
                     loss.backward()
                     optimizer.step()
 
+                # Here there could an evaluation phase
 
     def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
         if args.pretrain_CNNs != 'auto-encoder':
             self._pretrain_classif(agent, data_iterator, summary_writer, args, agent_name)
         else:
             self._pretrain_ae(agent, data_iterator, summary_writer, args, agent_name)
+
         if args.freeze_pretrained_CNNs:
-                for p in agent.image_encoder.parameters():
-                    p.requires_grad = False
+            for p in agent.image_encoder.parameters():
+                p.requires_grad = False

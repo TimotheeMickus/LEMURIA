@@ -166,7 +166,7 @@ class DistinctTargetClassDataLoader():
         if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities]
         assert all([(x >= 1) for x in constrain_dim])
 
-        self.concepts = []
+        self.concepts = [] # List of dictionaries {value name -> value idx}
         for i, nb_values in enumerate(constrain_dim):
             values = possibilities[i]
             random.shuffle(values)
