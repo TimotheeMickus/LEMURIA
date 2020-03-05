@@ -144,7 +144,7 @@ def correlation_fn(single_arg):
 
 		vals.append(tmp_results)
 	if dump_vals:
-		print('dumping scores...', file=sys.stderr)
+		print('dumping scores...')
 		with open(dump_vals, 'w') as dumpfile:
 			json.dump(vals, dumpfile)
 	cdist_scores = [r['meaning_scores']['cdist'] for r in vals]
@@ -182,13 +182,13 @@ if __name__ == "__main__":
 
 	args = p.parse_args()
 
-	print('loading models', file=sys.stderr)
+	print('loading models')
 
 	predictor = Predictor.from_path("https://s3-us-west-2.amazonaws.com/allennlp/models/elmo-constituency-parser-2018.03.14.tar.gz")
 	if args.with_embs:
 		import gensim
 		meanings_model = gensim.models.KeyedVectors.load_word2vec_format(args.with_embs)
-		print('reading defs', file=sys.stderr)
+		print('reading defs')
 
 		with open(args.base_file) as istr:
 			lines = map(str.strip, istr)
@@ -221,7 +221,7 @@ if __name__ == "__main__":
 			]
 		sentences = [tuple([str(t) for t in nlp(d)]) for _, defs in dataset for d in defs]
 
-	print('sampling', file=sys.stderr)
+	print('sampling')
 
 	sample = sample_pairs(sentences, sample_size=args.sample_size, restrict_dataset_size=args.restrict_dataset_size)
 
@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
 	w2c = collections.defaultdict(itertools.count().__next__)
 
-	print('computing correlations', file=sys.stderr)
+	print('computing correlations')
 
 	true_score_results = correlation_fn([sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, False, 'scores.json'])
 	print(json.dumps(true_score_results))
