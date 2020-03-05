@@ -73,6 +73,15 @@ def add_normal_noise(t, std_dev, clamp_values=None):
 def compute_entropy(counts):
     return Categorical(counts / counts.sum()).entropy().item()
 
+
+def compute_entropy_stats(sample_messages, sample_categories):
+    entropy_dict = collections.defaultdict(collections.Counter)
+    for msg, cat in zip(sample_messages, sample_categories):
+        entropy_dict[cat][msg] += 1.0
+    entropy_dict = {cat:compute_entropy(torch.tensor(list(entropy_dict[cat].values()))) for cat in entropy_dict}
+    entropy_cats = np.array(list(entropy_dict.values()))
+    return entropy_cats.min(), entropy_cats.mean(), np.median(entropy_cats), entropy_cats.max(), entropy_cats.var()
+
 def max_tensor(t, dim, abs_val=True, unsqueeze=True):
     x = t.abs() if(abs_val) else t
 

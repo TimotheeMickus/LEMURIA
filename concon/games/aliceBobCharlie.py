@@ -10,7 +10,7 @@ import tqdm
 
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
-from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing
+from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing, compute_entropy_stats
 from ..eval import compute_correlation
 
 class AliceBobCharlie(Game):
@@ -282,26 +282,31 @@ class AliceBobCharlie(Game):
 
 
             #timepoint = time.time()
-            l_cor, _, _, l_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30)
+            l_cor,*_, l_cor_n = compute_correlation.mantel(sample_messages, sample_categories)
             if(display != 'minimal'): print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            l_n_cor, _, _, l_n_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.levenshtein_normalised)
+            l_n_cor, *_, l_n_cor_n = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised)
             if(display != 'minimal'): print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            j_cor, _, _, j_cor_n = compute_correlation.analyze_correlation(sample_messages, sample_categories, scrambling_pool_size=30, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
+            j_cor, *_, j_cor_n = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
             if(display != 'minimal'): print('Jaccard: %f - %f' % (j_cor, j_cor_n))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
+
+            entropy_stats = compute_entropy_stats(sample_messages, sample_categories)
+            if(display != 'minimal'):
+                print('Entropy: min: %f, mean: %f, median: %f, max: %f, var: %f' % (entropy_stats))
+
 
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
@@ -310,6 +315,12 @@ class AliceBobCharlie(Game):
                 event_writer.add_scalar('eval/Normalised Lev-based comp (normalised)', l_n_cor_n, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp (normalised)', j_cor_n, epoch, period=1)
+                minH, meanH, medH, maxH, varH = entropy_stats
+                event_writer.add_scalar('eval/min Entropy category per msgs', minH, epoch, period=1)
+                event_writer.add_scalar('eval/mean Entropy category per msgs', meanH, epoch, period=1)
+                event_writer.add_scalar('eval/med Entropy category per msgs', medH, epoch, period=1)
+                event_writer.add_scalar('eval/max Entropy category per msgs', maxH, epoch, period=1)
+                event_writer.add_scalar('eval/var Entropy category per msgs', varH, epoch, period=1)
 
     @property
     def agents(self):
