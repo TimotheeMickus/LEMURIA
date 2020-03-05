@@ -87,7 +87,7 @@ def correlation_fn(single_arg):
 	"""
 	Compute correlation of text distance and meaning distance
 	"""
-	sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, remap = single_arg
+	sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, remap, dump_vals = single_arg
 
 	if remap:
 		uniq_cats = {i for p in sample for i in p}
@@ -143,6 +143,10 @@ def correlation_fn(single_arg):
 		}
 
 		vals.append(tmp_results)
+	if dump_vals:
+		print('dumping scores...', file=sys.stderr)
+		with open(dump_vals, 'w') as dumpfile:
+			json.dump(vals, dumpfile)
 	cdist_scores = [r['meaning_scores']['cdist'] for r in vals]
 	l2_scores = [r['meaning_scores']['l2'] for r in vals]
 
@@ -235,11 +239,11 @@ if __name__ == "__main__":
 
 	print('computing correlations', file=sys.stderr)
 
-	true_score_results = correlation_fn([sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, False])
+	true_score_results = correlation_fn([sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, False, 'scores.json'])
 	print(json.dumps(true_score_results))
 
 	pool = multiprocessing.Pool(multiprocessing.cpu_count())
-	single_arg = [sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, True]
+	single_arg = [sentences, tree_idx, pos_decored_idx, meanings_idx, w2c, True, False]
 
 	baseline_results = list(pool.map(correlation_fn, itertools.repeat(single_arg, args.baseline_support)))
 	json_output = {'true_score_results':true_score_results, 'baseline_results':baseline_results}
