@@ -75,11 +75,11 @@ def to_brkt(tree):
 def sample_pairs(sentences, restrict_dataset_size=None, sample_size=1024):
 	sample = range(len(sentences))
 
-	if restrict_dataset_size:
-		sample = random.sample(sample, restrict_dataset_size)
+	if True or restrict_dataset_size:
+		sample = random.sample(sample, 4096)
 
 	sample = list(itertools.combinations(sample, 2))
-	sample = random.sample(sample, sample_size)
+	#sample = random.sample(sample, sample_size)
 	return sample
 
 
