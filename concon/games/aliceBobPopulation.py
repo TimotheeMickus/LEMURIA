@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import random
+import itertools
 
 from .game import Game
 from .aliceBob import AliceBob
@@ -33,6 +34,13 @@ class AliceBobPopulation(AliceBob):
         self.adaptative_penalty = args.adaptative_penalty
 
         self._sender, self._receiver = None, None
+
+        # Mathusalemian dynamics
+        self._reaper_step = args.reaper_step
+        if self._reaper_step is not None:
+            self._current_epoch =  0
+            self._death_row = itertools.cycle(self._agents)
+
         self.start_episode()
 
         parameters = [p for a in self._agents for p in a.parameters()]
@@ -62,6 +70,10 @@ class AliceBobPopulation(AliceBob):
     def start_episode(self):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
+        if self._reaper_step is not None:
+            if (self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0):
+                self.kill(next(self._death_row))
+            self._current_epoch += 1
         self.train()
 
     @property

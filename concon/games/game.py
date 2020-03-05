@@ -181,9 +181,9 @@ class Game(metaclass=ABCMeta):
 
                     batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not args.pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
-                    
+
                     activation = model(batch_img)
-                    
+
                     tgts = batch.category(stack=True, f=category_filter).to(args.device)
                     loss = 0.
                     head_avg_acc = 0.
@@ -193,12 +193,12 @@ class Game(metaclass=ABCMeta):
                         head_avg_acc += (pred.argmax(dim=1) == tgt).float().sum().item()
                     head_avg_acc /= n_heads
                     avg_acc += head_avg_acc
-                    
+
                     total_items += tgt.size(0)
                     examples_seen += tgt.size(0)
                     if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / tgt.size(0)), examples_seen)
                     pbar.update(L=loss.item(), acc=(avg_acc / total_items))
-                    
+
                     loss.backward()
                     optimizer.step()
 
@@ -226,17 +226,17 @@ class Game(metaclass=ABCMeta):
 
                     batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not args.pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
-                    
+
                     output = model(batch_img)
-                    
+
                     loss = F.mse_loss(output, batch_img, reduction="sum")
-                    
+
                     total_loss += loss.item()
                     total_items += batch_img.size(0)
                     examples_seen += batch_img.size(0)
                     if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), examples_seen)
                     pbar.update(L=(total_loss / total_items))
-                    
+
                     loss.backward()
                     optimizer.step()
 
@@ -251,3 +251,15 @@ class Game(metaclass=ABCMeta):
         if args.freeze_pretrained_CNNs:
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
+
+    def kill(self, agent):
+        '''
+        To die, to sleep... to sleep, perchance to dream!
+        '''
+        def weight_init(submodule):
+            try:
+                submodule.reset_parameters()
+            except:
+                pass
+
+        agent.apply(weight_init)
