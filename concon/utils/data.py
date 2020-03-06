@@ -16,7 +16,6 @@ from deprecated import deprecated
 
 from .misc import add_normal_noise
 
-
 class Batch():
     def __init__(self, size, original, target, base_distractors):
        self.size = size
@@ -169,7 +168,7 @@ class DistinctTargetClassDataLoader():
         self.concepts = [] # List of dictionaries {value name -> value idx}
         for i, nb_values in enumerate(constrain_dim):
             values = possibilities[i]
-            random.shuffle(values)
+            #random.shuffle(values)
             values = values[:nb_values]
 
             self.concepts.append({v: i for (i, v) in enumerate(values)})
