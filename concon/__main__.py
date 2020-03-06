@@ -48,6 +48,8 @@ def train(args):
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
             model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, shared=args.shared)
 
+        if(args.save_every > 0): model.save(os.path.join(run_models_dir, ("model_e%i.pt" % -1)))
+
         # TODO There is an asymmetry between pretraining (which handles the epochs itself) and training (which does not)
         print(("[%s] training start…" % datetime.now()), flush=True)
         for epoch in range(args.epochs):
@@ -55,7 +57,7 @@ def train(args):
             model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, display=args.display, debug=args.debug)
 
             if((args.save_every > 0) and (((epoch + 1) % args.save_every) == 0)):
-                model.save(os.path.join(run_models_dir, "model_e%i.pt" % epoch))
+                model.save(os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
 
 if(__name__ == "__main__"):
     args = get_args()
