@@ -281,13 +281,23 @@ class AliceBob(Game):
                 np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
                 np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
-        # Computes the accuracy when the target is selected from any category
+        # Computes the accuracy when the images are selected from all categorsie
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
         if(event_writer is not None): event_writer.add_scalar('eval/accuracy', accuracy_all, epoch, period=1)
         if(display != 'minimal'): print('Accuracy: %s' % accuracy_all)
 
+        train_categories = data_iterator.training_categories_idx
         eval_categories = data_iterator.evaluation_categories_idx
         if(eval_categories != []):
+            # Computes the accuracy when both the target and the distractor are selected from training categories
+            failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
+            counts_matrix_train_td = counts_matrix[np.ix_(train_categories, train_categories)]
+
+            counts = counts_matrix_train_td.sum()
+            accuracy_train_td = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
+            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-train-td', accuracy_train_td, epoch, period=1)
+            if(display != 'minimal'): print('Accuracy train-td %s' % accuracy_train_td)
+
             # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
             failure_matrix_eval_t = failure_matrix[eval_categories, :]
             counts_matrix_eval_t = counts_matrix[eval_categories, :]
