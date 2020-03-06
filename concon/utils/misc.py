@@ -54,6 +54,12 @@ class Vocabulary:
     def __getitem__(self, idx):
         return self.entries[idx]
 
+
+def get_default_fn(base_fn, args):
+    def _wrap():
+        return base_fn(args)
+    return _wrap
+
 def pointing(scores):
     probs = F.softmax(scores, dim=-1)
     dist = Categorical(probs)

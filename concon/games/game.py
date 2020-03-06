@@ -68,6 +68,11 @@ class Game(metaclass=ABCMeta):
         """
         self.train() # Sets the current agents in training mode
 
+    def start_epoch(self, data_iterator, summary_writer):
+        """
+        Called before starting a new epoch of the game. Override for setup/pretrain behavior.
+        """
+        self.train() # Sets the current agents in training mode
 
     def end_episode(self, **kwargs):
         """
@@ -87,8 +92,9 @@ class Game(metaclass=ABCMeta):
                 `steps_per_epoch`: number of steps for epoch
                 `event_writer`: tensorboard writer to log evolution of values
         """
-        with autologger:
 
+        self.start_epoch(data_iterator, autologger.summary_writer)
+        with autologger:
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
             running_avg_success = 0.
@@ -137,54 +143,53 @@ class Game(metaclass=ABCMeta):
 
     # Caution: as this function pretrains all agents, be careful with shared parameters
     # It is likely that this method should be overriden
-    def pretrain_CNNs(self, data_iterator, summary_writer, args):
+    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
         for i, agents in enumerate(self.agents):
-            print(("[%s] pretraining agent %i…" % (datetime.now(), i)), flush=True)
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=("agent %i" % i))
+            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=("agent %i" % i))
 
-    def _pretrain_classif(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
-        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
+    def _pretrain_classif(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
+        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
 
-        default_constrain_dim = [2 if args.binary_dataset else 3] * 5
-        constrain_dim = args.constrain_dim or default_constrain_dim # TODO peut-être? [len(concept) for concept in data_iterator.concepts]
-
-        if args.pretrain_CNNs == 'feature-wise':
+        constrain_dim = [len(concept) for concept in data_iterator.concepts]
+        xcoder = agent.message_decoder if hasattr(agent, 'message_decoder') else agent.message_encoder
+        hidden_size = xcoder.symbol_embeddings.weight.size(1)
+        device = next(agent.parameters()).device
+        if pretrain_CNN_mode == 'feature-wise':
             #define as many classification heads as you have distinctive categories
             heads = nn.ModuleList([
                 nn.Sequential(
-                    nn.Linear(args.hidden_size, 3),
+                    nn.Linear(50, 3),
                     nn.LogSoftmax(dim=1)
                 ) for cdim in constrain_dim
-                if cdim > 1]).to(args.device)
+                if cdim > 1]).to(device)
             category_filter = lambda x: [c for c, cdim in zip(x, constrain_dim) if cdim > 1]
         else:
             heads = nn.ModuleList([
                 nn.Sequential(
-                    nn.Linear(args.hidden_size, data_iterator.nb_categories),
+                    nn.Linear(50, data_iterator.nb_categories),
                     nn.LogSoftmax(dim=1))
                 ]
-            ).to(args.device)
+            ).to(device)
             category_filter = lambda x: [data_iterator.category_idx(x)]
 
-        model = agent.image_encoder.to(args.device)
-        optimizer = build_optimizer(it.chain(model.parameters(), heads.parameters()), args.pretrain_learning_rate or args.learning_rate)
+        model = agent.image_encoder
+        optimizer = build_optimizer(it.chain(model.parameters(), heads.parameters()), learning_rate)
         n_heads = len(heads)
 
         examples_seen = 0
-
-        for epoch in range(args.pretrain_epochs):
-            pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L', 'acc'})
+        for epoch in range(nb_epochs):
+            pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L', 'acc'})
             avg_acc, total_items = 0., 0.
             with pbar:
-                for _ in range(args.steps_per_epoch):
+                for _ in range(steps_per_epoch):
                     self.optim.zero_grad()
 
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not args.pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
 
                     activation = model(batch_img)
 
-                    tgts = batch.category(stack=True, f=category_filter).to(args.device)
+                    tgts = batch.category(stack=True, f=category_filter).to(device)
                     loss = 0.
                     head_avg_acc = 0.
                     for head, tgt in zip(heads, torch.unbind(tgts, dim=1)):
@@ -204,27 +209,27 @@ class Game(metaclass=ABCMeta):
 
                 # Here there could an evaluation phase
 
-    def _pretrain_ae(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
-        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, args.pretrain_CNNs)
-
+    def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
+        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
+        device = next(agent.parameters()).device
         model = nn.Sequential(
             agent.image_encoder,
             Unflatten(),
-            build_cnn_decoder_from_args(args),
-        ).to(args.device)
+            deconvolution_factory(),
+        ).to(device)
 
-        optimizer = build_optimizer(model.parameters(), args.pretrain_learning_rate or args.learning_rate)
+        optimizer = build_optimizer(model.parameters(), learning_rate)
 
         examples_seen = 0
 
-        for epoch in range(args.pretrain_epochs):
+        for epoch in range(nb_epochs):
             total_loss, total_items = 0., 0.
-            pbar = Progress(args.display, args.steps_per_epoch, epoch, logged_items={'L'})
+            pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L'})
             with pbar:
-                for _ in range(args.steps_per_epoch):
+                for _ in range(steps_per_epoch):
                     self.optim.zero_grad()
 
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not args.pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
 
                     output = model(batch_img)
@@ -242,13 +247,14 @@ class Game(metaclass=ABCMeta):
 
                 # Here there could an evaluation phase
 
-    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, args, agent_name="agent"):
-        if args.pretrain_CNNs != 'auto-encoder':
-            self._pretrain_classif(agent, data_iterator, summary_writer, args, agent_name)
+    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, agent_name="agent"):
+        print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
+        if pretrain_CNN_mode != 'auto-encoder':
+            self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
-            self._pretrain_ae(agent, data_iterator, summary_writer, args, agent_name)
+            self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
 
-        if args.freeze_pretrained_CNNs:
+        if freeze_pretrained_CNN:
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
 

@@ -2,11 +2,13 @@ import torch
 import torch.nn as nn
 import random
 import itertools
+from datetime import datetime
 
 from .game import Game
 from .aliceBob import AliceBob
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.misc import build_optimizer
+from ..utils.misc import build_optimizer, get_default_fn
+from ..utils.modules import build_cnn_decoder_from_args
 
 class AliceBobPopulation(AliceBob):
     def __init__(self, args):
@@ -40,7 +42,19 @@ class AliceBobPopulation(AliceBob):
         if self._reaper_step is not None:
             self._current_epoch =  0
             self._death_row = itertools.cycle(self._agents)
-
+            self._pretrain_args = {
+                "pretrain_CNN_mode":args.pretrain_CNNs,
+                "freeze_pretrained_CNN":args.freeze_pretrained_CNNs,
+                "learning_rate":args.pretrain_learning_rate or args.learning_rate,
+                "nb_epochs":args.pretrain_epochs,
+                "steps_per_epoch":args.steps_per_epoch,
+                "display_mode":args.display,
+                "pretrain_CNNs_on_eval":args.pretrain_CNNs_on_eval,
+                "deconvolution_factory":get_default_fn(build_cnn_decoder_from_args, args),
+            }
+            self._pretrain_shared = args.shared
+        else:
+            self._pretrain_args = {"pretrain_CNN_mode":args.pretrain_CNNs,}
         self.start_episode()
 
         parameters = [p for a in self._agents for p in a.parameters()]
@@ -70,11 +84,24 @@ class AliceBobPopulation(AliceBob):
     def start_episode(self):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
+        self.train()
+
+    def start_epoch(self, data_iterator, summary_writer):
         if self._reaper_step is not None:
             if (self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0):
-                self.kill(next(self._death_row))
+                reborn_agent = next(self._death_row)
+                self.kill(reborn_agent)
+
+                if self._pretrain_args['pretrain_CNN_mode'] is not None:
+                    if self._pretrain_shared:
+                        reborn_agent = reborn_agent.sender
+                    if self._pretrain_args['freeze_pretrained_CNN']:
+                        for p in reborn_agent.image_encoder.parameters():
+                            p.requires_grad = True
+                    agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)
+                    self.pretrain_agent_CNN(reborn_agent, data_iterator, summary_writer, **self._pretrain_args, agent_name=agent_name)
+                    print("[%s] %s reinitialized." %(datetime.now(), agent_name))
             self._current_epoch += 1
-        self.train()
 
     @property
     def agents(self):
@@ -101,7 +128,7 @@ class AliceBobPopulation(AliceBob):
         instance._optim = checkpoint['optims'][0]
         return instance
 
-    def pretrain_CNNs(self, data_iterator, summary_writer, args):
-        agents = self._agents if not args.shared else [agent.sender for agent in self._agents]
+    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
+        agents = self._agents if not shared else [a.sender for a in self._agents]
         for i, agent in enumerate(agents):
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name="agent %i" %i)
+            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=("agent %i" % i))

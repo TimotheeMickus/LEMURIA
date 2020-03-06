@@ -13,7 +13,8 @@ import tqdm
 from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
 from .utils.data import get_data_loader
 from .utils.opts import get_args
-from .utils.misc import build_optimizer
+from .utils.misc import build_optimizer, get_default_fn
+from .utils.modules import build_cnn_decoder_from_args
 from .utils.logging import AutoLogger
 
 def train(args):
@@ -44,7 +45,8 @@ def train(args):
 
         if args.pretrain_CNNs:
             print(("[%s] pretraining start…" % datetime.now()), flush=True)
-            model.pretrain_CNNs(data_loader, autologger.summary_writer, args)
+            dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
+            model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, shared=args.shared)
 
         # TODO There is an asymmetry between pretraining (which handles the epochs itself) and training (which does not)
         print(("[%s] training start…" % datetime.now()), flush=True)
