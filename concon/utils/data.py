@@ -189,7 +189,7 @@ class DistinctTargetClassDataLoader():
         # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         self.training_categories = set()
         self.evaluation_categories = set()
-        ref_category = np.array([np.random.randint(len(concept)) for concept in self.concepts]) # np.full(len(self.concepts), 0)
+        ref_category = np.array([np.random.randint(len(concept)) for concept in self.concepts]) if(False) else np.full(len(self.concepts), 0) # Because False, we always select the same evaluation categories
         category = np.full(self.nb_concepts, 0)
         while(True): # Enumerates all categories to sort them
             dist = (category != ref_category).sum()
