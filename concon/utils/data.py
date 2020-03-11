@@ -302,7 +302,7 @@ class SimpleDataset(Dataset):
         for i, nb_values in enumerate(constrain_dim):
             values = possibilities[i]
             #random.shuffle(values)
-            values = values[:nb_values]
+            values = values[-1:] if(nb_values == 1) else values[:nb_values]
 
             self.concepts.append({v: i for (i, v) in enumerate(values)})
 
