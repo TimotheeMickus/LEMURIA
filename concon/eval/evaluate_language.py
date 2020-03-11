@@ -34,7 +34,11 @@ def main(args):
         counts_other_model == torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     with open(args.message_dump_file, 'w') as ostr:
-        for datapoint in tqdm.tqdm(data_loader.dataset):
+        n = len(data_loader)
+        n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+        for i in tqdm.tqdm(range(n)):
+            datapoint = data_loader.get_datapoint(i)
+
             sender_outcome = model.sender(datapoint.img.unsqueeze(0).to(args.device))
             message = sender_outcome.action[0].view(-1)
             message_str = ' '.join(map(str, message.tolist()))

@@ -1,3 +1,4 @@
+from abc import ABCMeta, abstractmethod
 import torch, torchvision
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
@@ -14,7 +15,7 @@ import itertools
 import random
 from deprecated import deprecated
 
-from .misc import add_normal_noise
+from .misc import add_normal_noise, show_imgs, combine_images
 
 class Batch():
     def __init__(self, size, original, target, base_distractors):
@@ -120,86 +121,60 @@ class FailureBasedDistribution():
 
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
-class DistinctTargetClassDataLoader():
-    def category_tuple(self, category_idx):
-        ks = []
-        k = 1
-        for i, concept in enumerate(self.concepts):
-            ks.append(k)
-            k *= len(concept)
-        ks.reverse()
-
-        l = []
-        remainder = category_idx
-        for k in ks:
-            l.append(remainder // k)
-            remainder = (remainder % k)
-        l.reverse()
-
-        category_tuple = tuple(l)
-
-        #if(np.random.randint(2)): assert self.category_idx(category_tuple) == category_idx # DEBUG ONLY
-
-        return category_tuple
-
-    def category_idx(self, category_tuple):
-        category_idx = 0
-        k = 1
-        for i, concept in enumerate(self.concepts):
-            category_idx += category_tuple[i] * k
-            k *= len(concept)
-
-        #if(np.random.randint(2)): assert self.category_tuple(category_idx) == category_tuple # DEBUG ONLY
-
-        return category_idx
-
-    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
-        # The concepts
-        possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
-        possible_colours = ['blue', 'red'] if binary else ['blue', 'red', 'green']
-        possible_v_positions = ['down', 'up'] if binary else ['down', 'up', 'v-mid']
-        possible_h_positions = ['left', 'right'] if binary else ['left', 'right', 'h-mid']
-        possible_sizes = ['small', 'big'] if binary else ['small', 'big', 'medium']
-        possibilities = [possible_shapes, possible_colours, possible_v_positions, possible_h_positions, possible_sizes]
-
-        if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities]
-        assert all([(x >= 1) for x in constrain_dim])
-
-        self.concepts = [] # List of dictionaries {value name -> value idx}
-        for i, nb_values in enumerate(constrain_dim):
-            values = possibilities[i]
-            #random.shuffle(values)
-            values = values[:nb_values]
-
-            self.concepts.append({v: i for (i, v) in enumerate(values)})
-
-        self.nb_categories = np.prod([len(concept) for concept in self.concepts])
-        self.nb_concepts = len(self.concepts)
-        self.concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
-
-        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
-
+class Dataset():
+    def __init__(self, same_img, device, noise, batch_size, sampling_strategies):
+        self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
         self.device = device
         self.noise = noise
         self.batch_size = batch_size
         self.sampling_strategies = sampling_strategies
-        self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
 
-        # If `evaluation_categories` is -1, all categories are used during training
-        # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
-        self.training_categories = set()
-        self.evaluation_categories = set()
-        ref_category = np.array([np.random.randint(len(concept)) for concept in self.concepts]) if(False) else np.full(len(self.concepts), 0) # Because False, we always select the same evaluation categories
-        category = np.full(self.nb_concepts, 0)
-        while(True): # Enumerates all categories to sort them
+        # Other properties that will be needed: self.nb_concepts, self.evaluation_categories, self.training_categories_idx, failure_based_distribution
+
+    @abstractmethod
+    def category_tuple(self, category_idx):
+        pass
+
+    @abstractmethod
+    def category_idx(self, category_tuple):
+        pass
+
+    @abstractmethod
+    def average_image(self):
+        pass
+    
+    # None for an infinite dataset?
+    @abstractmethod
+    def __len__(self):
+        pass
+    
+    @abstractmethod
+    def get_datapoint(self, i):
+        pass
+    
+    @abstractmethod
+    def category_to_datapoint(self, category_tuple):
+        pass
+   
+    # If `d` is -1, all categories are used during training
+    # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `d` are reserved for evaluation
+    def set_evaluation_categories(self, concepts, d, ref_category=None, random_ref=False):
+        training_categories = set()
+        evaluation_categories = set()
+
+        if(ref_category is not None): assert (not random_ref), "One cannot both specify a reference category and ask for a random one at the same time."
+        else: ref_category = np.array([np.random.randint(len(concept)) for concept in concepts]) if(random_ref) else np.full(len(concepts), 0)
+
+        category = np.full(len(concepts), 0)
+        while(True): # Iterates over all categories to categorise them. Alternatively, we could use the number of categories
             dist = (category != ref_category).sum()
-            if((evaluation_categories >= 0) and ((dist % evaluation_categories) == 0)):
-                self.evaluation_categories.add(tuple(category))
+            if((d >= 0) and ((dist % d) == 0)):
+                evaluation_categories.add(tuple(category))
             else:
-                self.training_categories.add(tuple(category))
+                training_categories.add(tuple(category))
 
             # Let's go to the next category
-            for i, concept in enumerate(self.concepts):
+            for i, concept in enumerate(concepts):
                 if(category[i] < (len(concept) - 1)):
                     category[i] += 1
                     break
@@ -207,67 +182,10 @@ class DistinctTargetClassDataLoader():
                 category[i] = 0
             if(category.sum() == 0): break # If we're back to (0,0,…,0), then we've seen all categories
 
-        self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
-        self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
+        self.training_categories = training_categories
+        self.evaluation_categories = evaluation_categories
 
-        print('Total number of categories: %i' % self.nb_categories)
-        print('Training categories: %s' % sorted(self.training_categories))
-        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
-        #print('(reference category: %s)' % ref_category)
-
-        def analyse_filename(filename):
-            name, ext = os.path.splitext(filename)
-            infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
-
-            idx = int(infos[0])
-            category = tuple([concept.get(value) for (concept, value) in zip(self.concepts, infos[1:])])
-
-            if(None in category): category = None # The value for one of the concepts is not accepted
-
-            return (idx, category)
-
-        print('Loading data from \'%s\'…' % data_set)
-
-        # Loads all images from data_set as DataPoint
-        dataset = [] # Will end as a Numpy array of DataPoint·s
-        #for filename in os.listdir(data_set):
-        tmp_data = os.listdir(data_set)
-        if(display == 'tqdm'): tmp_data = tqdm.tqdm(tmp_data)
-        for filename in tmp_data:
-            full_path = os.path.join(data_set, filename)
-            if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
-
-            idx, category = analyse_filename(filename)
-            if(category is None): continue
-
-            pil_img = PIL.Image.open(full_path).convert('RGB')
-            #torchvision.transforms.ToTensor
-            tensor_img = torchvision.transforms.functional.to_tensor(pil_img)
-
-            dataset.append(DataPoint(idx, category, tensor_img))
-        self.dataset = np.array(dataset)
-
-        categories = defaultdict(list) # Will end as a dictionary from category (tuple) to Numpy array of DataPoint·s
-        for img in self.dataset:
-            categories[img.category].append(img)
-        self.categories = {k: np.array(v) for (k, v) in categories.items()}
-
-        # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
-        # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
-        self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
-
-        if(display != 'tqdm'): print('Loading done')
-
-    def __len__(self):
-        return len(self.dataset)
-
-    _average_image = None
-    def average_image(self):
-        if(self._average_image is None):
-            tmp = torch.stack([x.img for x in self.dataset])
-            self._average_image = tmp.mean(axis=0)
-
-        return self._average_image
+        return ref_category
 
     def _distance_to_categories(self, category, distance, no_evaluation):
         """Returns the list of all categories at distance `distance` from category `category`."""
@@ -341,20 +259,20 @@ class DistinctTargetClassDataLoader():
             target_category = random.choice(list(categories))
 
             # Original image
-            _original = np.random.choice(self.categories[target_category]).toInput(keep_category, self.device)
+            _original = self.category_to_datapoint(target_category).toInput(keep_category, self.device)
             _original.add_normal_noise_(self.noise)
 
             # Target image
             if(self.same_img): _target = _original
             else: # Same category
-                _target = np.random.choice(self.categories[target_category]).toInput(keep_category, self.device)
+                _target = self.category_to_datapoint(target_category).toInput(keep_category, self.device)
                 _target.add_normal_noise_(self.noise)
 
             # Base distractors
             _base_distractors = []
             for sampling_strategy in sampling_strategies:
                 distractor_category = self.sample_category(sampling_strategy, target_category, no_evaluation)
-                distractor = np.random.choice(self.categories[distractor_category]).toInput(keep_category, self.device)
+                distractor = self.category_to_datapoint(distractor_category).toInput(keep_category, self.device)
                 distractor.add_normal_noise_(self.noise)
 
                 _base_distractors.append(distractor)
@@ -365,7 +283,234 @@ class DistinctTargetClassDataLoader():
 
         return Batch(size=size, original=original, target=target, base_distractors=base_distractors)
 
+class SimpleDataset(Dataset):
+    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
+        super().__init__(same_img, device, noise, batch_size, sampling_strategies)
+
+        # The concepts
+        possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
+        possible_colours = ['blue', 'red'] if binary else ['blue', 'red', 'green']
+        possible_v_positions = ['down', 'up'] if binary else ['down', 'up', 'v-mid']
+        possible_h_positions = ['left', 'right'] if binary else ['left', 'right', 'h-mid']
+        possible_sizes = ['small', 'big'] if binary else ['small', 'big', 'medium']
+        possibilities = [possible_shapes, possible_colours, possible_v_positions, possible_h_positions, possible_sizes]
+
+        if(constrain_dim is None): constrain_dim = [len(concept) for concept in possibilities]
+        assert all([(x >= 1) for x in constrain_dim])
+
+        self.concepts = [] # List of dictionaries {value name -> value idx}
+        for i, nb_values in enumerate(constrain_dim):
+            values = possibilities[i]
+            #random.shuffle(values)
+            values = values[:nb_values]
+
+            self.concepts.append({v: i for (i, v) in enumerate(values)})
+
+        self.nb_categories = np.prod([len(concept) for concept in self.concepts])
+        self.nb_concepts = len(self.concepts)
+        self.concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
+
+        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
+
+        # If `evaluation_categories` is -1, all categories are used during training
+        # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
+        ref_category = self.set_evaluation_categories(self.concepts, d=evaluation_categories, random_ref=False)
+
+        self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
+        self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
+
+        # TODO Maybe that should not be printed by __init_
+        print('Total number of categories: %i' % self.nb_categories)
+        print('Training categories: %s' % sorted(self.training_categories))
+        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
+        #print('(reference category: %s)' % ref_category)
+
+        def analyse_filename(filename):
+            name, ext = os.path.splitext(filename)
+            infos = name.split('_') # idx, shape, colour, vertical position, horizontal position, size
+
+            idx = int(infos[0])
+            category = tuple([concept.get(value) for (concept, value) in zip(self.concepts, infos[1:])])
+
+            if(None in category): category = None # The value for one of the concepts is not accepted
+
+            return (idx, category)
+
+        print('Loading data from \'%s\'…' % data_set)
+
+        # Loads all images from data_set as DataPoint
+        dataset = [] # Will end as a Numpy array of DataPoint·s
+        #for filename in os.listdir(data_set):
+        tmp_data = os.listdir(data_set)
+        if(display == 'tqdm'): tmp_data = tqdm.tqdm(tmp_data)
+        for filename in tmp_data:
+            full_path = os.path.join(data_set, filename)
+            if(not os.path.isfile(full_path)): continue # We are only interested in files (not directories)
+
+            idx, category = analyse_filename(filename)
+            if(category is None): continue
+
+            pil_img = PIL.Image.open(full_path).convert('RGB')
+            #torchvision.transforms.ToTensor
+            tensor_img = torchvision.transforms.functional.to_tensor(pil_img)
+
+            dataset.append(DataPoint(idx, category, tensor_img))
+        self._dataset = np.array(dataset)
+
+        categories = defaultdict(list) # Will end as a dictionary from category (tuple) to Numpy array of DataPoint·s
+        for img in self._dataset:
+            categories[img.category].append(img)
+        self.categories = {k: np.array(v) for (k, v) in categories.items()}
+
+        # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
+        # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
+        self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
+
+        if(display != 'tqdm'): print('Loading done')
+        
+        #show_imgs([self.average_image()], 1)
+    
+    def get_datapoint(self, i):
+        return self._dataset[i]
+
+    # Category tuples are read from left to right (contrary to usual numbers)
+    def category_tuple(self, category_idx):
+        ks = []
+        k = 1
+        for i, concept in enumerate(self.concepts):
+            ks.append(k)
+            k *= len(concept)
+        ks.reverse()
+
+        l = []
+        remainder = category_idx
+        for k in ks:
+            l.append(remainder // k)
+            remainder = (remainder % k)
+        l.reverse()
+
+        category_tuple = tuple(l)
+
+        #if(np.random.randint(2)): assert self.category_idx(category_tuple) == category_idx # DEBUG ONLY
+
+        return category_tuple
+
+    def category_idx(self, category_tuple):
+        category_idx = 0
+        k = 1
+        for i, concept in enumerate(self.concepts):
+            category_idx += category_tuple[i] * k
+            k *= len(concept)
+
+        #if(np.random.randint(2)): assert self.category_tuple(category_idx) == category_tuple # DEBUG ONLY
+
+        return category_idx
+
+    def __len__(self):
+        return len(self._dataset)
+
+    _average_image = None
+    def average_image(self):
+        if(self._average_image is None):
+            tmp = torch.stack([x.img for x in self._dataset])
+            self._average_image = tmp.mean(axis=0)
+
+        return self._average_image
+
+    def category_to_datapoint(self, category):
+        return np.random.choice(self.categories[category])
+
+class PairDataset(Dataset):
+    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
+        super().__init__(same_img, device, noise, batch_size, sampling_strategies)
+
+        self.base_dataset = SimpleDataset(same_img=None, evaluation_categories=evaluation_categories, data_set=data_set, display=display, noise=None, device=None, batch_size=None, sampling_strategies=None, binary=binary, constrain_dim=constrain_dim) # Maybe the display argument should be modified. Also note that some batch_size and sampling strategies should be useless, and probably evaluation_categories and device too
+
+        self.concepts = (self.base_dataset.concepts * 2)
+        self.nb_categories = (self.base_dataset.nb_categories * self.base_dataset.nb_categories)
+        self.nb_concepts = (2 * self.base_dataset.nb_concepts)
+        self.concept_names = ([('left_' + concept_name) for concept_name in self.base_dataset.concept_names] + [('right_' + concept_name) for concept_name in self.base_dataset.concept_names])
+
+        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
+
+        # If `evaluation_categories` is -1, all categories are used during training
+        # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
+        ref_category = self.set_evaluation_categories(self.concepts, d=evaluation_categories, random_ref=False)
+
+        self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
+        self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
+        
+        # TODO Maybe that should not be printed by __init__
+        print('Total number of categories: %i' % self.nb_categories)
+        print('Training categories: %s' % sorted(self.training_categories))
+        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
+        #print('(reference category: %s)' % ref_category)
+        
+        # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
+        # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
+        self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
+
+        #show_imgs([self.average_image()], 1)
+    
+    def get_datapoint(self, i):
+        base_len = len(self.base_dataset)
+        left_i = (i % base_len)
+        right_i = (i // base_len)
+
+        left_datapoint = self.base_dataset.get_datapoint(left_i)
+        right_datapoint = self.base_dataset.get_datapoint(left_i)
+
+        return self.combine_datapoint(left_datapoint, right_datapoint)
+    
+    def category_tuple(self, category_idx):
+        left_idx = (category_idx % self.base_dataset.nb_categories)
+        left_tuple = self.base_dataset.category_tuple(left_idx)
+        
+        right_idx = (category_idx // self.base_dataset.nb_categories)
+        right_tuple = self.base_dataset.category_tuple(right_idx)
+
+        return (left_tuple + right_tuple)
+    
+    def divide_category(self, category_tuple):
+        return (category_tuple[:self.base_dataset.nb_concepts], category_tuple[self.base_dataset.nb_concepts:])
+
+    def category_idx(self, category_tuple):
+        left_tuple, right_tuple = self.divide_category(category_tuple)
+
+        left_idx = self.base_dataset.category_idx(left_tuple)
+        right_idx = self.base_dataset.category_idx(right_tuple)
+
+        return (left_idx + (self.base_dataset.nb_categories * right_idx))
+        
+    def __len__(self):
+        return (len(self.base_dataset) * len(self.base_dataset))
+
+    _average_image = None
+    def average_image(self):
+        if(self._average_image is None):
+            base_img = self.base_dataset.average_image()
+
+            self._average_image = combine_images(base_img, base_img)
+
+        return self._average_image
+
+    def combine_datapoint(self, datapoint1, datapoint2):
+        idx = None # The following would work if the indices of the images are exactly the number between 0 and the size of the dataset: (left_datapoint.idx + (len(self.base_dataset) * right_datapoint_idx))
+        category = (datapoint1.category + datapoint2.category)
+        img = combine_images(datapoint1.img, datapoint2.img)
+        #show_imgs([img], 1)
+        
+        return DataPoint(idx, category, img)
+    
+    def category_to_datapoint(self, category_tuple):
+        left_tuple, right_tuple = self.divide_category(category_tuple)
+        left_datapoint, right_datapoint = self.base_dataset.category_to_datapoint(left_tuple), self.base_dataset.category_to_datapoint(right_tuple)
+
+        return self.combine_datapoint(left_datapoint, right_datapoint)
+
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    return DistinctTargetClassDataLoader(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+    if(args.pair_images): return PairDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+
+    return SimpleDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)

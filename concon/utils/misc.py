@@ -9,6 +9,16 @@ import torchvision
 
 import collections
 
+
+def h_compress(img):
+    shape = img.shape
+    width = shape[-1]
+        
+    return img.view(shape[:-1] + ((width // 2), 2)).mean(dim=-1)
+    
+def combine_images(img1, img2):
+    return torch.cat((h_compress(img1), h_compress(img2)), dim=-1)
+
 # Accepts either a list `l1` of pairs (element, key) or a list `l1` of elements and a list `l2` of keys
 def group_by(l1, l2=None):
     if(l2 is not None): l1 = zip(l1, l2)
