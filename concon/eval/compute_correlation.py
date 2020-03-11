@@ -38,9 +38,12 @@ def read_csv(csv_filename, string_msgs=False):
 
 # `str1` and `str2` can be any sequences
 # `embeddings` must currently have a get method for element of the sequences to Numpy arrays (or None)
-def word_embedding_levenshtein(str1, str2, embeddings, normalise=False):
+# `average_distance` and `r` are two hyperparameters: substituting two items the embeddings of which are at distance `average_distance` (in L2) will have a cost `r`. For smaller (resp. higher) distance, the cost of the substitution will be smaller (resp. higher), but, of course, always between 0 and 1.
+def word_embedding_levenshtein(str1, str2, embeddings, average_distance, r=0.9, normalise=False):
     x1 = 1 + len(str1)
     x2 = 1 + len(str2)
+
+    alpha = r / ((1 - r) * average_distance)
 
     # Initialisation of the matrix
     d = [] # Using Numpy structures for this is probably not more efficient
@@ -62,7 +65,9 @@ def word_embedding_levenshtein(str1, str2, embeddings, normalise=False):
                 if((ea is None) or (eb is None)): c = 1
                 else:
                     dst = np.linalg.norm(ea - eb) # Distance 2 (or L2 norm of the difference)
-                    c = 1 - (1 / (1 + dst)) # 1 - np.exp(-dst)
+
+                    # Now, we need a function increasing function mapping 0 to 0 and +inf to 1
+                    c = 1 - (1 / (1 + (alpha * dst)))
 
             d[i][j] = min(
                 (d[(i-1)][j] + 1), # Deletion of str1[i]
