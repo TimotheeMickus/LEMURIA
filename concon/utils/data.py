@@ -76,11 +76,19 @@ class InputDataPoint():
         self.img = img
         self.category = category
 
+    def copy(self):
+        return InputDataPoint(self.img, self.category)
+
     # Adds noise if necessary (normal random noise + clamping)
     def add_normal_noise_(self, noise):
         if(noise <= 0.0): return
 
         self.img = add_normal_noise(self.img, std_dev=noise, clamp_values=(0.0, 1.0))
+    
+    def add_normal_noise(self, noise):
+        img = self.img if(noise <= 0.0) else add_normal_noise(self.img, std_dev=noise, clamp_values=(0.0, 1.0))
+        
+        return InputDataPoint(img, self.category)
 
 class DataPoint():
     def __init__(self, idx, category, img):
@@ -123,7 +131,7 @@ class FailureBasedDistribution():
 
 class Dataset():
     def __init__(self, same_img, device, noise, batch_size, sampling_strategies):
-        self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category)
+        self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category); but any noise will be applied independently
         self.device = device
         self.noise = noise
         self.batch_size = batch_size
@@ -260,13 +268,14 @@ class Dataset():
 
             # Original image
             _original = self.category_to_datapoint(target_category).toInput(keep_category, self.device)
-            _original.add_normal_noise_(self.noise)
 
             # Target image
-            if(self.same_img): _target = _original
-            else: # Same category
-                _target = self.category_to_datapoint(target_category).toInput(keep_category, self.device)
-                _target.add_normal_noise_(self.noise)
+            if(self.same_img): _target = _original.copy()
+            else:_target = self.category_to_datapoint(target_category).toInput(keep_category, self.device) # Same category
+            
+            # Noise is applied independently to the two images
+            _original.add_normal_noise_(self.noise)
+            _target.add_normal_noise_(self.noise)
 
             # Base distractors
             _base_distractors = []
