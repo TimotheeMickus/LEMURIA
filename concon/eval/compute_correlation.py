@@ -36,6 +36,45 @@ def read_csv(csv_filename, string_msgs=False):
 
     return messages, categories
 
+# `str1` and `str2` can be any sequences
+# `embeddings` must currently have a get method for element of the sequences to Numpy arrays (or None)
+def word_embedding_levenshtein(str1, str2, embeddings, normalise=False):
+    x1 = 1 + len(str1)
+    x2 = 1 + len(str2)
+
+    # Initialisation of the matrix
+    d = [] # Using Numpy structures for this is probably not more efficient
+    d.append(list(range(x2)))
+    for i in range(1, x1):
+        d.append([i] * x2)
+
+    # Core of the algorithm
+    for i in range(1, x1):
+        for j in range(1, x2):
+            wa = str1[i-1]
+            wb = str2[j-1]
+
+            if(wa == wb): c = 0
+            else:
+                ea = embeddings.get(wa)
+                eb = embeddings.get(wb)
+
+                if((ea is None) or (eb is None)): c = 1
+                else:
+                    dst = np.linalg.norm(ea - eb) # Distance 2 (or L2 norm of the difference)
+                    c = 1 - (1 / (1 + dst)) # 1 - np.exp(-dst)
+
+            d[i][j] = min(
+                (d[(i-1)][j] + 1), # Deletion of str1[i]
+                (d[i][(j-1)] + 1), # Insertion of str2[j]
+                (d[(i-1)][(j-1)] + c)) # Substitution from str1[i] to str2[j]
+            )
+
+    raw = d[-1][-1]
+
+    if(normalise): return (raw / (len(str1) + len(str2)))
+    return raw
+
 @ft.lru_cache(maxsize=32768)
 def levenshtein(str1, str2, normalise=False):
     tmp = Levenshtein.distance(str1, str2)
