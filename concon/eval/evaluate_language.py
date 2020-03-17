@@ -7,7 +7,11 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
+import numpy as np
+
 import tqdm
+
+from .decision_tree import decision_tree
 
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
@@ -18,7 +22,7 @@ def main(args):
         print("Directory '%s' not found." % args.data_set)
         sys.exit()
     assert args.load_model is not None, "a valid path to a trained model is required."
-    assert args.message_dump_file is not None, "a valid output file is required."
+    #assert args.message_dump_file is not None, "a valid output file is required."
 
     if(args.population is not None): model = AliceBobPopulation.load(args.load_model, args)
     else: model = AliceBob.load(args.load_model, args)
@@ -33,26 +37,43 @@ def main(args):
         other_model = type(model).load(args.load_other_model, args)
         counts_other_model == torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
-    with open(args.message_dump_file, 'w') as ostr:
-        n = len(data_loader)
-        n = n or 100000 # If the dataset is infinite (None), use 100000 data points
-        for i in tqdm.tqdm(range(n)):
-            datapoint = data_loader.get_datapoint(i)
-
+    ostr = open(args.message_dump_file, 'w') if(args.message_dump_file is not None) else None
+    #with open(args.message_dump_file, 'w') as ostr:
+   
+    n = len(data_loader)
+    n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+    dataset = np.array([data_loader.get_datapoint(i) for i in range(n)])
+    
+    print("Generating the messages…")
+    messages = []
+    with torch.no_grad():
+        for datapoint in tqdm.tqdm(dataset):
             sender_outcome = model.sender(datapoint.img.unsqueeze(0).to(args.device))
             message = sender_outcome.action[0].view(-1)
+            
+            messages.append(message.tolist())
+            
             message_str = ' '.join(map(str, message.tolist()))
             category_str = ' '.join(map(str, datapoint.category))
             counts += (torch.arange(args.base_alphabet_size).expand(message.size(0), args.base_alphabet_size) == message.unsqueeze(1)).float().sum(dim=0)
+            
             if args.load_other_model is not None:
                 other_sender_outcome = other_model.sender(datapoint.img.unsqueeze(0).to(args.device))
                 other_message = other_sender_outcome.action[0].view(-1)
                 counts_other_model += (torch.arange(args.base_alphabet_size).expand(other_message.size(0), args.base_alphabet_size) == other_message.unsqueeze(1)).float().sum(dim=0)
-            print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
 
+            if(ostr is not None): print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
+
+    if(ostr is not None): ostr.close()
+
+    # Computes entropy stuff
     uniform = torch.ones_like(counts)
 
     if args.load_other_model is not None:
         print('entropy:', compute_entropy(counts), 'compared model:', compute_entropy(counts_other_model), 'ref uniform:', compute_entropy(uniform))
     else:
         print('entropy:', compute_entropy(counts), 'ref uniform:', compute_entropy(uniform))
+
+    # Decision tree stuff
+    decision_tree(model, data_loader, data=(dataset, messages))
+

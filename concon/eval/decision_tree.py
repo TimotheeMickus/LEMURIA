@@ -1,35 +1,40 @@
-import itertools
 import torch
-
 import torch.nn as nn
+import numpy as np
+
+import itertools
 import tqdm
 import sklearn.tree
 import matplotlib.pyplot as plt
 
 from collections import defaultdict
 
-def decision_tree(model, data_iterator):
-    model.eval()
+# `data` should either be a pair (dataset, messages) or None. If None, then messages will be generated
+# Except for generating the messages,
+#   we need model for _.base_alphabet_size
+#   and data_iterator for _.concepts
+def decision_tree_standalone(model, data_iterator):
+    n = len(data_iterator)
+    n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+    dataset = np.array([data_iterator.get_datapoint(i) for i in range(n)])
 
     print("Generating the messages…")
     messages = []
     with torch.no_grad():
-        n = len(data_iterator)
-        n = n or 100000 # If the dataset is infinite (None), use 100000 data points
-        for i in tqdm.tqdm(range(n)):
-            datapoint = data_iterator.get_datapoint(i)
-
+        model.eval()
+        for datapoint in tqdm.tqdm(dataset):
             sender_outcome = model.sender(datapoint.img.unsqueeze(0))
             message = sender_outcome.action[0].view(-1).tolist()
             messages.append(message)
             #print((datapoint.category, message))
+    
+    return decision_tree(dataset=dataset, messages=messages, base_alphabet_size=model.base_alphabet_size, concepts=data_iterator.concepts)
 
+def decision_tree(dataset, messages, base_alphabet_size, concepts):
     # As features, we will use the presence of n-grams
-    import numpy as np
-
     # TODO Add one OUT_OF_SENTENCE pseudo-word to the alphabet
     n = 3
-    alphabet_size = model.base_alphabet_size + 1
+    alphabet_size = base_alphabet_size + 1
     nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
     print('Number of possible %i-grams: %i' % (n, nb_ngrams))
 
@@ -74,29 +79,29 @@ def decision_tree(model, data_iterator):
 
     results_decision_tree = []
     max_depth = 2 # None # We could successively try with increasing depth
-    max_conjunctions = 3 # data_iterator.nb_concepts
+    max_conjunctions = 3 # len(concepts)
     for size_conjunctions in range(1, (max_conjunctions + 1)):
         results_binary_classifier = []
 
-        for concept_indices in itertools.combinations(range(data_iterator.nb_concepts), size_conjunctions): # Iterates over all subsets of [|0, `data_iterator.nb_concepts`|[ of size `size_conjunctions`
+        for concept_indices in itertools.combinations(range(len(concepts)), size_conjunctions): # Iterates over all subsets of [|0, `len(concepts)`|[ of size `size_conjunctions`
             #print([data_iterator.concept_names[idx] for idx in concept_indices])
 
             # For each selected concept, we pick a value
-            conjunctions = itertools.product(*[data_iterator.concepts[idx].keys() for idx in concept_indices])
+            conjunctions = itertools.product(*[concepts[idx].keys() for idx in concept_indices])
 
             for conjunction in conjunctions:
                 #print('\t class: %s' % str(conjunction))
 
                 def in_class(category):
                     for i, idx in enumerate(concept_indices):
-                        if(category[idx] != data_iterator.concepts[idx][conjunction[i]]): return False
+                        if(category[idx] != concepts[idx][conjunction[i]]): return False
 
                     return True
 
                 in_class_aux = np.vectorize(lambda datapoint: in_class(datapoint.category))
 
                 # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
-                gold = in_class_aux(data_iterator.dataset)
+                gold = in_class_aux(dataset)
                 for feature_idx in range(nb_ngrams):
                     ngram = ngrams[feature_idx]
 
@@ -147,7 +152,7 @@ def decision_tree(model, data_iterator):
 
                 # Decision trees
                 X = feature_vectors
-                Y = gold # in_class_aux(data_iterator.dataset) # [in_class(datapoint.category) for datapoint in data_iterator.dataset]
+                Y = gold # in_class_aux(dataset) # [in_class(datapoint.category) for datapoint in dataset]
 
                 classifier = sklearn.tree.DecisionTreeClassifier(max_depth=max_depth).fit(X, Y)
 

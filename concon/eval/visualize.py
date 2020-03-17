@@ -13,7 +13,7 @@ from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer
 from ..utils.data import get_data_loader
 
-from .decision_tree import decision_tree
+from .decision_tree import decision_tree_standalone
 
 def main(args):
     if(not os.path.isdir(args.data_set)):
@@ -31,6 +31,6 @@ def main(args):
 
     data_loader = get_data_loader(args)
 
-    decision_tree(model, data_loader)
-    while(True):
-        model.test_visualize(data_loader, args.learning_rate)
+    decision_tree_standalone(model, data_loader)
+
+    while(True): model.test_visualize(data_loader, args.learning_rate)
