@@ -130,5 +130,8 @@ class AliceBobPopulation(AliceBob):
 
     def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
         agents = self._agents if not shared else [a.sender for a in self._agents]
+        trained_models = {}
         for i, agent in enumerate(agents):
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=("agent %i" % i))
+            agent_name = ("agent %i" % i)
+            trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
+        return trained_models

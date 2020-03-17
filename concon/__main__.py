@@ -46,7 +46,7 @@ def train(args):
         if args.pretrain_CNNs:
             print(("[%s] pretraining start…" % datetime.now()), flush=True)
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
-            model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, shared=args.shared)
+            pretrained_models = model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, shared=args.shared)
 
         if(args.save_every > 0): model.save(os.path.join(run_models_dir, ("model_e%i.pt" % -1)))
 

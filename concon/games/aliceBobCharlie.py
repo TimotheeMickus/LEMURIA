@@ -370,5 +370,7 @@ class AliceBobCharlie(Game):
         return instance
 
     def pretrain_CNNs(self, data_iterator, summary_writer, args):
+        trained_models = {}
         for name, agent in [['sender', self.sender], ['receiver', self.receiver]]:
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=name)
+            trained_models[name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=name)
+        return trained_models

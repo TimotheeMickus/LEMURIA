@@ -148,8 +148,11 @@ class Game(metaclass=ABCMeta):
     # Caution: as this function pretrains all agents, be careful with shared parameters
     # It is likely that this method should be overriden
     def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
+        trained_models = {}
         for i, agent in enumerate(self.agents):
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=("agent %i" % i))
+            agent_name = ("agent %i" % i)
+            trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
+        return trained_models
 
     # Pretrains the CNN of an agent in category- or feature-wise mode
     def _pretrain_classif(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
@@ -190,7 +193,7 @@ class Game(metaclass=ABCMeta):
                 for step_i in range(steps_per_epoch):
                     self.optim.zero_grad()
 
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used 
+                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
                     batch_img = batch.target_img(stack=True)
 
                     activation = model(batch_img)
@@ -219,7 +222,7 @@ class Game(metaclass=ABCMeta):
 
         # Detects problems in the dataset
         # Should be used with '--evaluation_categories -1'
-        if(False): return
+        return {'model': model, 'heads': heads}
 
         # We use the information from the last round of training
         loss_mean = np.mean(losses)
@@ -250,7 +253,8 @@ class Game(metaclass=ABCMeta):
                     if(loss > 1.0):
                     #if((loss - loss_mean) > (3 * loss_std)):
                         print('Ahah! Datapoint idx=%i (category %s) has a high loss of %s!' % (datapoints[i].idx, datapoints[i].category, loss))
-            
+
+
 
     # Pretrains the CNN of an agent in auto-encoder mode
     def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
@@ -290,17 +294,19 @@ class Game(metaclass=ABCMeta):
                     optimizer.step()
 
                 # Here there could an evaluation phase
+        return {'model': model}
 
     def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, agent_name="agent"):
         print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
         if pretrain_CNN_mode != 'auto-encoder':
-            self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+            pretrained_model = self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
-            self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+            pretrained_model = = self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
 
         if freeze_pretrained_CNN:
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
+        return pretrained_model
 
     def kill(self, agent):
         '''
