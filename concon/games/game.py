@@ -186,7 +186,7 @@ class Game(metaclass=ABCMeta):
             pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L', 'acc'})
             avg_acc, total_items = 0., 0.
             with pbar:
-                losses = np.zeros(steps_per_epoch) # Average loss per image and head
+                losses = np.zeros(steps_per_epoch) # For each step of the epoch, the average loss per image and head
                 for step_i in range(steps_per_epoch):
                     self.optim.zero_grad()
 
@@ -218,6 +218,7 @@ class Game(metaclass=ABCMeta):
                 # Here there could be an evaluation phase
 
         # Detects problems in the dataset
+        # Should be used with pretrain_CNNs_on_eval
         if(False): return
 
         # We use the information from the last round of training
