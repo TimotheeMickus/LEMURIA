@@ -213,12 +213,12 @@ class Game(metaclass=ABCMeta):
                     loss.backward()
                     optimizer.step()
 
-                    losses[step_i] = (loss.item() / (n_heads * batch.size))
+                    losses[step_i] = (loss.item() / (n_heads * batch.size)) # Clearly not optimal as we don't get the right std-dev (used below to detect problems in the dataset)
 
                 # Here there could be an evaluation phase
 
         # Detects problems in the dataset
-        # Should be used with pretrain_CNNs_on_eval
+        # Should be used with '--evaluation_categories -1'
         if(False): return
 
         # We use the information from the last round of training
@@ -247,7 +247,8 @@ class Game(metaclass=ABCMeta):
                 losses = loss.cpu().numpy()
                 losses /= n_heads
                 for i, loss in enumerate(losses):
-                    if((loss - loss_mean) > (3 * loss_std)):
+                    if(loss > 1.0):
+                    #if((loss - loss_mean) > (3 * loss_std)):
                         print('Ahah! Datapoint idx=%i (category %s) has a high loss of %s!' % (datapoints[i].idx, datapoints[i].category, loss))
             
 
