@@ -163,7 +163,15 @@ class Dataset():
     @abstractmethod
     def category_to_datapoint(self, category_tuple):
         pass
-   
+
+    def print_info(self):
+        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
+        
+        print('Total number of categories: %i' % self.nb_categories)
+        print('Training categories: %s' % sorted(self.training_categories))
+        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
+        #print('(reference category: %s)' % ref_category)
+
     # If `d` is -1, all categories are used during training
     # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `d` are reserved for evaluation
     def set_evaluation_categories(self, concepts, d, ref_category=None, random_ref=False):
@@ -319,20 +327,12 @@ class SimpleDataset(Dataset):
         self.nb_concepts = len(self.concepts)
         self.concept_names = ['shape', 'colour', 'vertical-pos', 'horizontal-pos', 'size']
 
-        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
-
         # If `evaluation_categories` is -1, all categories are used during training
         # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         ref_category = self.set_evaluation_categories(self.concepts, d=evaluation_categories, random_ref=False)
 
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
-
-        # TODO Maybe that should not be printed by __init_
-        print('Total number of categories: %i' % self.nb_categories)
-        print('Training categories: %s' % sorted(self.training_categories))
-        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
-        #print('(reference category: %s)' % ref_category)
 
         def analyse_filename(filename):
             name, ext = os.path.splitext(filename)
@@ -440,20 +440,12 @@ class PairDataset(Dataset):
         self.nb_concepts = (2 * self.base_dataset.nb_concepts)
         self.concept_names = ([('left_' + concept_name) for concept_name in self.base_dataset.concept_names] + [('right_' + concept_name) for concept_name in self.base_dataset.concept_names])
 
-        for i, name in enumerate(self.concept_names): print('%s: %s' % (name, self.concepts[i]))
-
         # If `evaluation_categories` is -1, all categories are used during training
         # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `evaluation_categories` are reserved for evaluation
         ref_category = self.set_evaluation_categories(self.concepts, d=evaluation_categories, random_ref=False)
 
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
-        
-        # TODO Maybe that should not be printed by __init__
-        print('Total number of categories: %i' % self.nb_categories)
-        print('Training categories: %s' % sorted(self.training_categories))
-        print('Evaluation categories: %s' % sorted(self.evaluation_categories))
-        #print('(reference category: %s)' % ref_category)
         
         # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
         # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
@@ -520,6 +512,9 @@ class PairDataset(Dataset):
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    if(args.pair_images): return PairDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+    if(args.pair_images): dataset = PairDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+    else: dataset = SimpleDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
 
-    return SimpleDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+    dataset.print_info()
+
+    return dataset
