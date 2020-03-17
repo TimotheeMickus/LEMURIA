@@ -172,6 +172,8 @@ class Dataset():
         print('Evaluation categories: %s' % sorted(self.evaluation_categories))
         #print('(reference category: %s)' % ref_category)
 
+        print('Size: %i' % len(self))
+
     # If `d` is -1, all categories are used during training
     # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `d` are reserved for evaluation
     def set_evaluation_categories(self, concepts, d, ref_category=None, random_ref=False):
