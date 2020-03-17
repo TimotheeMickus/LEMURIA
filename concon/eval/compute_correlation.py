@@ -74,7 +74,7 @@ def word_embedding_levenshtein(seq1, seq2, embeddings, average_distance, r=0.9, 
             d[i][j] = min(
                 (d[(i-1)][j] + 1), # Deletion of seq1[i]
                 (d[i][(j-1)] + 1), # Insertion of seq2[j]
-                (d[(i-1)][(j-1)] + c)) # Substitution from seq1[i] to seq2[j]
+                (d[(i-1)][(j-1)] + c) # Substitution from seq1[i] to seq2[j]
             )
 
     raw = d[-1][-1]
@@ -115,7 +115,7 @@ def weighted_levenshtein(seq1, seq2, weights, normalise=False):
             d[i][j] = min(
                 (d[(i-1)][j] + w1), # Deletion of seq1[i]
                 (d[i][(j-1)] + w2), # Insertion of seq2[j]
-                (d[(i-1)][(j-1)] + (int(e1 != e2) * max(w1, w2)))) # Substitution from seq1[i] to seq2[j]
+                (d[(i-1)][(j-1)] + (int(e1 != e2) * max(w1, w2))) # Substitution from seq1[i] to seq2[j]
             )
 
     raw = d[-1][-1]
