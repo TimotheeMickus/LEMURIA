@@ -224,7 +224,7 @@ class Game(metaclass=ABCMeta):
         # We use the information from the last round of training
         loss_mean = np.mean(losses)
         loss_std = np.std(losses)
-        print('loss mean: %f; loss std: %f' % (loss_mean, loss_std))
+        print('loss mean: %s; loss std: %s' % (loss_mean, loss_std))
 
         with torch.no_grad():
             n = len(data_iterator)
@@ -247,8 +247,8 @@ class Game(metaclass=ABCMeta):
                 losses = loss.cpu().numpy()
                 losses /= n_heads
                 for i, loss in enumerate(losses):
-                    if((loss - loss_mean) > (2 * loss_std)):
-                        input('Ahah! Datapoint idx=%i (category %s) has a high loss of %f!' % (datapoints[i].idx, datapoints[i].category, loss))
+                    if((loss - loss_mean) > (3 * loss_std)):
+                        print('Ahah! Datapoint idx=%i (category %s) has a high loss of %s!' % (datapoints[i].idx, datapoints[i].category, loss))
             
 
     # Pretrains the CNN of an agent in auto-encoder mode
