@@ -79,6 +79,7 @@ class AliceBob(Game):
         receiver = receiver or self.receiver
         sender_outcome = sender(self._alice_input(batch))
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
+
         return sender_outcome, receiver_outcome
 
     def test_visualize(self, data_iterator, learning_rate):
