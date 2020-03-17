@@ -14,7 +14,11 @@ def decision_tree(model, data_iterator):
     print("Generating the messages…")
     messages = []
     with torch.no_grad():
-        for datapoint in tqdm.tqdm(data_iterator.dataset):
+        n = len(data_iterator)
+        n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+        for i in tqdm.tqdm(range(n)):
+            datapoint = data_iterator.get_datapoint(i)
+
             sender_outcome = model.sender(datapoint.img.unsqueeze(0))
             message = sender_outcome.action[0].view(-1).tolist()
             messages.append(message)
