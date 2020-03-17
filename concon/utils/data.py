@@ -119,13 +119,15 @@ class FailureBasedDistribution():
         np.add.at(self.failure_matrix, (target_category_idx, distractor_category_idx), failure)
 
     def distribution(self, category_idx, allowed_categories_idx=None):
-        unnormalised_dist = (self.failure_matrix[category_idx, allowed_categories_idx] / self.counts_matrix[category_idx, allowed_categories_idx])
+        if(allowed_categories_idx is None): unnormalised_dist = (self.failure_matrix[category_idx] / self.counts_matrix[category_idx])
+        else: unnormalised_dist = (self.failure_matrix[category_idx, allowed_categories_idx] / self.counts_matrix[category_idx, allowed_categories_idx])
+
         return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
 
     def sample(self, category_idx, allowed_categories_idx=None):
         dist = self.distribution(category_idx, allowed_categories_idx)
 
-        if(allowed_categories_idx is None): allowed_categories_idx = range(dist.shape[1])
+        if(allowed_categories_idx is None): allowed_categories_idx = range(dist.shape[0])
 
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
@@ -267,8 +269,8 @@ class Dataset():
         'device' is a PyTorch parameter.
         """
         batch = []
-        size = size or self.batch_size
-        sampling_strategies = sampling_strategies or self.sampling_strategies
+        if(size is None): size = self.batch_size
+        if(sampling_strategies is None): sampling_strategies = self.sampling_strategies
         for _ in range(size):
             # Choice of the original/target category
             categories = self.training_categories
