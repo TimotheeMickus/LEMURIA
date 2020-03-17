@@ -11,7 +11,7 @@ import scipy
 import numpy as np
 from ..utils.Mantel import test as mantel_test
 
-
+# The output values `messages` and `categories` are both lists of tuples of integers.
 def read_csv(csv_filename, string_msgs=False):
     """
     Open a message TSV file, and return messages paired with categories

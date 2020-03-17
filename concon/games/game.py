@@ -213,9 +213,9 @@ class Game(metaclass=ABCMeta):
                     loss.backward()
                     optimizer.step()
 
-                    losses[step_i] = (loss.mean().item() / n_heads)
+                    losses[step_i] = (loss.item() / (n_heads * batch.size))
 
-                # Here there could an evaluation phase
+                # Here there could be an evaluation phase
 
         # Detects problems in the dataset
         if(False): return
