@@ -50,7 +50,7 @@ def train(args):
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
             pretrained_models = model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, shared=args.shared)
 
-            if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier)
+            if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
                 (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())
                 print(pretrained_name)
 
@@ -74,7 +74,7 @@ def train(args):
                             #print('Ahah! Datapoint idx=%i (category %s) has a high miss of %s!' % (datapoints[i].idx, datapoints[i].category, miss))
 
                 outliers.sort(key=(lambda x: x[0]), reverse=True)
-                print(len(outliers))
+                print('%i outliers (%s%%)' % (len(outliers), (100 * len(outliers) / n)))
                 for i in range(len(outliers)): #range(min(len(outliers), 1000)):
                     miss, datapoint = outliers[i]
                     print('%i - %i' % (datapoint.idx, miss))
