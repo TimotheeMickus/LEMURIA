@@ -63,6 +63,7 @@ def main(args):
                 counts_other_model += (torch.arange(args.base_alphabet_size).expand(other_message.size(0), args.base_alphabet_size) == other_message.unsqueeze(1)).float().sum(dim=0)
 
             if(ostr is not None): print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
+    messages = np.array(messages)
 
     if(ostr is not None): ostr.close()
 
@@ -75,5 +76,5 @@ def main(args):
         print('entropy:', compute_entropy(counts), 'ref uniform:', compute_entropy(uniform))
 
     # Decision tree stuff
-    decision_tree(model, data_loader, data=(dataset, messages))
-
+    categories = np.array([datapoint.category for datapoint in dataset])
+    decision_tree(messages=messages, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_loader.concepts)

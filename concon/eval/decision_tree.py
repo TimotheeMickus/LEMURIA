@@ -17,6 +17,8 @@ def decision_tree_standalone(model, data_iterator):
     n = len(data_iterator)
     if(n is None): n = 10000
     dataset = np.array([data_iterator.get_datapoint(i) for i in range(n)])
+    
+    categories = np.array([datapoint.category for datapoint in dataset])
 
     print("Generating the messages…")
     messages = []
@@ -27,14 +29,15 @@ def decision_tree_standalone(model, data_iterator):
             message = sender_outcome.action[0].view(-1).tolist()
             messages.append(message)
             #print((datapoint.category, message))
-    
-    return decision_tree(dataset=dataset, messages=messages, base_alphabet_size=model.base_alphabet_size, concepts=data_iterator.concepts)
+    messages = np.array(messages)
 
-def decision_tree(dataset, messages, base_alphabet_size, concepts):
+    return decision_tree(messages=messages, categories=categories, alphabet_size=(1 + model.base_alphabet_size), concepts=data_iterator.concepts)
+
+# The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
+def decision_tree(messages, categories, alphabet_size, concepts):
     # As features, we will use the presence of n-grams
     # TODO Add one OUT_OF_SENTENCE pseudo-word to the alphabet
     n = 3
-    alphabet_size = base_alphabet_size + 1
     nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
     print('Number of possible %i-grams: %i' % (n, nb_ngrams))
 
@@ -98,10 +101,11 @@ def decision_tree(dataset, messages, base_alphabet_size, concepts):
 
                     return True
 
-                in_class_aux = np.vectorize(lambda datapoint: in_class(datapoint.category))
+                #in_class_aux = np.vectorize(lambda datapoint: in_class(datapoint.category))
 
                 # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
-                gold = in_class_aux(dataset)
+                #gold = in_class_aux(dataset)
+                gold = np.array([in_class(category) for category in categories])
                 for feature_idx in range(nb_ngrams):
                     ngram = ngrams[feature_idx]
 

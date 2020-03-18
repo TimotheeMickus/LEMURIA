@@ -5,13 +5,17 @@ import collections
 import random
 
 import torch
-import Levenshtein
 from scipy.stats import pearsonr as spearman
 import scipy
 import numpy as np
+
+import Levenshtein
+
 from ..utils.Mantel import test as mantel_test
+from .decision_tree import decision_tree
 
 # The output values `messages` and `categories` are both lists of tuples of integers.
+# If `string_msgs` is set to True, then the messages in the file are considered string and then converted to tuples of integers.
 def read_csv(csv_filename, string_msgs=False):
     """
     Open a message TSV file, and return messages paired with categories
@@ -25,16 +29,28 @@ def read_csv(csv_filename, string_msgs=False):
         c2i = collections.defaultdict(it.count().__next__)
         messages = map(str.strip, messages)
         messages = [tuple(map(c2i.__getitem__, msg)) for msg in messages]
+
+        alphabet_size = len(c2i)
     else:
         messages = map(str.strip, messages)
         messages = map(str.split, messages)
         messages = [tuple(map(int, msg)) for msg in messages]
 
+        alphabet_size = (1 + max([max(msg, default=0) for msg in messages]))
+
     categories = map(str.strip, categories)
     categories = map(str.split, categories)
     categories = [tuple(map(int, ctg)) for ctg in categories]
 
-    return messages, categories
+    # We assume all categories have the same length
+    concepts = [] # List of dictionaries {value name -> value idx}
+    for i in range(len(categories[0])):
+        #concept_name = ('d%i' % i)
+        max_value = max([category[i] for category in categories])
+        concept_values = dict([(('d%i.v%i' % (i, v)), v) for v in range(max_value + 1)])
+        concepts.append(concept_values)
+
+    return messages, categories, alphabet_size, concepts
 
 # `seq1` and `seq2` can be any sequences
 # `embeddings` must currently have a get method for element of the sequences to Numpy arrays (or None)
@@ -211,22 +227,30 @@ def analyze_correlation(messages, categories, scrambling_pool_size=1000, **kwarg
     return cor, μ, σ, impr
 
 def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True):
-
     if map_msg_to_str:
         messages = [''.join(map(chr, msg)) for msg in messages]
+
     if map_ctg_to_str:
         categories = [''.join(map(chr, ctg)) for ctg in categories]
 
     assert len(messages) == len(categories)
     tM = np.array(list(it.starmap(message_distance, it.combinations(messages, 2))))
     sM = np.array(list(it.starmap(meaning_distance, it.combinations(categories, 2))))
+    
     return mantel_test(tM, sM, method=method, perms=perms)
 
 def main(args):
     assert args.message_dump_file is not None, "Messages are required."
-    with torch.no_grad():
-        messages, categories = read_csv(args.message_dump_file, string_msgs=args.string_msgs)
+    
+    messages, categories, alphabet_size, concepts = read_csv(args.message_dump_file, string_msgs=args.string_msgs)
 
+    # Logs some information
+    print('Number of messages: %i' % len(messages))
+    print('Alphabet size: %i' % alphabet_size)
+    print('Concepts: %s' % concepts)
+
+    # Correlation tests
+    with torch.no_grad():
         """l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories)
         l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, message_distance=levenshtein_normalised)
         j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False)
@@ -243,3 +267,6 @@ def main(args):
         m_j = mantel(messages, categories, message_distance=jaccard, map_msg_to_str=False)
 
         print(args.message_dump_file, 'levenshtein', *m_l, 'levenshtein normalized', *m_ln, 'jaccard', *m_j)
+
+    # Decision tree stuff
+    decision_tree(messages=messages, categories=categories, alphabet_size=alphabet_size, concepts=concepts)
