@@ -62,7 +62,7 @@ def train(args):
                     batch_size = 128
                     for batch_i in range(n // batch_size):
                         datapoints = [data_loader.get_datapoint(i) for i in range((batch_size * batch_i), min((batch_size * (batch_i + 1)), n))]
-                        batch = Batch(size=batch_size, original=[], target=datapoints, base_distractors=[])
+                        batch = Batch(size=batch_size, original=[], target=[x.toInput(keep_category=True, device=args.device) for x in datapoints], base_distractors=[])
                         hits, losses = pretrained_model.forward(batch)
 
                         misses = 0 # Will be a vector with one value (number of misses over all heads) per element in the batch

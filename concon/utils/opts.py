@@ -8,7 +8,6 @@ import socket # for `gethostname`
 from datetime import datetime
 
 def get_args():
-
     arg_parser = argparse.ArgumentParser()
 
     default_data_set = os.path.join('data', 'concon')
@@ -55,7 +54,9 @@ def get_args():
     group.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
 
     group = arg_parser.add_argument_group(title='Perfs', description='arguments relative to performances')
-    group.add_argument('--device', help='what to run PyTorch on (potentially available: cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu)', default='cpu')
+
+    device_choices = ['cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'msnpu']
+    group.add_argument('--device', help='what to run PyTorch on (potentially available: ' + ', '.join(device_choices) + ')', choices=device_choices, default='cpu')
 
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
