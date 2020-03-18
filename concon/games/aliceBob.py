@@ -23,6 +23,9 @@ class AliceBob(Game):
         self.max_len_msg = args.max_len
 
         if(args.shared):
+            print('You currently cannot use AliceBob with shared CNNs. Please use AliceBobPopulation with a population of size 1 instead.')
+            raise ValueError 
+            
             senderReceiver = SenderReceiver.from_args(args)
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
