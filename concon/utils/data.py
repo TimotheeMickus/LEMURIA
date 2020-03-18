@@ -40,6 +40,7 @@ class Batch():
         if(stack): return torch.stack(tmp)
         else: return tmp
 
+    # TODO The name is no the most appropriate. But in fact, maybe one could do without this method
     def category(self, stack=False, f=None):
         if(f is None): f = (lambda x: x)
 
