@@ -194,44 +194,67 @@ class Game(metaclass=ABCMeta):
             ).to(device)
             get_head_targets = (lambda cat: [data_iterator.category_idx(cat)])
 
-        model = agent.image_encoder
-        optimizer = build_optimizer(it.chain(model.parameters(), heads.parameters()), learning_rate)
+        optimizer = build_optimizer(it.chain(agent.image_encoder.parameters(), heads.parameters()), learning_rate)
         n_heads = len(heads)
 
-        examples_seen = 0
+        class MultiHeadsClassifier:
+            def __init__(self, image_encoder, optimizer, heads, n_heads, get_head_targets, device):
+                self.image_encoder = image_encoder
+                self.optimizer = optimizer
+                self.heads = heads
+                self.n_heads = n_heads
+                self.get_head_targets = get_head_targets
+                self.device = device
+
+            def train(self, batch): # Only the target images will be used
+                self.optimizer.zero_grad()
+                
+                hits, loss = self.forward(batch)
+
+                loss.backward()
+                self.optimizer.step()
+
+                return hits, loss
+            
+            def forward(self, batch): # Only the target images will be used
+                batch_img = batch.target_img(stack=True)
+                activation = self.image_encoder(batch_img)
+                targets = batch.category(stack=True, f=self.get_head_targets).to(self.device)
+
+                loss = 0.
+                hits = 0.
+                for head, target in zip(self.heads, torch.unbind(targets, dim=1)):
+                    pred = head(activation)
+                    loss = F.nll_loss(pred, target) + loss
+                    hits += (pred.argmax(dim=1) == target).float().sum().item()
+
+                return hits, loss
+               
+        model = MultiHeadsClassifier(agent.image_encoder, optimizer, heads, n_heads, get_head_targets, device) # TODO
+
+        total_items = 0
         for epoch in range(nb_epochs):
             pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L', 'acc'})
-            total_hits = 0.
+            epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
             with pbar:
                 losses = np.zeros(steps_per_epoch) # For each step of the epoch, the average loss per image and head
                 for step_i in range(steps_per_epoch):
-                    self.optim.zero_grad()
-
                     batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
-                    batch_img = batch.target_img(stack=True)
+                    
+                    hits, loss = model.train(batch)
+                    
+                    epoch_hits += hits
+                    epoch_items += batch.size
+                    total_items += batch.size
 
-                    activation = model(batch_img)
-                    targets = batch.category(stack=True, f=get_head_targets).to(device)
-
-                    loss = 0.
-                    for head, target in zip(heads, torch.unbind(targets, dim=1)):
-                        pred = head(activation)
-                        loss = F.nll_loss(pred, target) + loss
-                        total_hits += (pred.argmax(dim=1) == target).float().sum().item()
-
-                    examples_seen += target.size(0)
-
-                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / target.size(0)), examples_seen)
-                    pbar.update(L=loss.item(), acc=(total_hits / (examples_seen * n_heads)))
-
-                    loss.backward()
-                    optimizer.step()
+                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
+                    pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
 
                     losses[step_i] = (loss.item() / (n_heads * batch.size)) # Clearly not optimal as we don't get the right std-dev (used below to detect problems in the dataset)
 
                 # Here there could be an evaluation phase
 
-        return {'model': model, 'heads': heads}
+        return model
 
         # Detects problems in the dataset
         # Should be used with '--evaluation_categories -1'
@@ -279,10 +302,10 @@ class Game(metaclass=ABCMeta):
 
         optimizer = build_optimizer(model.parameters(), learning_rate)
 
-        examples_seen = 0
+        total_items = 0
 
         for epoch in range(nb_epochs):
-            total_loss, total_items = 0., 0.
+            epoch_loss, epoch_items = 0., 0.
             pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L'})
             with pbar:
                 for _ in range(steps_per_epoch):
@@ -295,11 +318,11 @@ class Game(metaclass=ABCMeta):
 
                     loss = F.mse_loss(output, batch_img, reduction="sum")
 
-                    total_loss += loss.item()
+                    epoch_loss += loss.item()
+                    epoch_items += batch_img.size(0)
                     total_items += batch_img.size(0)
-                    examples_seen += batch_img.size(0)
-                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), examples_seen)
-                    pbar.update(L=(total_loss / total_items))
+                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), total_items)
+                    pbar.update(L=(epoch_loss / epoch_items))
 
                     loss.backward()
                     optimizer.step()
