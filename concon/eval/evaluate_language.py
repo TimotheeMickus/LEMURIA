@@ -41,7 +41,7 @@ def main(args):
     #with open(args.message_dump_file, 'w') as ostr:
    
     n = len(data_loader)
-    n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+    if(n is None): n = 10000
     dataset = np.array([data_loader.get_datapoint(i) for i in range(n)])
     
     print("Generating the messages…")

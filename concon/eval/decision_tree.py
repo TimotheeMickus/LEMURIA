@@ -15,7 +15,7 @@ from collections import defaultdict
 #   and data_iterator for _.concepts
 def decision_tree_standalone(model, data_iterator):
     n = len(data_iterator)
-    n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+    if(n is None): n = 10000
     dataset = np.array([data_iterator.get_datapoint(i) for i in range(n)])
 
     print("Generating the messages…")

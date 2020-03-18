@@ -12,7 +12,7 @@ from datetime import datetime
 
 from ..utils.logging import DummyLogger, Progress
 from ..utils.misc import build_optimizer, Unflatten
-from ..utils.modules import build_cnn_decoder_from_args
+from ..utils.modules import build_cnn_decoder_from_args, MultiHeadsClassifier
 
 from ..utils.data import Batch
 
@@ -148,14 +148,15 @@ class Game(metaclass=ABCMeta):
     # Caution: as this function pretrains all agents, be careful with shared parameters
     # It is likely that this method should be overriden
     def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
-        trained_models = {}
+        pretrained_models = {}
         for i, agent in enumerate(self.agents):
             agent_name = ("agent %i" % i)
-            trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
-        return trained_models
+            pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
+        return pretrained_models
 
     def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, agent_name="agent"):
         print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
+
         if pretrain_CNN_mode != 'auto-encoder':
             pretrained_model = self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
@@ -197,40 +198,7 @@ class Game(metaclass=ABCMeta):
         optimizer = build_optimizer(it.chain(agent.image_encoder.parameters(), heads.parameters()), learning_rate)
         n_heads = len(heads)
 
-        class MultiHeadsClassifier:
-            def __init__(self, image_encoder, optimizer, heads, n_heads, get_head_targets, device):
-                self.image_encoder = image_encoder
-                self.optimizer = optimizer
-                self.heads = heads
-                self.n_heads = n_heads
-                self.get_head_targets = get_head_targets
-                self.device = device
-
-            def train(self, batch): # Only the target images will be used
-                self.optimizer.zero_grad()
-                
-                hits, loss = self.forward(batch)
-
-                loss.backward()
-                self.optimizer.step()
-
-                return hits, loss
-            
-            def forward(self, batch): # Only the target images will be used
-                batch_img = batch.target_img(stack=True)
-                activation = self.image_encoder(batch_img)
-                targets = batch.category(stack=True, f=self.get_head_targets).to(self.device)
-
-                loss = 0.
-                hits = 0.
-                for head, target in zip(self.heads, torch.unbind(targets, dim=1)):
-                    pred = head(activation)
-                    loss = F.nll_loss(pred, target) + loss
-                    hits += (pred.argmax(dim=1) == target).float().sum().item()
-
-                return hits, loss
-               
-        model = MultiHeadsClassifier(agent.image_encoder, optimizer, heads, n_heads, get_head_targets, device) # TODO
+        model = MultiHeadsClassifier(agent.image_encoder, optimizer, heads, n_heads, get_head_targets, device)
 
         total_items = 0
         for epoch in range(nb_epochs):
@@ -243,7 +211,7 @@ class Game(metaclass=ABCMeta):
                     
                     hits, loss = model.train(batch)
                     
-                    epoch_hits += hits
+                    for x in hits: epoch_hits += x.sum().item()
                     epoch_items += batch.size
                     total_items += batch.size
 
@@ -265,7 +233,7 @@ class Game(metaclass=ABCMeta):
 
         with torch.no_grad():
             n = len(data_iterator)
-            n = n or 100000 # If the dataset is infinite (None), use 100000 data points
+            if(n is None): n = 10000
 
             batch_size = 128
             for batch_i in range(n // batch_size):
@@ -287,8 +255,6 @@ class Game(metaclass=ABCMeta):
                     if(loss > 1.0):
                     #if((loss - loss_mean) > (3 * loss_std)):
                         print('Ahah! Datapoint idx=%i (category %s) has a high loss of %s!' % (datapoints[i].idx, datapoints[i].category, loss))
-
-
 
     # Pretrains the CNN of an agent in auto-encoder mode
     def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):

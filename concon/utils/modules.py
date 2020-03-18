@@ -3,6 +3,43 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
+class MultiHeadsClassifier:
+    def __init__(self, image_encoder, optimizer, heads, n_heads, get_head_targets, device):
+        self.image_encoder = image_encoder
+        self.optimizer = optimizer
+        self.heads = heads
+        self.n_heads = n_heads
+        self.get_head_targets = get_head_targets
+        self.device = device
+
+    def train(self, batch): # Only the target images will be used
+        self.optimizer.zero_grad()
+        
+        hits, losses = self.forward(batch)
+
+        loss = 0. # Will be the sum over all heads of the mean over the batch
+        for x in losses: loss += x.mean()
+
+        loss.backward()
+        self.optimizer.step()
+
+        return hits, loss
+    
+    def forward(self, batch): # Only the target images will be used
+        batch_img = batch.target_img(stack=True)
+        activation = self.image_encoder(batch_img)
+        targets = batch.category(stack=True, f=self.get_head_targets).to(self.device)
+
+        losses = []
+        hits = []
+        for head, target in zip(self.heads, torch.unbind(targets, dim=1)):
+            pred = head(activation)
+
+            losses.append(F.nll_loss(pred, target, reduction='none'))
+            hits.append((pred.argmax(dim=1) == target).float())
+
+        return hits, losses # Lists with one element per head
+
 # Message -> vector
 class MessageEncoder(nn.Module):
     """
