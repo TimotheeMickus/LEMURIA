@@ -154,23 +154,37 @@ class Game(metaclass=ABCMeta):
             trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
         return trained_models
 
+    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, agent_name="agent"):
+        print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
+        if pretrain_CNN_mode != 'auto-encoder':
+            pretrained_model = self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+        else:
+            pretrained_model = self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+
+        if freeze_pretrained_CNN:
+            for p in agent.image_encoder.parameters():
+                p.requires_grad = False
+
+        return pretrained_model
+
     # Pretrains the CNN of an agent in category- or feature-wise mode
     def _pretrain_classif(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
 
-        constrain_dim = [len(concept) for concept in data_iterator.concepts]
+        concept_sizes = [len(concept) for concept in data_iterator.concepts]
         xcoder = agent.message_decoder if hasattr(agent, 'message_decoder') else agent.message_encoder
         hidden_size = xcoder.symbol_embeddings.weight.size(1)
         device = next(agent.parameters()).device
+
         if pretrain_CNN_mode == 'feature-wise':
-            #define as many classification heads as you have distinctive categories
+            # Defines one classification head per non-unary concept
             heads = nn.ModuleList([
                 nn.Sequential(
-                    nn.Linear(50, 3),
+                    nn.Linear(50, 3), # I guess the 3 could be replaced with csize
                     nn.LogSoftmax(dim=1)
-                ) for cdim in constrain_dim
-                if cdim > 1]).to(device)
-            category_filter = lambda x: [c for c, cdim in zip(x, constrain_dim) if cdim > 1]
+                ) for csize in concept_sizes if csize > 1
+            ]).to(device)
+            get_head_targets = (lambda cat: [v for v, csize in zip(cat, concept_sizes) if csize > 1])
         else:
             heads = nn.ModuleList([
                 nn.Sequential(
@@ -178,7 +192,7 @@ class Game(metaclass=ABCMeta):
                     nn.LogSoftmax(dim=1))
                 ]
             ).to(device)
-            category_filter = lambda x: [data_iterator.category_idx(x)]
+            get_head_targets = (lambda cat: [data_iterator.category_idx(cat)])
 
         model = agent.image_encoder
         optimizer = build_optimizer(it.chain(model.parameters(), heads.parameters()), learning_rate)
@@ -187,7 +201,7 @@ class Game(metaclass=ABCMeta):
         examples_seen = 0
         for epoch in range(nb_epochs):
             pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L', 'acc'})
-            avg_acc, total_items = 0., 0.
+            total_hits = 0.
             with pbar:
                 losses = np.zeros(steps_per_epoch) # For each step of the epoch, the average loss per image and head
                 for step_i in range(steps_per_epoch):
@@ -197,21 +211,18 @@ class Game(metaclass=ABCMeta):
                     batch_img = batch.target_img(stack=True)
 
                     activation = model(batch_img)
-                    tgts = batch.category(stack=True, f=category_filter).to(device)
+                    targets = batch.category(stack=True, f=get_head_targets).to(device)
 
                     loss = 0.
-                    head_avg_acc = 0.
-                    for head, tgt in zip(heads, torch.unbind(tgts, dim=1)):
+                    for head, target in zip(heads, torch.unbind(targets, dim=1)):
                         pred = head(activation)
-                        loss = F.nll_loss(pred, tgt) + loss
-                        head_avg_acc += (pred.argmax(dim=1) == tgt).float().sum().item()
-                    head_avg_acc /= n_heads
-                    avg_acc += head_avg_acc
+                        loss = F.nll_loss(pred, target) + loss
+                        total_hits += (pred.argmax(dim=1) == target).float().sum().item()
 
-                    total_items += tgt.size(0)
-                    examples_seen += tgt.size(0)
-                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / tgt.size(0)), examples_seen)
-                    pbar.update(L=loss.item(), acc=(avg_acc / total_items))
+                    examples_seen += target.size(0)
+
+                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / target.size(0)), examples_seen)
+                    pbar.update(L=loss.item(), acc=(total_hits / (examples_seen * n_heads)))
 
                     loss.backward()
                     optimizer.step()
@@ -220,10 +231,10 @@ class Game(metaclass=ABCMeta):
 
                 # Here there could be an evaluation phase
 
-        # Detects problems in the dataset
-        # Should be used with '--evaluation_categories -1'
         return {'model': model, 'heads': heads}
 
+        # Detects problems in the dataset
+        # Should be used with '--evaluation_categories -1'
         # We use the information from the last round of training
         loss_mean = np.mean(losses)
         loss_std = np.std(losses)
@@ -240,12 +251,12 @@ class Game(metaclass=ABCMeta):
                 batch_img = batch.target_img(stack=True)
 
                 activation = model(batch_img)
-                tgts = batch.category(stack=True, f=category_filter).to(device)
+                targets = batch.category(stack=True, f=category_filter).to(device)
 
                 loss = 0.
-                for head, tgt in zip(heads, torch.unbind(tgts, dim=1)):
+                for head, target in zip(heads, torch.unbind(targets, dim=1)):
                     pred = head(activation)
-                    loss = F.nll_loss(pred, tgt, reduction='none') + loss
+                    loss = F.nll_loss(pred, target, reduction='none') + loss
 
                 losses = loss.cpu().numpy()
                 losses /= n_heads
@@ -295,18 +306,6 @@ class Game(metaclass=ABCMeta):
 
                 # Here there could an evaluation phase
         return {'model': model}
-
-    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, agent_name="agent"):
-        print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
-        if pretrain_CNN_mode != 'auto-encoder':
-            pretrained_model = self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
-        else:
-            pretrained_model = = self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
-
-        if freeze_pretrained_CNN:
-            for p in agent.image_encoder.parameters():
-                p.requires_grad = False
-        return pretrained_model
 
     def kill(self, agent):
         '''
