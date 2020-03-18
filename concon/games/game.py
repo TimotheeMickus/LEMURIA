@@ -205,7 +205,6 @@ class Game(metaclass=ABCMeta):
             pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L', 'acc'})
             epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
             with pbar:
-                losses = np.zeros(steps_per_epoch) # For each step of the epoch, the average loss per image and head
                 for step_i in range(steps_per_epoch):
                     batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
                     
@@ -218,43 +217,9 @@ class Game(metaclass=ABCMeta):
                     if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
                     pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
 
-                    losses[step_i] = (loss.item() / (n_heads * batch.size)) # Clearly not optimal as we don't get the right std-dev (used below to detect problems in the dataset)
-
                 # Here there could be an evaluation phase
 
         return model
-
-        # Detects problems in the dataset
-        # Should be used with '--evaluation_categories -1'
-        # We use the information from the last round of training
-        loss_mean = np.mean(losses)
-        loss_std = np.std(losses)
-        print('loss mean: %s; loss std: %s' % (loss_mean, loss_std))
-
-        with torch.no_grad():
-            n = len(data_iterator)
-            if(n is None): n = 10000
-
-            batch_size = 128
-            for batch_i in range(n // batch_size):
-                datapoints = [data_iterator.get_datapoint(i) for i in range((batch_size * batch_i), max((batch_size * (batch_i + 1)), n))]
-                batch = Batch(size=batch_size, original=[], target=datapoints, base_distractors=[])
-                batch_img = batch.target_img(stack=True)
-
-                activation = model(batch_img)
-                targets = batch.category(stack=True, f=category_filter).to(device)
-
-                loss = 0.
-                for head, target in zip(heads, torch.unbind(targets, dim=1)):
-                    pred = head(activation)
-                    loss = F.nll_loss(pred, target, reduction='none') + loss
-
-                losses = loss.cpu().numpy()
-                losses /= n_heads
-                for i, loss in enumerate(losses):
-                    if(loss > 1.0):
-                    #if((loss - loss_mean) > (3 * loss_std)):
-                        print('Ahah! Datapoint idx=%i (category %s) has a high loss of %s!' % (datapoints[i].idx, datapoints[i].category, loss))
 
     # Pretrains the CNN of an agent in auto-encoder mode
     def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
