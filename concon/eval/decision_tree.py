@@ -151,7 +151,6 @@ def decision_tree(messages, categories, alphabet_size, concepts):
                     item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngram, feature_type)
                     results_binary_classifier.append(item)
 
-
                 if(True): continue
 
                 # Decision trees
@@ -199,15 +198,33 @@ def decision_tree(messages, categories, alphabet_size, concepts):
             print(e)
 
     clean_rules = []
+    clean_rules_by_lhs = defaultdict(list)
     for ngram, l in rules.items():
         lhs = ngram # In fact it could be ('NOT', ngram)
         rhs = set.union(*[e[0] for e in l])
-        clean_rules.append((lhs, rhs))
+        rule = (lhs, rhs)
 
-    # Removes redundant rules (i.e., if (x1, …, xn) => Y, then (x1, …, x{n+1}) => Y)
-    # Does currently nothing for negative rules (whereas if NOT(x1, …, x{n+1}) => Y, then NOT(x1, …, xn) => Y)
+        clean_rules.append(rule)
+        clean_rules_by_lhs[lhs].append(rule)
+
+    # Removes redundant rules (i.e., if (x1, …, xn) => Y, then (x1, …, x{n+1}) => Y, so we don't need the latter)
+    # Does currently nothing for negative rules (whereas if NOT(x1, …, x{n+1}) => Y, then NOT(x1, …, xn) => Y, so we don't need the latter)
+
+    # Iterates over all sublists of `l`
+    def iter_sublists(l, non_empty=True, strict=True):
+        n = len(l)
+        max_k = n
+        if(strict): max_k -= 1
+
+        if(not non_empty): yield []
+
+        for k in range(max_k):
+            for i in range(n - k):
+                yield l[i:(i + k + 1)]
+
     for lhs, rhs in clean_rules:
         ok = True
+        
         for lhs2, rhs2 in clean_rules:
             if(lhs == lhs2): continue
             if(rhs != rhs2): continue
@@ -219,6 +236,16 @@ def decision_tree(messages, categories, alphabet_size, concepts):
                     break
 
             if(not ok): break
+        
+        # Checks whether the rule can be obtained compositionaly from other rules
+        rhs_remainder = set(rhs)
+        for lhs2 in iter_sublists(lhs):
+            for _, rhs2 in clean_rules_by_lhs[lhs2]:
+                rhs_remainder.difference_update(rhs2)
+            
+                if(not rhs_remainder):
+                    ok = False
+                    break
 
         if(ok or lhs[0] == 'NOT'): print('%s => %s' % (lhs, rhs))
 
