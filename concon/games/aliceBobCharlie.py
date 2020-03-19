@@ -201,7 +201,7 @@ class AliceBobCharlie(Game):
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
         for _ in batch_numbers:
             with torch.no_grad():
-                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
+                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome = self.sender(self._alice_input(batch))
                 receiver_outcome = self.receiver(self._bob_input(batch, None), *sender_outcome.action)
 

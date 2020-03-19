@@ -90,7 +90,7 @@ class AliceBob(Game):
         self.eval() # Sets the model in evaluation mode; good idea or not?
 
         batch_size = 4
-        batch = data_iterator.get_batch(batch_size) # Standard training batch
+        batch = data_iterator.get_batch(batch_size, data_type='any') # Standard training batch
 
         batch.require_grad()
 
@@ -271,7 +271,7 @@ class AliceBob(Game):
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
         for _ in batch_numbers:
             with torch.no_grad():
-                batch = data_iterator.get_batch(batch_size, no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
+                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome, receiver_outcome = self(batch)
 
                 messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])

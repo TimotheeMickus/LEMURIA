@@ -103,7 +103,7 @@ class Game(metaclass=ABCMeta):
             end_i = (start_i + steps_per_epoch)
             running_avg_success = 0.
             for index in range(start_i, end_i):
-                batch = data_iterator.get_batch(keep_category=autologger.log_lang_progress)
+                batch = data_iterator.get_batch(data_type='train', keep_category=autologger.log_lang_progress)
                 self.start_episode()
 
                 self.optim.zero_grad()
@@ -206,7 +206,7 @@ class Game(metaclass=ABCMeta):
             epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
             with pbar:
                 for step_i in range(steps_per_epoch):
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
+                    batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
                     
                     hits, loss = model.train(batch)
                     
@@ -242,7 +242,7 @@ class Game(metaclass=ABCMeta):
                 for _ in range(steps_per_epoch):
                     self.optim.zero_grad()
 
-                    batch = data_iterator.get_batch(keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
 
                     output = model(batch_img)

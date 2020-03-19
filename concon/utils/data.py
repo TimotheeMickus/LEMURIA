@@ -163,8 +163,9 @@ class Dataset():
     def get_datapoint(self, i):
         pass
     
+    # Data type is for train data or test data
     @abstractmethod
-    def category_to_datapoint(self, category_tuple):
+    def category_to_datapoint(self, category_tuple, data_type):
         pass
 
     def print_info(self):
@@ -260,9 +261,10 @@ class Dataset():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=None, sampling_strategies=None, no_evaluation=True, target_evaluation=False, keep_category=False):
+    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, keep_category=False):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
+        'data_type' (train, test, any) indicates, when selecting an image from a category, from what part of this category we take it.
         'sampling_strategies' indicates how the distractor·s are determined.
         'no_evaluation' indicates whether we avoid evaluation categories.
         'target_evaluation' indicates whether the original/target category must be one of the evaluation categories.
@@ -280,11 +282,11 @@ class Dataset():
             target_category = random.choice(list(categories))
 
             # Original image
-            _original = self.category_to_datapoint(target_category).toInput(keep_category, self.device)
+            _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device)
 
             # Target image
             if(self.same_img): _target = _original.copy()
-            else:_target = self.category_to_datapoint(target_category).toInput(keep_category, self.device) # Same category
+            else:_target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
             
             # Noise is applied independently to the two images
             _original.add_normal_noise_(self.noise)
@@ -294,7 +296,7 @@ class Dataset():
             _base_distractors = []
             for sampling_strategy in sampling_strategies:
                 distractor_category = self.sample_category(sampling_strategy, target_category, no_evaluation)
-                distractor = self.category_to_datapoint(distractor_category).toInput(keep_category, self.device)
+                distractor = self.category_to_datapoint(distractor_category, data_type).toInput(keep_category, self.device)
                 distractor.add_normal_noise_(self.noise)
 
                 _base_distractors.append(distractor)
@@ -431,8 +433,21 @@ class SimpleDataset(Dataset):
 
         return self._average_image
 
-    def category_to_datapoint(self, category):
-        return np.random.choice(self.categories[category])
+    def category_to_datapoint(self, category, data_type):
+        l = len(self.categories[category])
+        if(category in self.training_categories):
+            split_point = ((4 * l) // 5)
+            split = [0, split_point, l] # 4/5th in the train portion, 1/5th in the test portion
+        else:
+            split = [0, 0, l] # Everything in the test portion
+
+        if(data_type == 'train'): a, b = split[0], (split[1]-1)
+        elif(data_type == 'test'): a, b = split[1], (split[2]-1)
+        elif(data_type == 'any'): a, b = split[0], (split[-1]-1)
+        else: assert False, ('Data type \'%s\' unknown.' % data_type)
+        i = random.randint(a, b) # A random integer between a and b (included)
+
+        return self.categories[category][i]
 
 class PairDataset(Dataset):
     def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
@@ -508,9 +523,9 @@ class PairDataset(Dataset):
         
         return DataPoint(idx, category, img)
     
-    def category_to_datapoint(self, category_tuple):
+    def category_to_datapoint(self, category_tuple, data_type):
         left_tuple, right_tuple = self.divide_category(category_tuple)
-        left_datapoint, right_datapoint = self.base_dataset.category_to_datapoint(left_tuple), self.base_dataset.category_to_datapoint(right_tuple)
+        left_datapoint, right_datapoint = self.base_dataset.category_to_datapoint(left_tuple, data_type), self.base_dataset.category_to_datapoint(right_tuple, data_type)
 
         return self.combine_datapoint(left_datapoint, right_datapoint)
 
