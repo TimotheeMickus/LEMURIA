@@ -36,46 +36,85 @@ def decision_tree_standalone(model, data_iterator):
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
 def decision_tree(messages, categories, alphabet_size, concepts):
     # As features, we will use the presence of n-grams
-    # TODO Add one OUT_OF_SENTENCE pseudo-word to the alphabet
     n = 3
-    nb_ngrams = alphabet_size * (alphabet_size**n - 1) // (alphabet_size - 1)
-    print('Number of possible %i-grams: %i' % (n, nb_ngrams))
+    print('We will consider %i-grams' % n)
 
-    ngrams = [()] * nb_ngrams
-    def ngram_to_idx(ngram): # `ngram` is a list of integers
-        idx = 0
-        for i, k in enumerate(ngram): # We read the n-grams as numbers in base ALPHABET_SIZE written in reversed and with '0' used as the unit, instead of '1' (because message (0, 0) is different from (0))
-            idx += (k + 1) * (alphabet_size**i) # '+1' because symbol '0' is used as the unit
+    def get_ngrams(message, max_length):
+        for s in message: yield (s,) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
 
-        idx -= 1 # Because the 0-gram is not taken into account
+        message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end
+        for l in range(2, (min(max_length, len(message_tmp)) + 1)): # Length of the n-gram
+            for i in range(len(message_tmp) - l + 1):
+                yield tuple(message_tmp[i:(i + l)])
 
-        assert (ngrams[idx] == () or ngrams[idx] == ngram) # Checks that we are not assigning the same id to two different n-grams
+    # Determines the set of n-grams
+    ngrams_idx = defaultdict(itertools.count().__next__) # From ngrams (tuples) to indices
+    for message in messages:
+        for ngram in get_ngrams(message, n): _ = ngrams_idx[ngram]
+    ngrams = sorted(list(ngrams_idx.keys()), key=len) # From indices to ngrams (tuple); we will stick to a Python list as tuples are a bit tricky to put into Numpy arrays
+    ngrams_idx = dict([(ngram, i) for (i, ngram) in enumerate(ngrams)])
 
-        ngrams[idx] = ngram
-
-        return idx
-
-    last_symbol = alphabet_size - 1 # Because the alphabet starts with 0
-    last_tuple = tuple([last_symbol] * n)
-    print('Id of %s: %i' % (last_tuple, ngram_to_idx(last_tuple)))
-
+    # Generates the feature vectors
     feature_vectors = []
     for message in messages:
-        # We could consider adding the BOM symbol
-        v = np.zeros(nb_ngrams, dtype=bool)
-        s = set()
-        for l in range(1, (n + 1)): # Length on the n-gram
-            for i in range(len(message) - l + 1):
-                ngram = tuple(message[i:(i + l)])
-                s.add(ngram)
-                idx = ngram_to_idx(ngram)
-                v[idx] = True
-                #print((ngram, idx))
-        #input((message, v, s))
+        v = np.zeros(len(ngrams), dtype=np.int)
+        for ngram in get_ngrams(message, n):
+            idx = ngrams_idx[ngram]
+            v[idx] += 1
         feature_vectors.append(v)
+    
+    feature_vectors = np.array(feature_vectors) # Integer tensor
+    boolean_feature_vectors = (feature_vectors != 0) # Boolean tensor
 
-    feature_vectors = np.array(feature_vectors)
+    # Super decision-tree
+    print('Full tree')
 
+    def category_to_name(category):
+        return '_'.join([str(v) for v in category])
+
+    X = feature_vectors # We might want to use only some of these (e.g., only the unigrams)
+    Y = np.array([category_to_name(category) for category in categories]) 
+
+    classifier = sklearn.tree.DecisionTreeClassifier(max_depth=64).fit(X, Y)
+
+    n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
+    accuracy = classifier.score(X, Y) # Accuracy on the 'training set'
+
+    print('Decision tree accuracy: %s' % accuracy)
+    print('Number of leaves: %i' % n_leaves)
+    print('Depth: %i' % depth)
+    #print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
+
+    #plt.figure(figsize=(12, 12))
+    #sklearn.tree.plot_tree(classifier, filled=True)
+    #plt.show()
+
+    # Conceptual decision-tree
+    for dim in range(len(concepts)):
+        print('Tree for concept %i' % dim)
+
+        def category_to_name(category):
+            return str(category[dim])
+
+        X = feature_vectors # We might want to use only some of these (e.g., only the unigrams)
+        Y = np.array([category_to_name(category) for category in categories]) 
+
+        classifier = sklearn.tree.DecisionTreeClassifier(max_depth=64).fit(X, Y)
+
+        n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
+        accuracy = classifier.score(X, Y) # Accuracy on the 'training set'
+
+        print('Decision tree accuracy: %s' % accuracy)
+        print('Number of leaves: %i' % n_leaves)
+        print('Depth: %i' % depth)
+        #print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
+
+        #plt.figure(figsize=(12, 12))
+        #sklearn.tree.plot_tree(classifier, filled=True)
+        #plt.show()
+
+
+    # Rules stuff
     rule_precision_threshold = 0.95
     rule_frequence_threshold = 0.05
     rules = defaultdict(list) # From ngram to list of RHS·s (to be conjuncted)
@@ -84,6 +123,7 @@ def decision_tree(messages, categories, alphabet_size, concepts):
     max_depth = 2 # None # We could successively try with increasing depth
     max_conjunctions = 3 # len(concepts)
     for size_conjunctions in range(1, (max_conjunctions + 1)):
+        print('\nConjunctions of %i concepts' % size_conjunctions)
         results_binary_classifier = []
 
         for concept_indices in itertools.combinations(range(len(concepts)), size_conjunctions): # Iterates over all subsets of [|0, `len(concepts)`|[ of size `size_conjunctions`
@@ -106,17 +146,13 @@ def decision_tree(messages, categories, alphabet_size, concepts):
                 # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
                 #gold = in_class_aux(dataset)
                 gold = np.array([in_class(category) for category in categories])
-                for feature_idx in range(nb_ngrams):
-                    ngram = ngrams[feature_idx]
-
-                    if(ngram == ()): continue
-
+                for feature_idx, ngram in enumerate(ngrams):
 
                     ratio = gold.mean()
                     baseline_accuracy = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
 
                     feature_type = 'presence'
-                    prediction = feature_vectors[:, feature_idx]
+                    prediction = boolean_feature_vectors[:, feature_idx]
 
                     matches = (gold == prediction)
 
@@ -151,7 +187,7 @@ def decision_tree(messages, categories, alphabet_size, concepts):
                     item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngram, feature_type)
                     results_binary_classifier.append(item)
 
-                if(True): continue
+                if(True): continue # TODO only for simple concepts, and over all values
 
                 # Decision trees
                 X = feature_vectors
@@ -160,15 +196,15 @@ def decision_tree(messages, categories, alphabet_size, concepts):
                 classifier = sklearn.tree.DecisionTreeClassifier(max_depth=max_depth).fit(X, Y)
 
                 n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
-                precision = classifier.score(X, Y) # Precision on the 'training set'
+                accuracy = classifier.score(X, Y) # Accuracy on the 'training set'
                 ratio = (np.sum(Y) / Y.size)
-                baseline_precision = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
+                baseline_accuracy = max(ratio, (1.0 - ratio)) # Accuracy of the majority class baseline
 
                 item = (
-                    precision,
-                    baseline_precision,
-                    (precision / baseline_precision),
-                    ((1 - baseline_precision) / (1 - precision)),
+                    accuracy,
+                    baseline_accuracy,
+                    (accuracy / baseline_accuracy),
+                    ((1 - baseline_accuracy) / (1 - accuracy)),
                     conjunction,
                     n_leaves,
                     depth,
@@ -177,7 +213,7 @@ def decision_tree(messages, categories, alphabet_size, concepts):
 
                 results_decision_tree.append(item)
 
-                #if(precision > 0.9):
+                #if(accuracy > 0.9):
                 if(item[3] > 2.0):
                     print(item)
                     print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
@@ -225,29 +261,31 @@ def decision_tree(messages, categories, alphabet_size, concepts):
     for lhs, rhs in clean_rules:
         ok = True
         
-        for lhs2, rhs2 in clean_rules:
-            if(lhs == lhs2): continue
-            if(rhs != rhs2): continue
+        if(lhs[0] != 'NOT'):
+            for lhs2, rhs2 in clean_rules:
+                if(lhs == lhs2): continue
+                if(rhs != rhs2): continue
 
-            # Checks whether lhs2 is a subpart of lhs
-            for i in range(1 + len(lhs) - len(lhs2)):
-                if(lhs[i:(i + len(lhs2))] == lhs2):
-                    ok = False
-                    break
+                # Checks whether lhs2 is a subpart of lhs
+                for i in range(1 + len(lhs) - len(lhs2)):
+                    if(lhs[i:(i + len(lhs2))] == lhs2):
+                        ok = False
+                        break
 
-            if(not ok): break
+                if(not ok): break
         
         # Checks whether the rule can be obtained compositionaly from other rules
-        rhs_remainder = set(rhs)
-        for lhs2 in iter_sublists(lhs):
-            for _, rhs2 in clean_rules_by_lhs[lhs2]:
-                rhs_remainder.difference_update(rhs2)
-            
-                if(not rhs_remainder):
-                    ok = False
-                    break
+        if(lhs[0] != 'NOT'):
+            rhs_remainder = set(rhs)
+            for lhs2 in iter_sublists(lhs):
+                for _, rhs2 in clean_rules_by_lhs[lhs2]:
+                    rhs_remainder.difference_update(rhs2)
+                
+                    if(not rhs_remainder):
+                        ok = False
+                        break
 
-        if(ok or lhs[0] == 'NOT'): print('%s => %s' % (lhs, rhs))
+        if(ok): print('%s => %s' % (lhs, rhs))
 
     print("\nBest decision trees")
     results_decision_tree.sort(reverse=True, key=(lambda e: e[3]))
