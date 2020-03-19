@@ -34,12 +34,12 @@ def decision_tree_standalone(model, data_iterator):
     return decision_tree(messages=messages, categories=categories, alphabet_size=(1 + model.base_alphabet_size), concepts=data_iterator.concepts)
 
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
-def decision_tree(messages, categories, alphabet_size, concepts):
-    # As features, we will use the presence of n-grams
-    n = 3
-    print('We will consider %i-grams' % n)
+# `n` is the k max of k-grams to consider
+def analyse(messages, categories, alphabet_size, concepts, n, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
+    result = {}
 
     def get_ngrams(message, max_length):
+        assert max_length > 0
         for s in message: yield (s,) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
 
         message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end
@@ -47,51 +47,46 @@ def decision_tree(messages, categories, alphabet_size, concepts):
             for i in range(len(message_tmp) - l + 1):
                 yield tuple(message_tmp[i:(i + l)])
 
-    # Determines the set of n-grams
-    ngrams_idx = defaultdict(itertools.count().__next__) # From ngrams (tuples) to indices
-    for message in messages:
-        for ngram in get_ngrams(message, n): _ = ngrams_idx[ngram]
-    ngrams = sorted(list(ngrams_idx.keys()), key=len) # From indices to ngrams (tuple); we will stick to a Python list as tuples are a bit tricky to put into Numpy arrays
-    ngrams_idx = dict([(ngram, i) for (i, ngram) in enumerate(ngrams)])
+    if(feature_vectors is None):
+        # Determines the set of n-grams
+        ngrams_idx = defaultdict(itertools.count().__next__) # From ngrams (tuples) to indices
+        for message in messages:
+            for ngram in get_ngrams(message, n): _ = ngrams_idx[ngram]
+        ngrams = sorted(list(ngrams_idx.keys()), key=len) # From indices to ngrams (tuple); we will stick to a Python list as tuples are a bit tricky to put into Numpy arrays
+        ngrams_idx = dict([(ngram, i) for (i, ngram) in enumerate(ngrams)])
 
-    # Generates the feature vectors
-    feature_vectors = []
-    for message in messages:
-        v = np.zeros(len(ngrams), dtype=np.int)
-        for ngram in get_ngrams(message, n):
-            idx = ngrams_idx[ngram]
-            v[idx] += 1
-        feature_vectors.append(v)
-    
-    feature_vectors = np.array(feature_vectors) # Integer tensor
-    boolean_feature_vectors = (feature_vectors != 0) # Boolean tensor
+        result['ngrams'] = ngrams
+        result['ngrams_idx'] = ngrams_idx
+
+        # Generates the feature vectors
+        feature_vectors = []
+        for message in messages:
+            v = np.zeros(len(ngrams), dtype=np.int)
+            for ngram in get_ngrams(message, n):
+                idx = ngrams_idx[ngram]
+                v[idx] += 1
+            feature_vectors.append(v)
+        
+        feature_vectors = np.array(feature_vectors) # Integer tensor
+
+    result['feature_vectors'] = feature_vectors
 
     # Super decision-tree
-    print('Full tree')
-
     def category_to_name(category):
         return '_'.join([str(v) for v in category])
 
     X = feature_vectors # We might want to use only some of these (e.g., only the unigrams)
     Y = np.array([category_to_name(category) for category in categories]) 
 
-    classifier = sklearn.tree.DecisionTreeClassifier(max_depth=64).fit(X, Y)
-
-    n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
+    classifier = sklearn.tree.DecisionTreeClassifier(max_depth=full_max_depth).fit(X, Y)
     accuracy = classifier.score(X, Y) # Accuracy on the 'training set'
 
-    print('Decision tree accuracy: %s' % accuracy)
-    print('Number of leaves: %i' % n_leaves)
-    print('Depth: %i' % depth)
-    #print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
-
-    #plt.figure(figsize=(12, 12))
-    #sklearn.tree.plot_tree(classifier, filled=True)
-    #plt.show()
+    result['full_tree'] = (classifier, accuracy)
 
     # Conceptual decision-tree
+    conceptual_trees = []
     for dim in range(len(concepts)):
-        print('Tree for concept %i' % dim)
+        if(len(concepts[dim]) < 2): continue
 
         def category_to_name(category):
             return str(category[dim])
@@ -99,20 +94,56 @@ def decision_tree(messages, categories, alphabet_size, concepts):
         X = feature_vectors # We might want to use only some of these (e.g., only the unigrams)
         Y = np.array([category_to_name(category) for category in categories]) 
 
-        classifier = sklearn.tree.DecisionTreeClassifier(max_depth=64).fit(X, Y)
-
-        n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
+        classifier = sklearn.tree.DecisionTreeClassifier(max_depth=conceptual_max_depth).fit(X, Y)
         accuracy = classifier.score(X, Y) # Accuracy on the 'training set'
+        
+        conceptual_trees.append((dim, (classifier, accuracy)))
+
+    result['conceptual_trees'] = conceptual_trees
+
+    return result
+
+# The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
+def decision_tree(messages, categories, alphabet_size, concepts):
+    # As features, we will use the presence of n-grams
+    n = 3
+    print('We will consider %i-grams' % n)
+
+    tmp = analyse(messages, categories, alphabet_size, concepts, n)
+    ngrams = tmp['ngrams']
+    ngrams_idx = tmp['ngrams_idx']
+    feature_vectors = tmp['feature_vectors']
+    (full_tree, full_tree_accuracy) = tmp['full_tree']
+    conceptual_trees = tmp['conceptual_trees']
+    
+    boolean_feature_vectors = (feature_vectors != 0) # Boolean tensor
+
+    # Super decision-tree
+    print('Full tree')
+    n_leaves, depth = full_tree.get_n_leaves(), full_tree.get_depth()
+
+    print('Decision tree accuracy: %s' % full_tree_accuracy)
+    print('Number of leaves: %i' % n_leaves)
+    print('Depth: %i' % depth)
+    #print(sklearn.tree.export_text(full_tree, feature_names=ngrams, show_weights=True))
+
+    #plt.figure(figsize=(12, 12))
+    #sklearn.tree.plot_tree(full_tree, filled=True)
+    #plt.show()
+
+    # Conceptual decision-tree
+    for dim, (tree, accuracy) in conceptual_trees:
+        print('Tree for concept %i' % dim)
+        n_leaves, depth = tree.get_n_leaves(), tree.get_depth()
 
         print('Decision tree accuracy: %s' % accuracy)
         print('Number of leaves: %i' % n_leaves)
         print('Depth: %i' % depth)
-        #print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
+        #print(sklearn.tree.export_text(tree, feature_names=ngrams, show_weights=True))
 
         #plt.figure(figsize=(12, 12))
-        #sklearn.tree.plot_tree(classifier, filled=True)
+        #sklearn.tree.plot_tree(tree, filled=True)
         #plt.show()
-
 
     # Rules stuff
     rule_precision_threshold = 0.95

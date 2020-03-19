@@ -14,6 +14,7 @@ from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_norm
 from ..utils import misc
 
 from ..eval import compute_correlation
+from ..eval import decision_tree
 
 from .game import Game
 
@@ -260,11 +261,13 @@ class AliceBob(Game):
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
         batch_size = 256
-        nb_batch = int(np.ceil(len(data_iterator) / batch_size)) # Doing so makes us see on average at least each data point once; this also means that each cell of the failure matrix is updated (len(data_iterator) / ((nb_categories) * (nb_categories - 1))) time, which can be quite low (~10)
+        n = len(data_iterator)
+        if(n is None): n = 10000
+        nb_batch = int(np.ceil(n / batch_size)) # Doing so makes us see on average at least each data point once; this also means that each cell of the failure matrix is updated (len(data_iterator) / ((nb_categories) * (nb_categories - 1))) time, which can be quite low (~10)
 
-        batch_numbers = range(nb_batch)
         messages = []
         categories = []
+        batch_numbers = range(nb_batch)
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
         for _ in batch_numbers:
             with torch.no_grad():
@@ -355,7 +358,6 @@ class AliceBob(Game):
             sample_messages, sample_categories = zip(*sample)
             sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
 
-
             #timepoint = time.time()
             l_cor, *_, l_cor_n = compute_correlation.mantel(sample_messages, sample_categories)
             if(display != 'minimal'): print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
@@ -396,6 +398,31 @@ class AliceBob(Game):
                 event_writer.add_scalar('eval/max Entropy category per msgs', maxH, epoch, period=1)
                 event_writer.add_scalar('eval/var Entropy category per msgs', varH, epoch, period=1)
 
+        # Decision tree stuff
+        alphabet_size = (self.base_alphabet_size + 1)
+        n = 1 # Max size of n-grams to consider
+        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_iterator.concepts, n)
+        (full_tree, full_tree_accuracy) = tmp['full_tree']
+        conceptual_trees = tmp['conceptual_trees']
+        
+        n_leaves, depth = full_tree.get_n_leaves(), full_tree.get_depth()
+        if(event_writer is not None): event_writer.add_scalar('decision_tree/full_accuracy', full_tree_accuracy, epoch, period=1)
+        if(display != 'minimal'): print('Full tree accuracy: %s' % full_tree_accuracy)
+        if(event_writer is not None): event_writer.add_scalar('decision_tree/full_n_leaves', n_leaves, epoch, period=1)
+        if(display != 'minimal'): print('Full tree n leaves: %s' % n_leaves)
+        if(event_writer is not None): event_writer.add_scalar('decision_tree/full_depth', depth, epoch, period=1)
+        if(display != 'minimal'): print('Full tree depth: %s' % depth)
+            
+        for i, (tree, accuracy) in conceptual_trees:
+            name = data_iterator.concept_names[i]
+            
+            n_leaves, depth = tree.get_n_leaves(), tree.get_depth()
+            if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_accuracy' % name), accuracy, epoch, period=1)
+            if(display != 'minimal'): print('%s tree accuracy: %s' % (name, accuracy))
+            if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_n_leaves' % name), n_leaves, epoch, period=1)
+            if(display != 'minimal'): print('%s tree n leaves: %s' % (name, n_leaves))
+            if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_depth' % name), depth, epoch, period=1)
+            if(display != 'minimal'): print('%s tree depth: %s' % (name, depth))
 
     @property
     def agents(self):
