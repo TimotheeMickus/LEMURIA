@@ -109,7 +109,7 @@ _big = {
     "small":0,
 }
 
-def screenshot(fname, buffertime=.25):
+def screenshot(fname, buffertime=1):
     sleep(buffertime)
     scene.capture("%s.png" % fname)
     sleep(buffertime)
@@ -120,7 +120,7 @@ scene.autoscale=False
 
 import os
 # change path below as appropriate
-PATH = '../Downloads/rgb_dataset'
+PATH = 'data/concon'
 DATASET = {
     os.path.splitext(f)[0]
     for f in os.listdir(PATH)
