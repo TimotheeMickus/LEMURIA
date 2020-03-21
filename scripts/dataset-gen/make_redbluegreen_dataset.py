@@ -10,6 +10,9 @@ SPHERE = vp.sphere(visible=False)
 CUBE = vp.box(visible=False)
 RING = vp.ring(visible=False, thickness=0.2)
 
+print('scene set')
+
+
 def hide_all():
     for obj in [SPHERE, CUBE, RING]:
         obj.visible = False
@@ -52,19 +55,22 @@ def random_radius(bigness):
         s = uniform(1.25, 1.75)
     return s
 
+
+min_margin_dominant_color = 0.7
+ceiling_nondominant_color = 0.3
 def random_color(blueness):
     if blueness == 2:
-        b = uniform(.5, 1.)
-        g = uniform(0., min(b - 0.1, 0.5))
-        r = uniform(0., min(b - 0.1, 0.5))
+        b = uniform(min_margin_dominant_color, 1.)
+        g = uniform(0., ceiling_nondominant_color)
+        r = uniform(0., ceiling_nondominant_color)
     elif blueness == 1:
-        g = uniform(.5, 1.)
-        b = uniform(0., min(g - 0.1, 0.5))
-        r = uniform(0., min(g - 0.1, 0.5))
+        g = uniform(min_margin_dominant_color, 1.)
+        b = uniform(0., ceiling_nondominant_color)
+        r = uniform(0., ceiling_nondominant_color)
     else:
-        r = uniform(.5, 1.)
-        g = uniform(0., min(r - 0.1, 0.5))
-        b = uniform(0., min(r - 0.1, 0.5))
+        r = uniform(min_margin_dominant_color, 1.)
+        g = uniform(0., ceiling_nondominant_color)
+        b = uniform(0., ceiling_nondominant_color)
     return vp.vector(r, g, b)
 
 def random_obj(obj, upness, rightness, bigness, blueness):
@@ -109,7 +115,7 @@ _big = {
     "small":0,
 }
 
-def screenshot(fname, buffertime=1):
+def screenshot(fname, buffertime=.05):
     sleep(buffertime)
     scene.capture("%s.png" % fname)
     sleep(buffertime)
@@ -120,12 +126,13 @@ scene.autoscale=False
 
 import os
 # change path below as appropriate
-PATH = 'data/concon'
+PATH = '/home/airc/Downloads/rgb_dataset'
 DATASET = {
     os.path.splitext(f)[0]
     for f in os.listdir(PATH)
     if os.path.isfile(os.path.join(PATH, f))
 }
+print('boot ok')
 
 i = 0
 while True:
@@ -142,7 +149,7 @@ while True:
                             continue
                         if i >= NUMBER_IMGS:
                             from rm_dups import rm_dups
-                            deleted = rm_dups()
+                            deleted = rm_dups(dataset_path=PATH)
                             if deleted:
                                 DATASET = {
                                     os.path.splitext(f)[0]

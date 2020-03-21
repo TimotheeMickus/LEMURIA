@@ -5,11 +5,12 @@ import random
 import os
 
 
-OUTPUT_DIR = 'data/gen-langs'
+OUTPUT_DIR = 'data/gen-langs/interspersed-10'
 NUMBER_MSG_PER_CATEGORY = 30
 MAX_SWAP = 2
 MAX_SYNONYMS = 3
 MAX_UPPER_MWE_LEN = 3
+MAX_INTERSPERSE = 3
 
 #0. Create result dir
 if not os.path.isdir(OUTPUT_DIR):
@@ -22,11 +23,20 @@ def _base_msg(category):
     """
     return  [2 * i + int(c) for i,c in enumerate(category)]
 
-def _pretty(message, synonym_table, end_symbol):
+def _pretty(message, synonym_table, end_symbol, intersperse):
     """
     Clean up message.
     """
-    return [s for sub in message for s in random.choice(synonym_table[sub])] + [end_symbol]
+    sequence = [
+        random.choice(synonym_table[sub])
+        for sub in message
+    ]
+
+    for _ in range(intersperse):
+        ungrounded_symbol = [random.choice(range(end_symbol + 1, end_symbol + intersperse + 1))]
+        random_position = random.randint(0, len(sequence))
+        sequence.insert(random_position, ungrounded_symbol)
+    return [symbol for item in sequence for symbol in item] + [end_symbol]
 
 def generate_synonym_table(num_synonyms, upper_mwe_len):
     """
@@ -72,48 +82,50 @@ with open(os.path.join(OUTPUT_DIR, 'irregular-constlen.tsv'), 'w') as ostr:
                 message = random.choices(range(10), k=5) + [10]
                 print(id, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
 
-for synonyms in range(1, MAX_SYNONYMS + 1):
+for intersperse in range(0, MAX_INTERSPERSE + 1):
 
-    for upper_mwe_len in range(1, MAX_UPPER_MWE_LEN + 1):
+    for synonyms in range(1, MAX_SYNONYMS + 1):
 
-        base_name = 'syn-%i_mwe-%i_' % (synonyms, upper_mwe_len)
+        for upper_mwe_len in range(1, MAX_UPPER_MWE_LEN + 1):
 
-        for swaps in range(MAX_SWAP + 1):
+            base_name = 'syn-%i_mwe-%i_isp-%i_' % (synonyms, upper_mwe_len, intersperse)
 
-            synonym_table, base_alphabet_size = generate_synonym_table(synonyms, upper_mwe_len)
-            if swaps == 0:
-                # no scramble
-                with open(os.path.join(OUTPUT_DIR, base_name + 'strict-order.tsv'), 'w') as ostr:
-                    idx = 0
-                    for i in range(NUMBER_MSG_PER_CATEGORY):
-                        for category in it.product([0, 1], repeat=5):
-                            message = _base_msg(category)
-                            message = _pretty(message, synonym_table, base_alphabet_size)
-                            print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
-                            idx += 1
+            for swaps in range(MAX_SWAP + 1):
 
                 synonym_table, base_alphabet_size = generate_synonym_table(synonyms, upper_mwe_len)
-                # total random scramble
-                with open(os.path.join(OUTPUT_DIR, base_name + 'random-order.tsv'), 'w') as ostr:
-                    idx = 0
-                    for i in range(NUMBER_MSG_PER_CATEGORY):
-                        for category in it.product([0, 1], repeat=5):
-                            message = _base_msg(category)
-                            random.shuffle(message)
-                            message = _pretty(message, synonym_table, base_alphabet_size)
-                            print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
-                            idx += 1
+                if swaps == 0:
+                    # no scramble
+                    with open(os.path.join(OUTPUT_DIR, base_name + 'strict-order.tsv'), 'w') as ostr:
+                        idx = 0
+                        for i in range(NUMBER_MSG_PER_CATEGORY):
+                            for category in it.product([0, 1], repeat=5):
+                                message = _base_msg(category)
+                                message = _pretty(message, synonym_table, base_alphabet_size, intersperse)
+                                print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
+                                idx += 1
 
-            # random inversion of `swap` pairs
-            else:
-                with open(os.path.join(OUTPUT_DIR, base_name + 'swap-%i.tsv' % swaps), 'w') as ostr:
-                    idx = 0
-                    for i in range(NUMBER_MSG_PER_CATEGORY):
-                        for category in it.product([0, 1], repeat=5):
-                            message = _base_msg(category)
-                            for _ in range(swaps):
-                                i1, i2 = random.sample(range(5), 2)
-                                message[i1], message[i2] = message[i2], message[i1]
-                            message = _pretty(message, synonym_table, base_alphabet_size)
-                            print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
-                            idx += 1
+                    synonym_table, base_alphabet_size = generate_synonym_table(synonyms, upper_mwe_len)
+                    # total random scramble
+                    with open(os.path.join(OUTPUT_DIR, base_name + 'random-order.tsv'), 'w') as ostr:
+                        idx = 0
+                        for i in range(NUMBER_MSG_PER_CATEGORY):
+                            for category in it.product([0, 1], repeat=5):
+                                message = _base_msg(category)
+                                random.shuffle(message)
+                                message = _pretty(message, synonym_table, base_alphabet_size, intersperse)
+                                print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
+                                idx += 1
+
+                # random inversion of `swap` pairs
+                else:
+                    with open(os.path.join(OUTPUT_DIR, base_name + 'swap-%i.tsv' % swaps), 'w') as ostr:
+                        idx = 0
+                        for i in range(NUMBER_MSG_PER_CATEGORY):
+                            for category in it.product([0, 1], repeat=5):
+                                message = _base_msg(category)
+                                for _ in range(swaps):
+                                    i1, i2 = random.sample(range(5), 2)
+                                    message[i1], message[i2] = message[i2], message[i1]
+                                message = _pretty(message, synonym_table, base_alphabet_size, intersperse)
+                                print(idx, ' '.join(map(str, category)), ' '.join(map(str, message)), sep="\t", file=ostr)
+                                idx += 1
