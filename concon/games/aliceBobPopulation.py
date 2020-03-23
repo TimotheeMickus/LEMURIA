@@ -81,10 +81,10 @@ class AliceBobPopulation(AliceBob):
         """
         return AliceBob.__call__(self, batch, sender=self._sender, receiver=self._receiver)
 
-    def start_episode(self):
+    def start_episode(self, train_episode=True):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
-        self.train()
+        if train_episode: self.train()
 
     def start_epoch(self, data_iterator, summary_writer):
         if self._reaper_step is not None:

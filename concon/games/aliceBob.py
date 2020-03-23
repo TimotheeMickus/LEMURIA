@@ -25,8 +25,8 @@ class AliceBob(Game):
 
         if(args.shared):
             print('You currently cannot use AliceBob with shared CNNs. Please use AliceBobPopulation with a population of size 1 instead.')
-            raise ValueError 
-            
+            raise ValueError
+
             senderReceiver = SenderReceiver.from_args(args)
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
@@ -270,6 +270,8 @@ class AliceBob(Game):
         batch_numbers = range(nb_batch)
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch), desc='Eval.')
         for _ in batch_numbers:
+            self.start_episode(train_episode=False) # Select agents at random if necessary
+
             with torch.no_grad():
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome, receiver_outcome = self(batch)
@@ -404,7 +406,7 @@ class AliceBob(Game):
         tmp = decision_tree.analyse(messages, categories, alphabet_size, data_iterator.concepts, n)
         (full_tree, full_tree_accuracy) = tmp['full_tree']
         conceptual_trees = tmp['conceptual_trees']
-        
+
         n_leaves, depth = full_tree.get_n_leaves(), full_tree.get_depth()
         if(event_writer is not None): event_writer.add_scalar('decision_tree/full_accuracy', full_tree_accuracy, epoch, period=1)
         if(display != 'minimal'): print('Full tree accuracy: %s' % full_tree_accuracy)
@@ -412,10 +414,10 @@ class AliceBob(Game):
         if(display != 'minimal'): print('Full tree n leaves: %s' % n_leaves)
         if(event_writer is not None): event_writer.add_scalar('decision_tree/full_depth', depth, epoch, period=1)
         if(display != 'minimal'): print('Full tree depth: %s' % depth)
-            
+
         for i, (tree, accuracy) in conceptual_trees:
             name = data_iterator.concept_names[i]
-            
+
             n_leaves, depth = tree.get_n_leaves(), tree.get_depth()
             if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_accuracy' % name), accuracy, epoch, period=1)
             if(display != 'minimal'): print('%s tree accuracy: %s' % (name, accuracy))
