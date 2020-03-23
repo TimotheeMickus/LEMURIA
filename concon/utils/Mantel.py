@@ -164,7 +164,10 @@ def test(X, Y, perms=10000, method='pearson', tail='two-tail'):
       covariances[i] = (X_residuals * Y_residuals_permuted).sum()
 
   # Calculate the veridical correlation coefficient from the veridical covariance.
-  r = covariances[0] / np.sqrt((X_residuals ** 2).sum() * (Y_residuals ** 2).sum())
+  correl_denom = np.sqrt((X_residuals ** 2).sum() * (Y_residuals ** 2).sum())
+  r = (covariances[0] / correl_denom)
+
+  r_mean = (covariances[1:] / correl_denom).mean()
 
   # Calculate the empirical p-value for the upper or lower tail.
   if tail == 'upper':
@@ -177,4 +180,4 @@ def test(X, Y, perms=10000, method='pearson', tail='two-tail'):
   # Calculate the standard score.
   z = (covariances[0] - covariances.mean()) / covariances.std()
 
-  return r, p, z
+  return r, p, z, r_mean

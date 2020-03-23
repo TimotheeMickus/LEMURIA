@@ -362,21 +362,21 @@ class AliceBob(Game):
 
             #timepoint = time.time()
             l_cor, *_, l_cor_n, l_cor_rd = compute_correlation.mantel(sample_messages, sample_categories)
-            if(display != 'minimal'): print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
+            if(display != 'minimal'): print('Levenshtein: %f - %f (%f)' % (l_cor, l_cor_n, l_cor_rd))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
             l_n_cor, *_, l_n_cor_n, l_n_cor_rd = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised)
-            if(display != 'minimal'): print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
+            if(display != 'minimal'): print('Levenshtein (normalised): %f - %f (%f)' % (l_n_cor, l_n_cor_n, l_cor_rd))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
             j_cor, *_, j_cor_n, j_cor_rd = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
-            if(display != 'minimal'): print('Jaccard: %f - %f' % (j_cor, j_cor_n))
+            if(display != 'minimal'): print('Jaccard: %f - %f (%f)' % (j_cor, j_cor_n, l_cor_rd))
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
