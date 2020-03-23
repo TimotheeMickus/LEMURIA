@@ -21,16 +21,17 @@ def main(args):
     if(not os.path.isdir(args.data_set)):
         print("Directory '%s' not found." % args.data_set)
         sys.exit()
-    assert args.load_model is not None, "a valid path to a trained model is required."
+    assert args.load_model is not None, "You need to specify 'load_model'"
     #assert args.message_dump_file is not None, "a valid output file is required."
 
     if(args.population is not None): model = AliceBobPopulation.load(args.load_model, args)
     else: model = AliceBob.load(args.load_model, args)
     #print(model)
 
-    data_loader = get_data_loader(args)
+    data_iterator = get_data_loader(args)
 
     #model.eval()
+    '''
     counts = torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
 
     if args.load_other_model is not None:
@@ -39,14 +40,40 @@ def main(args):
 
     ostr = open(args.message_dump_file, 'w') if(args.message_dump_file is not None) else None
     #with open(args.message_dump_file, 'w') as ostr:
+    '''
    
-    n = len(data_loader)
-    if(n is None): n = 10000
-    dataset = np.array([data_loader.get_datapoint(i) for i in range(n)])
+    # We try to visit each category on average 32 times
+    batch_size = 256
+    max_datapoints = 32768 # (2^15)
+    n = (32 * data_iterator.nb_categories)
+    #n = data_iterator.size(data_type='test', no_evaluation=False)
+    n = min(max_datapoints, n) 
+    nb_batch = int(np.ceil(n / batch_size))
+    print('%i datapoints (%i batches)' % (n, nb_batch))
     
     print("Generating the messages…")
     messages = []
+    categories = []
+    batch_numbers = range(nb_batch)
+    if(args.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers)
     with torch.no_grad():
+        for _ in batch_numbers:
+            model.start_episode(train_episode=False) # Selects agents at random if necessary
+
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # Standard evaluation batch
+            sender_outcome, receiver_outcome = model(batch)
+
+            messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
+            categories.extend([x.category for x in batch.original])
+   
+    '''
+    messages = []
+    categories = []
+    with torch.no_grad():
+        batch_numbers = range(nb_batch)
+        if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch))
+        for _ in batch_numbers:
+        
         for datapoint in tqdm.tqdm(dataset):
             sender_outcome = model.sender(datapoint.img.unsqueeze(0).to(args.device))
             message = sender_outcome.action[0].view(-1)
@@ -63,8 +90,10 @@ def main(args):
                 counts_other_model += (torch.arange(args.base_alphabet_size).expand(other_message.size(0), args.base_alphabet_size) == other_message.unsqueeze(1)).float().sum(dim=0)
 
             if(ostr is not None): print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
-    messages = np.array(messages)
+    '''
+    categories = np.array(categories) # Numpyfies the categories (but not the messages, as there are list of various length)
 
+    '''
     if(ostr is not None): ostr.close()
 
     # Computes entropy stuff
@@ -74,7 +103,7 @@ def main(args):
         print('entropy:', compute_entropy(counts), 'compared model:', compute_entropy(counts_other_model), 'ref uniform:', compute_entropy(uniform))
     else:
         print('entropy:', compute_entropy(counts), 'ref uniform:', compute_entropy(uniform))
+    '''
 
     # Decision tree stuff
-    categories = np.array([datapoint.category for datapoint in dataset])
-    decision_tree(messages=messages, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_loader.concepts)
+    decision_tree(messages=messages, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_iterator.concepts)

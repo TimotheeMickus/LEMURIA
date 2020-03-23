@@ -14,22 +14,30 @@ from collections import defaultdict
 #   we need model for _.base_alphabet_size
 #   and data_iterator for _.concepts
 def decision_tree_standalone(model, data_iterator):
-    n = len(data_iterator)
-    if(n is None): n = 10000
-    dataset = np.array([data_iterator.get_datapoint(i) for i in range(n)])
+    # We try to visit each category on average 32 times
+    batch_size = 256
+    max_datapoints = 32768 # (2^15)
+    n = (32 * data_iterator.nb_categories)
+    #n = data_iterator.size(data_type='test', no_evaluation=False)
+    n = min(max_datapoints, n) 
+    nb_batch = int(np.ceil(n / batch_size))
+    print('%i datapoints (%i batches)' % (n, nb_batch))
     
-    categories = np.array([datapoint.category for datapoint in dataset])
-
-    print("Generating the messages…")
     messages = []
+    categories = []
+    print("Generating the messages…")
+    batch_numbers = range(nb_batch)
     with torch.no_grad():
-        model.eval()
-        for datapoint in tqdm.tqdm(dataset):
-            sender_outcome = model.sender(datapoint.img.unsqueeze(0))
-            message = sender_outcome.action[0].view(-1).tolist()
-            messages.append(message)
-            #print((datapoint.category, message))
-    messages = np.array(messages)
+        for _ in batch_numbers:
+            model.start_episode(train_episode=False) # Selects agents at random if necessary
+
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # Standard evaluation batch
+            sender_outcome, receiver_outcome = model(batch)
+
+            messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
+            categories.extend([x.category for x in batch.original])
+    
+    categories = np.array(categories) # Numpyfies the categories (but not the messages, as there are list of various length)
 
     return decision_tree(messages=messages, categories=categories, alphabet_size=(1 + model.base_alphabet_size), concepts=data_iterator.concepts)
 

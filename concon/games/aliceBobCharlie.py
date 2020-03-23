@@ -192,8 +192,13 @@ class AliceBobCharlie(Game):
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
+        # We try to visit each pair of categories on average 8 times
         batch_size = 256
-        nb_batch = int(np.ceil(len(data_iterator) / batch_size)) # Doing so makes us see on average at least each data point once; this also means that each cell of the failure matrix is updated (len(data_iterator) / ((nb_categories) * (nb_categories - 1))) time, which can be quite low (~10)
+        max_datapoints = 32768 # (2^15)
+        n = (8 * (data_iterator.nb_categories**2))
+        #n = data_iterator.size(data_type='test', no_evaluation=False)
+        n = min(max_datapoints, n) 
+        nb_batch = int(np.ceil(n / batch_size))
 
         batch_numbers = range(nb_batch)
         messages = []

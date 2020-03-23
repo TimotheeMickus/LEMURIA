@@ -40,7 +40,7 @@ class Batch():
         if(stack): return torch.stack(tmp)
         else: return tmp
 
-    # TODO The name is no the most appropriate. But in fact, maybe one could do without this method
+    # TODO The name is not the most appropriate. But in fact, maybe one could do without this method
     def category(self, stack=False, f=None):
         if(f is None): f = (lambda x: x)
 
@@ -49,6 +49,7 @@ class Batch():
         if(stack): return torch.tensor(tmp)
         else: return tmp
 
+    # TODO If there is no base distractor, then the function might fail (when asking to stack an empty list)
     def base_distractors_img(self, flat=False, stack=False, f=None):
         if(f is None): f = (lambda x: x)
 
@@ -156,9 +157,14 @@ class Dataset():
     
     # None for an infinite dataset?
     @abstractmethod
-    def __len__(self):
+    def size(self, data_type='any', no_evaluation=True):
         pass
     
+    # None for an infinite dataset?
+    #def __len__(self):
+    #    pass
+    
+    # Should only be used for debugging purpose. Use `get_batch` instead
     @abstractmethod
     def get_datapoint(self, i):
         pass
@@ -176,7 +182,7 @@ class Dataset():
         print('Evaluation categories: %s' % sorted(self.evaluation_categories))
         #print('(reference category: %s)' % ref_category)
 
-        print('Size: %i' % len(self))
+        print('Size (total): %i' % self.size(data_type='any', no_evaluation=False))
 
     # If `d` is -1, all categories are used during training
     # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `d` are reserved for evaluation
@@ -386,6 +392,7 @@ class SimpleDataset(Dataset):
         
         #show_imgs([self.average_image()], 1)
     
+    # Should only be used for debugging purpose. Use `get_batch` instead
     def get_datapoint(self, i):
         return self._dataset[i]
 
@@ -422,9 +429,6 @@ class SimpleDataset(Dataset):
 
         return category_idx
 
-    def __len__(self):
-        return len(self._dataset)
-
     _average_image = None
     def average_image(self):
         if(self._average_image is None):
@@ -432,14 +436,41 @@ class SimpleDataset(Dataset):
             self._average_image = tmp.mean(axis=0)
 
         return self._average_image
+    
+    # Should be consistant with `category_to_datapoint`
+    def size(self, data_type, no_evaluation):
+        size = 0
+        
+        categories = self.training_categories
+        if(not no_evaluation): categories = categories.union(self.evaluation_categories)
 
-    def category_to_datapoint(self, category, data_type):
+        for category in categories:
+            size += self.category_size(category, data_type)
+
+        return size
+
+    #def __len__(self):
+    #    return len(self._dataset)
+
+    def category_size(self, category, data_type):
+        split = self.category_split(category)
+        
+        if(data_type == 'train'): return split[1] - split[0]
+        elif(data_type == 'test'): return split[2] - split[1]
+        elif(data_type == 'any'): return split[-1] - split[0]
+        else: assert False, ('Data type \'%s\' unknown.' % data_type)
+
+    def category_split(self, category):
         l = len(self.categories[category])
+        
         if(category in self.training_categories):
             split_point = ((4 * l) // 5)
-            split = [0, split_point, l] # 4/5th in the train portion, 1/5th in the test portion
-        else:
-            split = [0, 0, l] # Everything in the test portion
+            return [0, split_point, l] # 4/5th in the train portion, 1/5th in the test portion
+        
+        return [0, 0, l] # Everything in the test portion
+
+    def category_to_datapoint(self, category, data_type):
+        split = self.category_split(category)
 
         if(data_type == 'train'): a, b = split[0], (split[1]-1)
         elif(data_type == 'test'): a, b = split[1], (split[2]-1)
@@ -453,7 +484,7 @@ class PairDataset(Dataset):
     def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
         super().__init__(same_img, device, noise, batch_size, sampling_strategies)
 
-        self.base_dataset = SimpleDataset(same_img=None, evaluation_categories=evaluation_categories, data_set=data_set, display=display, noise=None, device=None, batch_size=None, sampling_strategies=None, binary=binary, constrain_dim=constrain_dim) # Maybe the display argument should be modified. Also note that some batch_size and sampling strategies should be useless, and probably evaluation_categories and device too
+        self.base_dataset = SimpleDataset(same_img=None, evaluation_categories=-1, data_set=data_set, display=display, noise=None, device=None, batch_size=None, sampling_strategies=None, binary=binary, constrain_dim=constrain_dim) # Maybe the display argument should be modified. Also note that some batch_size and sampling strategies should be useless, and probably evaluation_categories and device too
 
         self.concepts = (self.base_dataset.concepts * 2)
         self.nb_categories = (self.base_dataset.nb_categories * self.base_dataset.nb_categories)
@@ -473,6 +504,7 @@ class PairDataset(Dataset):
 
         #show_imgs([self.average_image()], 1)
     
+    # Should only be used for debugging purpose. Use `get_batch` instead
     def get_datapoint(self, i):
         base_len = len(self.base_dataset)
         left_i = (i % base_len)
@@ -503,9 +535,6 @@ class PairDataset(Dataset):
 
         return (left_idx + (self.base_dataset.nb_categories * right_idx))
         
-    def __len__(self):
-        return (len(self.base_dataset) * len(self.base_dataset))
-
     _average_image = None
     def average_image(self):
         if(self._average_image is None):
@@ -515,6 +544,33 @@ class PairDataset(Dataset):
 
         return self._average_image
 
+    # Should be consistant with `category_to_datapoint`
+    def size(self, data_type, no_evaluation):
+        size = 0
+        
+        categories = self.training_categories
+        if(not no_evaluation): categories = categories.union(self.evaluation_categories)
+
+        for category in categories:
+            size += self.category_size(category, data_type)
+
+        return size
+
+    #def __len__(self):
+    #    return len(self._dataset)
+
+    def category_size(self, category, data_type):
+        if(category in self.evaluation_categories):
+            assert data_type != 'train'
+            base_data_type = 'any'
+        else:
+            base_data_type = data_type
+        
+        left_tuple, right_tuple = self.divide_category(category)
+        left_size, right_size = self.base_dataset.category_size(left_tuple, base_data_type), self.base_dataset.category_size(right_tuple, 'any') 
+
+        return (left_size * right_size)
+
     def combine_datapoint(self, datapoint1, datapoint2):
         idx = None # The following would work if the indices of the images are exactly the number between 0 and the size of the dataset: (left_datapoint.idx + (len(self.base_dataset) * right_datapoint_idx))
         category = (datapoint1.category + datapoint2.category)
@@ -522,10 +578,21 @@ class PairDataset(Dataset):
         #show_imgs([img], 1)
         
         return DataPoint(idx, category, img)
-    
+  
+    # For training categories, training (resp. testing) images are composed of a training (resp. testing) images and an 'any' image
+    # For evaluation categories, there is no training image and testing images are composed of two 'any' images
+    # As a consequence, there is no overlap of the combinations even though, for instance, an image from an evaluation category may be composed of two sub-images appearing independently in the training portions of two training categories
+    # I'm doing this because otherwise the dataset is harder to manage (think about 'any' containing more datapoints than the sum of the 'train' and the 'test' portion).
+    # This might not seem optimal at first, but (i) combined images will still behave as expected and (ii) the combined dataset will probably be gigantic so overfitting might be less of a concern.
     def category_to_datapoint(self, category_tuple, data_type):
+        if(category_tuple in self.evaluation_categories):
+            assert data_type != 'train'
+            base_data_type = 'any'
+        else:
+            base_data_type = data_type
+
         left_tuple, right_tuple = self.divide_category(category_tuple)
-        left_datapoint, right_datapoint = self.base_dataset.category_to_datapoint(left_tuple, data_type), self.base_dataset.category_to_datapoint(right_tuple, data_type)
+        left_datapoint, right_datapoint = self.base_dataset.category_to_datapoint(left_tuple, base_data_type), self.base_dataset.category_to_datapoint(right_tuple, 'any')
 
         return self.combine_datapoint(left_datapoint, right_datapoint)
 

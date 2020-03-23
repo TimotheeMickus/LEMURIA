@@ -56,11 +56,14 @@ def train(args):
 
                 outliers = []
                 with torch.no_grad():
-                    n = len(data_loader)
-                    if(n is None): n = 10000
-
-                    batch_size = 128
-                    for batch_i in range(n // batch_size):
+                    batch_size = args.batch_size
+                    max_datapoints = 32768 # (2^15)
+                    n = data_loader.size(data_type='any', no_evaluation=False) # We would like to see all datapoints
+                    if((n is None) or (n > max_datapoints)):
+                        print('The dataset is too big, so we are only going to be looking at %i datapoints.' % max_datapoints)
+                        n = max_datapoints
+                    nb_batch = int(np.ceil(n / batch_size))
+                    for batch_i in range(nb_batch):
                         datapoints = [data_loader.get_datapoint(i) for i in range((batch_size * batch_i), min((batch_size * (batch_i + 1)), n))]
                         batch = Batch(size=batch_size, original=[], target=[x.toInput(keep_category=True, device=args.device) for x in datapoints], base_distractors=[])
                         hits, losses = pretrained_model.forward(batch)
