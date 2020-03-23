@@ -66,7 +66,7 @@ class Game(metaclass=ABCMeta):
         for agent in self.agents:  # Sets the agents in evaluation mode
             agent.eval()
 
-    def start_episode(self):
+    def start_episode(self, train_episode=True):
         """
         Called before starting a new round of the game. Override for setup behavior.
         """
@@ -207,9 +207,9 @@ class Game(metaclass=ABCMeta):
             with pbar:
                 for step_i in range(steps_per_epoch):
                     batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
-                    
+
                     hits, loss = model.train(batch)
-                    
+
                     for x in hits: epoch_hits += x.sum().item()
                     epoch_items += batch.size
                     total_items += batch.size
