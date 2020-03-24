@@ -293,7 +293,7 @@ class AliceBob(Game):
                 np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
                 np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
-        # Computes the accuracy when the images are selected from all categorsie
+        # Computes the accuracy when the images are selected from all categories
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
         if(event_writer is not None): event_writer.add_scalar('eval/accuracy', accuracy_all, epoch, period=1)
         if(display != 'minimal'): print('Accuracy: %s' % accuracy_all)
