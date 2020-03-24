@@ -432,9 +432,23 @@ class AliceBob(Game):
             if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_depth' % name), depth, epoch, period=1)
             if(display != 'minimal'): print('%s tree depth: %s' % (name, depth))
 
-        tree_depth_ratio = full_tree.get_depth() / sum([tree.get_depth() for (_, (tree, _)) in conceptual_trees])
-        if(event_writer is not None): event_writer.add_scalar('decision_tree/depth_ratio', tree_depth_ratio, epoch, period=1)
-        if(display != 'minimal'): print('tree depth ratio: %s' % (tree_depth_ratio))
+        prod_conceptual_accuracy = np.array([accuracy for (_, (_, accuracy)) in conceptual_trees]).prod()
+        if(prod_conceptual_accuracy > 0.0):
+            tree_accuracy_ratio = (full_tree_accuracy / prod_conceptual_accuracy)
+            if(event_writer is not None): event_writer.add_scalar('decision_tree/accuracy_ratio', tree_accuracy_ratio, epoch, period=1)
+            if(display != 'minimal'): print('tree accuracy ratio: %s' % (tree_accuracy_ratio))
+
+        prod_conceptual_n_leaves = np.array([tree.get_n_leaves() for (_, (tree, _)) in conceptual_trees]).prod()
+        if(prod_conceptual_n_leaves > 0):
+            tree_n_leaves_ratio = (full_tree.get_n_leaves() / prod_conceptual_n_leaves)
+            if(event_writer is not None): event_writer.add_scalar('decision_tree/n_leaves_ratio', tree_n_leaves_ratio, epoch, period=1)
+            if(display != 'minimal'): print('tree n_leaves ratio: %s' % (tree_n_leaves_ratio))
+
+        sum_conceptual_depth = sum([tree.get_depth() for (_, (tree, _)) in conceptual_trees])
+        if(sum_conceptual_depth > 0):
+            tree_depth_ratio = (full_tree.get_depth() / sum_conceptual_depth)
+            if(event_writer is not None): event_writer.add_scalar('decision_tree/depth_ratio', tree_depth_ratio, epoch, period=1)
+            if(display != 'minimal'): print('tree depth ratio: %s' % (tree_depth_ratio))
 
     @property
     def agents(self):
