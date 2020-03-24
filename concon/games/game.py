@@ -70,7 +70,8 @@ class Game(metaclass=ABCMeta):
         """
         Called before starting a new round of the game. Override for setup behavior.
         """
-        self.train() # Sets the current agents in training mode
+        if train_episode: self.train() # Sets the current agents in training mode
+        else: self.eval()
 
     def start_epoch(self, data_iterator, summary_writer):
         """

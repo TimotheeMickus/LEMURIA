@@ -84,7 +84,8 @@ class AliceBobPopulation(AliceBob):
     def start_episode(self, train_episode=True):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
-        if train_episode: self.train()
+        
+        super(self).start_episode(train_episode=train_episode)
 
     def start_epoch(self, data_iterator, summary_writer):
         if self._reaper_step is not None:
