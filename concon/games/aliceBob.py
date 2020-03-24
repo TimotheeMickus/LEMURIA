@@ -432,6 +432,10 @@ class AliceBob(Game):
             if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_depth' % name), depth, epoch, period=1)
             if(display != 'minimal'): print('%s tree depth: %s' % (name, depth))
 
+        tree_depth_ratio = full_tree.get_depth() / sum([tree.get_depth() for (_, (tree, _)) in conceptual_trees])
+        if(event_writer is not None): event_writer.add_scalar('decision_tree/depth_ratio', tree_depth_ratio, epoch, period=1)
+        if(display != 'minimal'): print('tree depth ratio: %s' % (tree_depth_ratio))
+
     @property
     def agents(self):
         return self.sender, self.receiver
