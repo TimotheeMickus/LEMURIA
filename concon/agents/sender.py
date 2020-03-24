@@ -31,7 +31,6 @@ class Sender(Agent):
             action=(outputs["message"], outputs["message_len"]))
         return outcome
 
-
     @classmethod
     def from_args(cls, args, image_encoder=None, symbol_embeddings=None):
         if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)

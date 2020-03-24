@@ -228,9 +228,13 @@ class AliceBob(Game):
         (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores)
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
-        loss = -(rewards * log_prob).mean()
+        loss = torch.tensor(0.0).to(log_prob.device)
+        
+        reinforce_loss = -(rewards * log_prob).mean() # REINFORCE loss
+        loss += reinforce_loss
 
-        loss = loss - (self.beta_sender * sender_outcome.entropy.mean()) # Entropy penalty
+        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Entropy loss; could be normalised (divided) by (base_alphabet_size + 1)
+        loss += entropy_loss
 
         return (loss, successes, rewards)
 
@@ -247,11 +251,15 @@ class AliceBob(Game):
 
         rewards = successes
 
-        loss = -(rewards * log_prob).mean()
+        loss = torch.tensor(0.0).to(log_prob.device)
+        
+        reinforce_loss = -(rewards * log_prob).mean()
+        loss += reinforce_loss
 
-        loss = loss - (self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
-        if return_entropy:
-            return loss, receiver_pointing['dist'].entropy().mean()
+        entropy_loss = -(self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
+        loss += entropy_loss
+        
+        if return_entropy: return (loss, receiver_pointing['dist'].entropy().mean())
         return loss
 
     def evaluate(self, data_iterator, epoch, event_writer=None, display='tqdm', debug=False, log_lang_progress=True):
