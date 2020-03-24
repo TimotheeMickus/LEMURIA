@@ -228,9 +228,13 @@ class AliceBob(Game):
         (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores)
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
-        loss = -(rewards * log_prob).mean()
+        loss = 0.0
+        
+        reinforce_loss = -(rewards * log_prob).mean() # REINFORCE loss
+        loss += reinforce_loss
 
-        loss = loss - (self.beta_sender * sender_outcome.entropy.mean()) # Entropy penalty
+        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Entropy loss; could be normalised (divided) by (base_alphabet_size + 1)
+        loss += entropy_loss
 
         return (loss, successes, rewards)
 

@@ -155,13 +155,14 @@ class MessageDecoder(nn.Module):
         # average entropy over timesteps, hence ignore padding
         entropy = torch.stack(entropy, dim=1)
         entropy = entropy.sum(dim=1, keepdim=True)
-        entropy = entropy / message_len.float()
+        entropy = entropy / message_len.float() # The average symbol distribution entropy over the message
 
         outputs = {
-            "entropy":entropy,
-            "log_probs":log_probs,
-            "message":message,
-            "message_len":message_len}
+            "entropy": entropy,
+            "log_probs": log_probs,
+            "message": message,
+            "message_len": message_len}
+
         return outputs
 
     @classmethod
