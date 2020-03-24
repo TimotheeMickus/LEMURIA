@@ -17,6 +17,7 @@ class AliceBobPopulation(AliceBob):
 
         size = args.population
 
+        # In both cases, there are `size` senders and `size` receivers, but if `shared` is True, senders are paired with receivers so as to share their CNN and symbol embeddings
         if(args.shared):
             self._agents = [SenderReceiver.from_args(args) for _ in range(size)]
 
@@ -55,7 +56,8 @@ class AliceBobPopulation(AliceBob):
             self._pretrain_shared = args.shared
         else:
             self._pretrain_args = {"pretrain_CNN_mode":args.pretrain_CNNs,}
-        self.start_episode()
+        
+        self.start_episode() # TODO Really useful?
 
         parameters = [p for a in self._agents for p in a.parameters()]
         self._optim = build_optimizer(nn.ParameterList(parameters), args.learning_rate)
@@ -118,7 +120,6 @@ class AliceBobPopulation(AliceBob):
             'optims':[optim for optim in self.optims],
         }
         torch.save(state, path)
-
 
     @classmethod
     def load(cls, path, args, _old_model=False):
