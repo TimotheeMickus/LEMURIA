@@ -10,7 +10,7 @@ import random
 import time
 
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, compute_entropy, build_optimizer, compute_entropy_stats
+from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, build_optimizer, compute_entropy_stats
 from ..utils import misc
 
 from ..eval import compute_correlation
@@ -385,7 +385,7 @@ class AliceBob(Game):
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            entropy_stats = compute_entropy_stats(sample_messages, sample_categories)
+            entropy_stats = compute_entropy_stats(sample_messages, sample_categories, base=2)
             if(display != 'minimal'):
                 print('Entropy category/msgs: min: %f, mean: %f, median: %f, max: %f, var: %f' % (entropy_stats))
 

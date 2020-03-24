@@ -100,9 +100,9 @@ def main(args):
     uniform = torch.ones_like(counts)
 
     if args.load_other_model is not None:
-        print('entropy:', compute_entropy(counts), 'compared model:', compute_entropy(counts_other_model), 'ref uniform:', compute_entropy(uniform))
+        print('entropy:', compute_entropy(counts, base=2), 'compared model:', compute_entropy(counts_other_model, base=2), 'ref uniform:', compute_entropy(uniform, base=2))
     else:
-        print('entropy:', compute_entropy(counts), 'ref uniform:', compute_entropy(uniform))
+        print('entropy:', compute_entropy(counts, base=2), 'ref uniform:', compute_entropy(uniform, base=2))
     '''
 
     # Decision tree stuff

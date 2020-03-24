@@ -269,4 +269,5 @@ def main(args):
         print(args.message_dump_file, 'levenshtein', *m_l, 'levenshtein normalized', *m_ln, 'jaccard', *m_j)
 
     # Decision tree stuff
+    print('\nDecision tree stuff')
     decision_tree(messages=messages, categories=categories, alphabet_size=alphabet_size, concepts=concepts)

@@ -138,7 +138,7 @@ class AutoLogger(object):
 
     def __exit__(self, type, value, traceback):
         if self.log_entropy and self.summary_writer is not None:
-            self.summary_writer.writer.add_scalar('llp/language_entropy', compute_entropy(self._state['symbol_counts']), self._state['number_ex_seen'])
+            self.summary_writer.writer.add_scalar('llp/language_entropy', compute_entropy(self._state['symbol_counts'], base=2), self._state['number_ex_seen'])
 
         self._pbar.__exit__(type, value, traceback)
         self._state = {}

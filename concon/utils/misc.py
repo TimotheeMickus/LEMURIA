@@ -9,7 +9,6 @@ import torchvision
 
 import collections
 
-
 def h_compress(img):
     shape = img.shape
     width = shape[-1]
@@ -64,7 +63,6 @@ class Vocabulary:
     def __getitem__(self, idx):
         return self.entries[idx]
 
-
 def get_default_fn(base_fn, args):
     def _wrap():
         return base_fn(args)
@@ -86,16 +84,24 @@ def add_normal_noise(t, std_dev, clamp_values=None):
 
     return tmp
 
-def compute_entropy(counts):
-    return Categorical(counts / counts.sum()).entropy().item()
+# `counts` must be a Torch tensor
+# If `base` is None, the base is e
+# The output is a Python float
+def compute_entropy(counts, base=None):
+    entropy = Categorical(counts / counts.sum()).entropy().item()
+    if(base is not None): entropy /= np.log(base)
 
+    return entropy
 
-def compute_entropy_stats(sample_messages, sample_categories):
+def compute_entropy_stats(sample_messages, sample_categories, base=None):
+    # We starts by counting the occurences of each messages for each category
     entropy_dict = collections.defaultdict(collections.Counter)
-    for msg, cat in zip(sample_messages, sample_categories):
-        entropy_dict[cat][msg] += 1.0
-    entropy_dict = {cat:compute_entropy(torch.tensor(list(entropy_dict[cat].values()))) for cat in entropy_dict}
-    entropy_cats = np.array(list(entropy_dict.values()))
+    for msg, cat in zip(sample_messages, sample_categories): entropy_dict[cat][msg] += 1.0
+
+    # We then computes the entropy of each category's distribution 
+    entropy_cats = [compute_entropy(torch.tensor(list(messages_counter.values())), base=base) for messages_counter in entropy_dict.values()]
+    entropy_cats = np.array(entropy_cats)
+    
     return entropy_cats.min(), entropy_cats.mean(), np.median(entropy_cats), entropy_cats.max(), entropy_cats.var()
 
 def max_tensor(t, dim, abs_val=True, unsqueeze=True):

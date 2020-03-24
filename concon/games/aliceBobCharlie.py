@@ -308,7 +308,7 @@ class AliceBobCharlie(Game):
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            entropy_stats = compute_entropy_stats(sample_messages, sample_categories)
+            entropy_stats = compute_entropy_stats(sample_messages, sample_categories, base=2)
             if(display != 'minimal'):
                 print('Entropy: min: %f, mean: %f, median: %f, max: %f, var: %f' % (entropy_stats))
 

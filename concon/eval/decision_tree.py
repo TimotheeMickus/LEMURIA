@@ -114,7 +114,7 @@ def analyse(messages, categories, alphabet_size, concepts, n, feature_vectors=No
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
 def decision_tree(messages, categories, alphabet_size, concepts):
     # As features, we will use the presence of n-grams
-    n = 3
+    n = 1
     print('We will consider %i-grams' % n)
 
     tmp = analyse(messages, categories, alphabet_size, concepts, n)
@@ -133,11 +133,12 @@ def decision_tree(messages, categories, alphabet_size, concepts):
     print('Decision tree accuracy: %s' % full_tree_accuracy)
     print('Number of leaves: %i' % n_leaves)
     print('Depth: %i' % depth)
-    #print(sklearn.tree.export_text(full_tree, feature_names=ngrams, show_weights=True))
-
-    #plt.figure(figsize=(12, 12))
-    #sklearn.tree.plot_tree(full_tree, filled=True)
-    #plt.show()
+    if(True):
+        print(sklearn.tree.export_text(full_tree, feature_names=ngrams, show_weights=True))
+        
+        plt.figure(figsize=(12, 12))
+        sklearn.tree.plot_tree(full_tree, filled=True)
+        plt.show()
 
     # Conceptual decision-tree
     for dim, (tree, accuracy) in conceptual_trees:
