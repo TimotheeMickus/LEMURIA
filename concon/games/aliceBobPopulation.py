@@ -56,7 +56,7 @@ class AliceBobPopulation(AliceBob):
             self._pretrain_shared = args.shared
         else:
             self._pretrain_args = {"pretrain_CNN_mode":args.pretrain_CNNs,}
-        
+
         self.start_episode() # TODO Really useful?
 
         parameters = [p for a in self._agents for p in a.parameters()]
@@ -86,8 +86,8 @@ class AliceBobPopulation(AliceBob):
     def start_episode(self, train_episode=True):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
-        
-        super(self).start_episode(train_episode=train_episode)
+
+        super().start_episode(train_episode=train_episode)
 
     def start_epoch(self, data_iterator, summary_writer):
         if self._reaper_step is not None:
