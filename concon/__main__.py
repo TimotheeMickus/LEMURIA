@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from datetime import datetime
+import time
 from itertools import chain
 import os
 import sys
@@ -89,8 +90,19 @@ def train(args):
         # TODO There is an asymmetry between pretraining (which handles the epochs itself) and training (which does not)
         print(("[%s] training start…" % datetime.now()), flush=True)
         for epoch in range(args.epochs):
+            timepoint_0 = time.time()
+            
             model.train_epoch(data_loader, epoch=epoch, autologger=autologger, steps_per_epoch=args.steps_per_epoch)
+            
+            timepoint_1 = time.time()
+            print('Training took %f s.' % (timepoint_1 - timepoint_0))
+            timepoint_0 = timepoint_1
+            
             model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, display=args.display, debug=args.debug)
+
+            timepoint_1 = time.time()
+            print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
+            timepoint_0 = timepoint_1
 
             if((args.save_every > 0) and (((epoch + 1) % args.save_every) == 0)):
                 model.save(os.path.join(run_models_dir, ("model_e%i.pt" % epoch)))
