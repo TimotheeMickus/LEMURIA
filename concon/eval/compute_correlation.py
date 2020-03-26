@@ -147,6 +147,7 @@ def levenshtein(str1, str2, normalise=False):
     return tmp
 
 @ft.lru_cache(maxsize=32768)
+# `str1` and `str2` must be two strings of the same length
 def hamming(str1, str2):
     return Levenshtein.hamming(str1, str2)
 
@@ -198,10 +199,10 @@ def compute_correlation(messages, categories, message_distance=levenshtein, mean
         categories = [''.join(map(chr, ctg)) for ctg in categories]
 
     # Compute pairwise distances
-    messages = list(it.starmap(message_distance, it.combinations(messages, 2)))
-    categories = list(it.starmap(meaning_distance, it.combinations(categories, 2)))
+    dm = list(it.starmap(message_distance, it.combinations(messages, 2)))
+    dc = list(it.starmap(meaning_distance, it.combinations(categories, 2)))
 
-    return spearman(categories, messages)
+    return spearman(dc, dm)
 
 def compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs):
     """
@@ -215,6 +216,7 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
         remapped_categories = list(map(mapping.__getitem__, map(tuple, categories)))
         results.append(compute_correlation(messages, remapped_categories, **kwargs)[0])
     results = np.array(results)
+
     return results.mean(), results.std()
 
 def score(cor, μ, σ):
@@ -227,13 +229,14 @@ def analyze_correlation(messages, categories, scrambling_pool_size=1000, **kwarg
     return cor, μ, σ, impr
 
 def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True):
+    assert len(messages) == len(categories)
+    
     if map_msg_to_str:
-        messages = [''.join(map(chr, msg)) for msg in messages]
+        messages = [''.join(map(chr, msg)) for msg in messages] # Each integer is mapped to the corresponding unicode character
 
     if map_ctg_to_str:
-        categories = [''.join(map(chr, ctg)) for ctg in categories]
+        categories = [''.join(map(chr, ctg)) for ctg in categories] # Each integer is mapped to the corresponding unicode character
 
-    assert len(messages) == len(categories)
     tM = np.array(list(it.starmap(message_distance, it.combinations(messages, 2))))
     sM = np.array(list(it.starmap(meaning_distance, it.combinations(categories, 2))))
     
