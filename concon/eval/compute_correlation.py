@@ -157,17 +157,17 @@ def levenshtein_normalised(str1, str2):
 
 @ft.lru_cache(maxsize=32768)
 def jaccard(seq1, seq2):
-    union = len(seq1)
-    intersection = 0
-    d = collections.defaultdict(int)
+    union = len(seq1) # Will contain the total number of symbols (with repetition) in both sequences
+    intersection = 0 # Will contain the nubme of symbols (with repetition) in common in the two sequences
+    d = collections.defaultdict(int) # This dictionary is used to track which symbols in seq1 are not exhausted by seq2
     for i in seq1:
         d[i] += 1
     for i in seq2:
         x = d[i]
-        if(x > 0):
+        if(x > 0): # i·s from seq1 not exhausted yet
             d[i] -= 1
             intersection += 1
-        else:
+        else: # i·s from seq1 already exhausted
             union += 1
     return 1 - (intersection / union)
 
@@ -219,13 +219,15 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
 
     return results.mean(), results.std()
 
-def score(cor, μ, σ):
-    return (cor - μ) / σ
+# Normalise value `x` using a mean and standard deviation
+def score(x, mean, stdev):
+    return ((x - mean) / stdev)
 
 def analyze_correlation(messages, categories, scrambling_pool_size=1000, **kwargs):
     cor = compute_correlation(messages, categories, **kwargs)[0]
     μ, σ = compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs)
     impr = score(cor, μ, σ)
+
     return cor, μ, σ, impr
 
 def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True):
