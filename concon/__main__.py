@@ -91,13 +91,13 @@ def train(args):
         print(("[%s] training start…" % datetime.now()), flush=True)
         for epoch in range(args.epochs):
             timepoint_0 = time.time()
-            
+
             model.train_epoch(data_loader, epoch=epoch, autologger=autologger, steps_per_epoch=args.steps_per_epoch)
-            
+
             timepoint_1 = time.time()
             print('Training took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
-            
+
             model.evaluate(data_loader, epoch=epoch, event_writer=autologger.summary_writer, log_lang_progress=args.log_lang_progress, display=args.display, debug=args.debug)
 
             timepoint_1 = time.time()
@@ -117,6 +117,9 @@ if(__name__ == "__main__"):
         main(args)
     elif args.compute_correlation:
         from .eval.compute_correlation import main
+        main(args)
+    elif args.threeway_correlation:
+        from .eval.three_way_correlation import main
         main(args)
     else:
         train(args)
