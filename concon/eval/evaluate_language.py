@@ -106,4 +106,4 @@ def main(args):
     '''
 
     # Decision tree stuff
-    decision_tree(messages=messages, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_iterator.concepts)
+    decision_tree(messages=messages, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_iterator.concepts, gram_size=args.analysis_gram_size, disj_size=args.analysis_disj_size)

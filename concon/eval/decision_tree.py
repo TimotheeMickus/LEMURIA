@@ -41,25 +41,125 @@ def decision_tree_standalone(model, data_iterator):
 
     return decision_tree(messages=messages, categories=categories, alphabet_size=(1 + model.base_alphabet_size), concepts=data_iterator.concepts)
 
+# For a sequence of symbols `l`, yields all tuples of strictly increasing tuples of size between 1 and `max_disj`, with values between 0 and `max_val`, and containing the corresponding element in `l` (i.e., the ith tuple will contain l[i])
+def apply_disj(l, max_disj, max_val):
+    # Increment a list `l` such that it stays strictly increasing, without modifying a pivot
+    # `pos` is the position of the pivot
+    # `max_val` is the maximum allowed value
+    # Should return None on invalid input
+    def increment(target, pos):
+        k = len(target)
+        
+        i = 0 # The position we are working on
+        
+        incr_loop = ((target[-1] <= max_val) and ((pos == 0) or target[pos-1] < target[pos]))
+        while(incr_loop):
+            if(i == pos):
+                i += 1
+                continue
+            
+            if(i == k): # The end
+                return None
+            
+            target[i] += 1
+            
+            max_allowed = (max_val+1) if(i == (k-1)) else target[i+1]
+            if(target[i] >= max_allowed):
+                min_val = 0 if(i == 0) else (target[i-1]+1)
+                target[i] = min_val
+                i += 1
+            else:
+                return target
+        return None
+    
+    # Initialisation
+    tmp_output = [(s, ) for s in l]
+    infos = [0 for _ in l] # Position of the original symbol in the inner tuple
+    
+    outer_loop = True
+    while(outer_loop):
+        yield tuple(tmp_output)
+        
+        # Incrementation
+        i = 0 # The index of the inner tuple we are working on
+        pos = infos[i] # Position of the original symbol in the inner tuple
+        target = list(tmp_output[i]) # Inner tuple
+        k = len(target) # Size of the inner tuple
+        
+        incr_loop = True
+        while(incr_loop):
+            #print(i, target, pos, k)
+            tmp = increment(target, pos)
+            #print('tmp: %s ' % tmp)
+            if(tmp is not None):
+                tmp_output[i] = tuple(tmp)
+                incr_loop = False
+            else: # We have to update one of the parameter (pos, k), or move to next inner tuple (i)
+                pos += 1 # We try to increase the position of the original symbol
+                if(pos < k):
+                    x = l[i]
+                    target = list(range(pos)) + [x] + list(range((x+1), (x+k-pos))) # Should be of same size (k)
+                    #print('try target: %s' %target)
+                    if((target[pos-1] < x) and (target[-1] <= max_val)):
+                        tmp_output[i] = tuple(target)
+                        infos[i] = pos
+                        incr_loop = False
+                        # Otherwise, in the next loop, `increment` will output None and we will try to increase `pos` again
+                else: # We have to update one of the parameter (k), or move to next inner tuple (i)
+                    pos = 0
+                    
+                    k += 1 # We try to increase the size of the disjunction
+                    if(k <= max_disj):
+                        x = l[i]
+                        target = [x] + list(range((x+1), (x+k))) # Should be of size k (the incremented value)
+                        #print('new target: %s' % target)
+                        if(target[-1] <= max_val):
+                            tmp_output[i] = tuple(target)
+                            infos[i] = pos
+                            incr_loop = False
+                            # Otherwise, in the next loop, `increment` will output None and we will try to increase `pos`
+                    else:
+                        k = 1 # We reinitialise the inner tuple to (k, )
+                        tmp_output[i] = (l[i], )
+                        infos[i] = 0
+                        
+                        i += 1 # We have to move to the next inner tuple (i)
+                        if(i < len(l)):
+                            pos = infos[i]
+                            target = list(tmp_output[i])
+                            k = len(target)
+                        else: # It's over
+                            incr_loop = False
+                            outer_loop = False
+
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
-# `n` is the k max of k-grams to consider
-def analyse(messages, categories, alphabet_size, concepts, n, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
+# `gram_size` is the k max of k-grams to consider
+def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=1, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
     result = {}
 
+    # Returns all the k-grams for 0 < k <= `max_length` in the message with an out-of-message symbol at the beginning and the end
     def get_ngrams(message, max_length):
-        assert max_length > 0
+        assert (max_length > 0)
         for s in message: yield (s,) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
 
         message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end
-        for l in range(2, (min(max_length, len(message_tmp)) + 1)): # Length of the n-gram
-            for i in range(len(message_tmp) - l + 1):
-                yield tuple(message_tmp[i:(i + l)])
+        for k in range(2, (min(max_length, len(message_tmp)) + 1)): # Length of the n-gram
+            for i in range(len(message_tmp) - k + 1):
+                yield tuple(message_tmp[i:(i + k)])
+
+    def get_disj_ngrams(message, max_length):
+        if(disj_size == 1):
+            for ngram in get_ngrams(message, max_length): yield ngram
+        else:
+            for ngram in get_ngrams(message, max_length):
+                for disj in apply_disj(ngram, disj_size, (alphabet_size + 1)): yield disj
 
     if(feature_vectors is None):
         # Determines the set of n-grams
         ngrams_idx = defaultdict(itertools.count().__next__) # From ngrams (tuples) to indices
         for message in messages:
-            for ngram in get_ngrams(message, n): _ = ngrams_idx[ngram]
+            for ngram in get_disj_ngrams(message, gram_size):
+                _ = ngrams_idx[ngram]
         ngrams = sorted(list(ngrams_idx.keys()), key=len) # From indices to ngrams (tuple); we will stick to a Python list as tuples are a bit tricky to put into Numpy arrays
         ngrams_idx = dict([(ngram, i) for (i, ngram) in enumerate(ngrams)])
 
@@ -70,7 +170,7 @@ def analyse(messages, categories, alphabet_size, concepts, n, feature_vectors=No
         feature_vectors = []
         for message in messages:
             v = np.zeros(len(ngrams), dtype=np.int)
-            for ngram in get_ngrams(message, n):
+            for ngram in get_disj_ngrams(message, gram_size):
                 idx = ngrams_idx[ngram]
                 v[idx] += 1
             feature_vectors.append(v)
@@ -112,12 +212,18 @@ def analyse(messages, categories, alphabet_size, concepts, n, feature_vectors=No
     return result
 
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
-def decision_tree(messages, categories, alphabet_size, concepts):
-    # As features, we will use the presence of n-grams
-    n = 1
-    print('We will consider %i-grams' % n)
+# `gram_size` corresponds to the size of the n-grams to consider
+# `disj_size` corresponds to 
+def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, disj_size=1):
+    print('First, some messages and categories:')
+    for i in range(min(30, len(messages))):
+        print('message', messages[i], '; category', categories[i])
+    print()
 
-    tmp = analyse(messages, categories, alphabet_size, concepts, n)
+    # As features, we will use the presence of n-grams
+    print('We will consider %i-grams' % gram_size)
+
+    tmp = analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=disj_size)
     ngrams = tmp['ngrams']
     ngrams_idx = tmp['ngrams_idx']
     feature_vectors = tmp['feature_vectors']
@@ -325,7 +431,7 @@ def decision_tree(messages, categories, alphabet_size, concepts):
                         ok = False
                         break
 
-        if(ok): print('%s => %s' % (lhs, rhs))
+        if(ok): print('%s => %s' % (lhs, sorted(list(rhs))))
 
     print("\nBest decision trees")
     results_decision_tree.sort(reverse=True, key=(lambda e: e[3]))

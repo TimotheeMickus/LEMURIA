@@ -416,8 +416,8 @@ class AliceBob(Game):
 
         # Decision tree stuff
         alphabet_size = (self.base_alphabet_size + 1)
-        n = 1 # Max size of n-grams to consider
-        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_iterator.concepts, n)
+        gram_size = 1 # Max size of n-grams to consider
+        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_iterator.concepts, gram_size)
         (full_tree, full_tree_accuracy) = tmp['full_tree']
         conceptual_trees = tmp['conceptual_trees']
 
