@@ -132,6 +132,69 @@ def apply_disj(l, max_disj, max_val):
                             incr_loop = False
                             outer_loop = False
 
+
+# Used to represent disjunctions of n-grams
+class DisjTerm():
+    def __init__(self, seq_terms):
+        assert (len(seq_terms) > 1) # Everywhere else I am assuming this
+        self.seq_terms = seq_terms # A set of SeqTerm·s
+
+    # A DisjTerm entails another DisjTerm or SeqTerm if all of the disjuncts entails the other term
+    def entails(self, other_term):
+        for seq_term in self.seq_terms:
+            if(not other_term.is_entailed(seq_term)): return False
+        return True
+    
+    # A DisjTerm is entailed by a SeqTerm if each SeqTerm of the former is entailed by the latter
+    def is_entailed(self, other_seq_term):
+        for seq_term in self.seq_terms:
+            if(not seq_term.is_entailed(other_seq_term)): return False
+        return True
+
+    def __str__(self):
+        return ('(%s)' % '|'.join([str(seq_term) for seq_term in self.seq_terms]))
+
+    def can_equal(self, other):
+        return isinstance(other, DisjTerm)
+
+    def __eq__(self, other):
+        return (self.can_equal(other) and other.can_equal(self) and (self.seq_terms == other.seq_terms))
+
+    def __hash__(self): # 1 plus the sum of the hash of each SeqTerm
+        tmp_hash = 1
+        for seq_term in self.seq_terms: tmp_hash += hash(seq_term)
+        return tmp_hash
+
+# Used to represent n-grams
+class SeqTerm():
+    def __init__(self, t):
+        self.t = t # A tuple
+
+    def entails(self, other_term):
+        return other_term.is_entailed(self)
+
+    # A SeqTerm is entailed by another one if the former is a subsequence of the latter
+    def is_entailed(self, other_seq_term):
+        for i in range(1 + len(other_seq_term) - len(self)):
+            other_part = other_seq_term.t[i:(i + len(self))]
+            if(other_part == self.t): return True
+        return False
+
+    def __len__(self):
+        return len(self.t)
+
+    def __str__(self):
+        return str(self.t)
+
+    def can_equal(self, other):
+        return isinstance(other, SeqTerm)
+
+    def __eq__(self, other):
+        return (self.can_equal(other) and other.can_equal(self) and (self.t == other.t))
+
+    def __hash__(self):
+        return hash(self.t)
+
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
 # `gram_size` is the k max of k-grams to consider
 def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=1, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
@@ -140,13 +203,14 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
     # Returns all the k-grams for 0 < k <= `max_length` in the message with an out-of-message symbol at the beginning and the end
     def get_ngrams(message, max_length):
         assert (max_length > 0)
-        for s in message: yield (s,) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
+        for s in message: yield SeqTerm((s,)) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
 
         message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end
         for k in range(2, (min(max_length, len(message_tmp)) + 1)): # Length of the n-gram
             for i in range(len(message_tmp) - k + 1):
-                yield tuple(message_tmp[i:(i + k)])
+                yield SeqTerm(tuple(message_tmp[i:(i + k)]))
 
+    # Can be used to have disjunctions directly in the n-grams, but we will not do that
     def get_disj_ngrams(message, max_length):
         if(disj_size == 1):
             for ngram in get_ngrams(message, max_length): yield ngram
@@ -158,24 +222,45 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
         # Determines the set of n-grams
         ngrams_idx = defaultdict(itertools.count().__next__) # From ngrams (tuples) to indices
         for message in messages:
-            for ngram in get_disj_ngrams(message, gram_size):
+            for ngram in get_ngrams(message, gram_size):
                 _ = ngrams_idx[ngram]
-        ngrams = sorted(list(ngrams_idx.keys()), key=len) # From indices to ngrams (tuple); we will stick to a Python list as tuples are a bit tricky to put into Numpy arrays
-        ngrams_idx = dict([(ngram, i) for (i, ngram) in enumerate(ngrams)])
+        ngrams = np.array(sorted(ngrams_idx.keys(), key=len)) # From indices to ngrams (SeqTerm)
+        ngrams_idx = {ngram: i for (i, ngram) in enumerate(ngrams)}
 
-        result['ngrams'] = ngrams
-        result['ngrams_idx'] = ngrams_idx
-
-        # Generates the feature vectors
-        feature_vectors = []
-        for message in messages:
-            v = np.zeros(len(ngrams), dtype=np.int)
-            for ngram in get_disj_ngrams(message, gram_size):
+        # Generates the (n-gram) feature vectors
+        ngram_vectors = np.zeros((len(messages), len(ngrams)), dtype=np.int)
+        for i, message in enumerate(messages):
+            for ngram in get_ngrams(message, gram_size):
                 idx = ngrams_idx[ngram]
-                v[idx] += 1
-            feature_vectors.append(v)
-        
-        feature_vectors = np.array(feature_vectors) # Integer tensor
+                ngram_vectors[i, idx] += 1
+
+        if(disj_size == 1):
+            features = ngrams
+            features_idx = ngrams_idx
+
+            feature_vectors = ngram_vectors
+        else: # Now, we add the disjunctions of ngrams
+            # Set of features
+            disjunctions = []
+            for i in range(2, (disj_size + 1)):
+                for disjuncts in itertools.combinations(ngrams, i):
+                    disjunction = DisjTerm(set(disjuncts))
+                    disjunctions.append(disjunction)
+            features = np.empty((len(ngrams) + len(disjunctions)), dtype=object)
+            features[:len(ngrams)] = ngrams
+            features[len(ngrams):] = disjunctions
+            features_idx = {ngram: i for (i, ngram) in enumerate(features)}
+
+            # Feature vectors
+            feature_vectors = np.zeros((len(messages), len(features)), dtype=np.int)
+            feature_vectors[:, :len(ngrams)] = ngram_vectors
+            for i in range(len(ngrams), len(features)): # For all disjunctive terms (by index)
+                disjunction = features[i]
+                for ngram in disjunction.seq_terms:
+                    feature_vectors[:, i] += feature_vectors[:, features_idx[ngram]]
+
+        result['features'] = features
+        result['features_idx'] = features_idx
 
     result['feature_vectors'] = feature_vectors
 
@@ -221,11 +306,11 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
     print()
 
     # As features, we will use the presence of n-grams
-    print('We will consider %i-grams' % gram_size)
+    print('We will consider %i-grams and disjunctions up to size %i' % (gram_size, disj_size))
 
     tmp = analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=disj_size)
-    ngrams = tmp['ngrams']
-    ngrams_idx = tmp['ngrams_idx']
+    features = tmp['features']
+    features_idx = tmp['features_idx']
     feature_vectors = tmp['feature_vectors']
     (full_tree, full_tree_accuracy) = tmp['full_tree']
     conceptual_trees = tmp['conceptual_trees']
@@ -240,7 +325,7 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
     print('Number of leaves: %i' % n_leaves)
     print('Depth: %i' % depth)
     if(True):
-        print(sklearn.tree.export_text(full_tree, feature_names=ngrams, show_weights=True))
+        print(sklearn.tree.export_text(full_tree, feature_names=[str(f) for f in features], show_weights=True))
         
         plt.figure(figsize=(12, 12))
         sklearn.tree.plot_tree(full_tree, filled=True)
@@ -254,7 +339,7 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
         print('Decision tree accuracy: %s' % accuracy)
         print('Number of leaves: %i' % n_leaves)
         print('Depth: %i' % depth)
-        #print(sklearn.tree.export_text(tree, feature_names=ngrams, show_weights=True))
+        #print(sklearn.tree.export_text(tree, feature_names=[str(f) for f in features], show_weights=True))
 
         #plt.figure(figsize=(12, 12))
         #sklearn.tree.plot_tree(tree, filled=True)
@@ -263,9 +348,8 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
     # Rules stuff
     rule_precision_threshold = 0.95
     rule_frequence_threshold = 0.05
-    rules = defaultdict(list) # From ngram to list of RHS·s (to be conjuncted)
+    rules = defaultdict(list) # From LSH (feature or ('NOT', feature)) to list of RHS·s, which are sets of properties (we also indicate the precision of the rule)
 
-    results_decision_tree = []
     max_depth = 2 # None # We could successively try with increasing depth
     max_conjunctions = 3 # len(concepts)
     for size_conjunctions in range(1, (max_conjunctions + 1)):
@@ -292,7 +376,7 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
                 # For each n-gram, check if it is a good predictor of the class (equivalent to building a decision tree of depth 1)
                 #gold = in_class_aux(dataset)
                 gold = np.array([in_class(category) for category in categories])
-                for feature_idx, ngram in enumerate(ngrams):
+                for feature_idx, feature in enumerate(features):
 
                     ratio = gold.mean()
                     baseline_accuracy = max(ratio, (1.0 - ratio)) # Precision of the majority class baseline
@@ -307,12 +391,12 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
 
                     precision = gold[prediction].mean() # 1 means that the symbol entails the property
                     if((precision > rule_precision_threshold) and (prediction.sum() > rule_frequence_threshold * prediction.size)):
-                        rules[ngram].append((set(conjunction), precision))
-                        #print('%s means %s (%f)' % (ngram, conjunction, precision))
+                        rules[('', feature)].append((set(conjunction), precision))
+                        #print('%s means %s (%f)' % (feature, conjunction, precision))
                     recall = prediction[gold].mean() # 1 means that the property entails the symbol
                     f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
-                    item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngram, feature_type)
+                    item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, str(feature), feature_type)
                     results_binary_classifier.append(item)
 
                     feature_type = 'absence'
@@ -325,48 +409,13 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
 
                     precision = gold[prediction].mean() # 1 means that the absence of the symbol entails the property
                     if((precision > rule_precision_threshold) and (prediction.sum() < (1 - rule_frequence_threshold) * prediction.size)):
-                        rules[('NOT', ngram)].append((set(conjunction), precision))
-                        #print('NOT %s means %s (%f)' % (ngram, conjunction, precision))
+                        rules[('NOT', feature)].append((set(conjunction), precision))
+                        #print('NOT %s means %s (%f)' % (feature, conjunction, precision))
                     recall = prediction[gold].mean() # 1 means that the property entails the absence of the symbol
                     f1 = (2 * precision * recall / (precision + recall)) if(precision + recall > 0.0) else 0.0
 
-                    item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, ngram, feature_type)
+                    item = (accuracy, baseline_accuracy, error_reduction, precision, recall, f1, conjunction, str(feature), feature_type)
                     results_binary_classifier.append(item)
-
-                if(True): continue # TODO only for simple concepts, and over all values
-
-                # Decision trees
-                X = feature_vectors
-                Y = gold # in_class_aux(dataset) # [in_class(datapoint.category) for datapoint in dataset]
-
-                classifier = sklearn.tree.DecisionTreeClassifier(max_depth=max_depth).fit(X, Y)
-
-                n_leaves, depth = classifier.get_n_leaves(), classifier.get_depth()
-                accuracy = classifier.score(X, Y) # Accuracy on the 'training set'
-                ratio = (np.sum(Y) / Y.size)
-                baseline_accuracy = max(ratio, (1.0 - ratio)) # Accuracy of the majority class baseline
-
-                item = (
-                    accuracy,
-                    baseline_accuracy,
-                    (accuracy / baseline_accuracy),
-                    ((1 - baseline_accuracy) / (1 - accuracy)),
-                    conjunction,
-                    n_leaves,
-                    depth,
-                    classifier
-                )
-
-                results_decision_tree.append(item)
-
-                #if(accuracy > 0.9):
-                if(item[3] > 2.0):
-                    print(item)
-                    print(sklearn.tree.export_text(classifier, feature_names=ngrams, show_weights=True))
-
-                    plt.figure(figsize=(12, 12))
-                    sklearn.tree.plot_tree(classifier, filled=True)
-                    plt.show()
 
         print("\nBest binary classifiers")
         print("\tby error reduction")
@@ -379,10 +428,10 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
         for e in results_binary_classifier[:10]:
             print(e)
 
+    # We potentially have many rules for the same LHS
     clean_rules = []
     clean_rules_by_lhs = defaultdict(list)
-    for ngram, l in rules.items():
-        lhs = ngram # In fact it could be ('NOT', ngram)
+    for lhs, l in rules.items(): # `lhs` is (x, feature) where x is '' or 'NOT'
         rhs = set.union(*[e[0] for e in l])
         rule = (lhs, rhs)
 
@@ -404,36 +453,56 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
             for i in range(n - k):
                 yield l[i:(i + k + 1)]
 
-    for lhs, rhs in clean_rules:
+    # Determines whether a formula entails another
+    def entails(p1, p2):
+        t1, f1 = p1
+        t2, f2 = p2
+
+        if(t1 != t2): # A positive rule and a negative one
+            return False
+        
+        elif(t1 == ''): # Positive rules
+            return f1.entails(f2)
+
+        else: # Negative rules
+            return f2.entails(f1)
+
+    for lhs1, rhs1 in clean_rules:
         ok = True
         
-        if(lhs[0] != 'NOT'):
-            for lhs2, rhs2 in clean_rules:
-                if(lhs == lhs2): continue
-                if(rhs != rhs2): continue
+        for lhs2, rhs2 in clean_rules:
+            if((rhs1 == rhs2) and (lhs1 != lhs2)):
+                if(entails(lhs1, lhs2)):
+                    ok = False
+                    break
 
-                # Checks whether lhs2 is a subpart of lhs
-                for i in range(1 + len(lhs) - len(lhs2)):
-                    if(lhs[i:(i + len(lhs2))] == lhs2):
-                        ok = False
-                        break
-
-                if(not ok): break
+            if((lhs1 == lhs2) and (rhs1 != rhs2)):
+                if(entails(rhs2, lhs1)):
+                    ok = False
+                    break
         
-        # Checks whether the rule can be obtained compositionaly from other rules
-        if(lhs[0] != 'NOT'):
-            rhs_remainder = set(rhs)
-            for lhs2 in iter_sublists(lhs):
-                for _, rhs2 in clean_rules_by_lhs[lhs2]:
-                    rhs_remainder.difference_update(rhs2)
-                
-                    if(not rhs_remainder):
-                        ok = False
+        # TODO Checks whether the rule can be obtained compositionaly from other rules
+        t, f = lhs1
+        if(t != 'NOT'):
+            if(isinstance(f, DisjTerm)): # Handling of trivial disjunction (if a -> b and a' -> b, obviously a|a' -> b)
+                trivial = True
+                for seq_term in f.seq_terms:
+                    also_entails = False
+                    for _, rhs2 in clean_rules_by_lhs[('', seq_term)]:
+                        if(rhs1.issubset(rhs2)):
+                            also_entails = True
+                            break
+                    if(not also_entails):
+                        trivial = False
                         break
+                if(trivial): ok = False
+                
+            # Si DisjTerm
+            # On regarde si tous les disjuncts entail la rhs
+            # Si c'est le cas, on jarte
+            
 
-        if(ok): print('%s => %s' % (lhs, sorted(list(rhs))))
-
-    print("\nBest decision trees")
-    results_decision_tree.sort(reverse=True, key=(lambda e: e[3]))
-    for e in results_decision_tree[:10]:
-        print(e)
+        if(ok):
+            str_lhs1 = str(lhs1[1])
+            if(lhs1[0] == 'NOT'): str_lhs1 = 'NOT(%s)' % str_lhs1
+            print('%s => %s' % (str_lhs1, sorted(list(rhs1))))
