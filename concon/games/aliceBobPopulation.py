@@ -8,10 +8,11 @@ from .game import Game
 from .aliceBob import AliceBob
 from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import build_optimizer, get_default_fn
+from ..utils import misc
 from ..utils.modules import build_cnn_decoder_from_args
 
 class AliceBobPopulation(AliceBob):
-    def __init__(self, args):
+    def __init__(self, args): # TODO We could consider calling super().__init__(args)
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
 
@@ -36,7 +37,7 @@ class AliceBobPopulation(AliceBob):
         self.penalty = args.penalty
         self.adaptative_penalty = args.adaptative_penalty
 
-        self._sender, self._receiver = None, None
+        self._sender, self._receiver = None, None # Set before each episode by `start_episode`
 
         # Mathusalemian dynamics
         self._reaper_step = args.reaper_step
@@ -61,7 +62,12 @@ class AliceBobPopulation(AliceBob):
 
         parameters = [p for a in self._agents for p in a.parameters()]
         self._optim = build_optimizer(nn.ParameterList(parameters), args.learning_rate)
-        self._running_average_success = 0
+
+        # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different
+        self.use_baseline = args.use_baseline
+        if(self.use_baseline):
+            self._sender_avg_reward = misc.Averager(size=12800)
+            self._receiver_avg_reward = misc.Averager(size=12800)
 
     def to(self, *vargs, **kwargs):
         #self = super().to(*vargs, **kwargs)

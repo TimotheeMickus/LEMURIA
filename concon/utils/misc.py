@@ -9,6 +9,44 @@ import torchvision
 
 import collections
 
+class Averager:
+    def __init__(self, size, mem_factor=2, dtype=None):
+        self.size = size
+
+        buffer_size = int(mem_factor * size)
+        assert (buffer_size > size)
+        self._buffer = np.empty(buffer_size, dtype=dtype)
+
+        self._i = 0
+
+    def update_batch(self, xs):
+        if(xs.size < self.size): # Usual case: `xs` of size lower than `size`
+           if((self._i + xs.size) < self._buffer.size): # Most of the time case: adding `xs` would not fill the buffer entirely
+                self._buffer[self._i:(self._i + xs.size)] = xs
+                self._i += xs.size
+           else: # Sometime case: adding `xs` would fill the buffer entirely
+                j = (self.size - xs.size)
+                self._buffer[:j] = self._buffer[(self._i - j):self._i]
+                self._buffer[j:self.size] = xs
+                self._i = self.size
+        else: # Unusual case: `xs` of size higher than `size`
+            self._buffer[:self.size] = xs[-self.size:]
+            self._i = self.size
+
+    def update(self, x):
+        self._buffer[self._i] = x
+        self._i += 1
+
+        if(self._i == self._buffer.size): # The buffer is full
+            self._buffer[:self.size] = self._buffer[-self.size:]
+            self._i = self.size
+
+    def get(self, default=None):
+        l = min(self._i, self.size) # The number of values to consider might be smaller than `size` at the beginning
+        if(l == 0): return default
+        
+        return self._buffer[(self._i-l):self._i].mean()
+
 def h_compress(img):
     shape = img.shape
     width = shape[-1]

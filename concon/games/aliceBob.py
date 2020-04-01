@@ -45,6 +45,12 @@ class AliceBob(Game):
 
         self._optim = build_optimizer(parameters, args.learning_rate)
 
+        # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different
+        self.use_baseline = args.use_baseline
+        if(self.use_baseline):
+            self._sender_avg_reward = misc.Averager(size=12800)
+            self._receiver_avg_reward = misc.Averager(size=12800)
+
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
 
@@ -230,7 +236,12 @@ class AliceBob(Game):
 
         loss = torch.tensor(0.0).to(log_prob.device)
         
-        reinforce_loss = -(rewards * log_prob).mean() # REINFORCE loss
+        if(self.use_baseline):
+            r_baseline = self._sender_avg_reward.get(default=0.0)
+            self._sender_avg_reward.update_batch(rewards.cpu().numpy())
+        else: r_baseline = 0.0
+        
+        reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
         loss += reinforce_loss
 
         entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Entropy loss; could be normalised (divided) by (base_alphabet_size + 1)
@@ -249,11 +260,16 @@ class AliceBob(Game):
             successes = (receiver_pointing['action'] == 0).float()
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
 
-        rewards = successes
+        rewards = successes.clone()
 
         loss = torch.tensor(0.0).to(log_prob.device)
         
-        reinforce_loss = -(rewards * log_prob).mean()
+        if(self.use_baseline):
+            r_baseline = self._receiver_avg_reward.get(default=0.0)
+            self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
+        else: r_baseline = 0.0
+        
+        reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
         loss += reinforce_loss
 
         entropy_loss = -(self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty

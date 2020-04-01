@@ -14,7 +14,7 @@ def get_args():
     default_models = os.path.join('[summary]', 'models')
     default_summary = os.path.join('runs', 'cbc', ('[now]_' + socket.gethostname()))
 
-    group = arg_parser.add_argument_group(title='data', description='arguments relative to data handling')
+    group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
     group.add_argument('--data_set', help='the path to the data set', default=default_data_set)
     group.add_argument('--binary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
     group.add_argument('--constrain_dim', help='restrict specific dimensions in dataset', nargs=5, choices=[1,2,3], default=None, type=int)
@@ -68,6 +68,7 @@ def get_args():
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
+    group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
     group.add_argument('--runs', help='number of runs', default=1, type=int)

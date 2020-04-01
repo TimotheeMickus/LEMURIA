@@ -109,7 +109,7 @@ class Game(metaclass=ABCMeta):
 
                 self.optim.zero_grad()
 
-                loss, *external_output  = self.compute_interaction(batch)
+                loss, *external_output = self.compute_interaction(batch)
 
                 loss.backward() # Backpropagation
 
