@@ -481,7 +481,7 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
                     ok = False
                     break
         
-        # TODO Checks whether the rule can be obtained compositionaly from other rules
+        # TODO Checks whether the rule can be obtained compositionaly from other rules (many situations are possible)
         t, f = lhs1
         if(t != 'NOT'):
             if(isinstance(f, DisjTerm)): # Handling of trivial disjunction (if a -> b and a' -> b, obviously a|a' -> b)
