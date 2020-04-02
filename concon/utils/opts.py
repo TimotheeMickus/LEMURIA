@@ -90,6 +90,7 @@ def get_args():
     group.add_argument('--evaluate_language', help='evaluate language instead of training', action='store_true')
     group.add_argument('--analysis_gram_size', help='size of the n-grams considered during language analysis', type=int, default=1)
     group.add_argument('--analysis_disj_size', help='size of the disjunctions considered during language analysis', type=int, default=1)
+    group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
     group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
     group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')
     group.add_argument('--threeway_correlation', help='compute three-way correlation between image vectors, meaning distance and message distance instead of training', action='store_true')

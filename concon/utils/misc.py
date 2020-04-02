@@ -106,10 +106,12 @@ def get_default_fn(base_fn, args):
         return base_fn(args)
     return _wrap
 
-def pointing(scores):
+def pointing(scores, argmax=False):
     probs = F.softmax(scores, dim=-1)
     dist = Categorical(probs)
-    action = dist.sample()
+
+    if(argmax): action = scores.max(-1).indices
+    else: action = dist.sample()
 
     return {'dist': dist, 'action': action}
 

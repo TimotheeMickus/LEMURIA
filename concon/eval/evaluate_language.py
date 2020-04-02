@@ -15,6 +15,7 @@ from .decision_tree import decision_tree
 
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
+from ..utils import misc
 from ..utils.data import get_data_loader
 
 def main(args):
@@ -63,8 +64,16 @@ def main(args):
             batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # Standard evaluation batch
             sender_outcome, receiver_outcome = model(batch)
 
-            messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
-            categories.extend([x.category for x in batch.original])
+            receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
+            
+            for i, datapoint in enumerate(batch.original):
+                msg = sender_outcome.action[0][i]
+                msg_len = sender_outcome.action[1][i]
+                cat = datapoint.category
+
+                if((not args.correct_only) or (receiver_pointing['action'][i] == 0)):
+                    messages.append(msg.tolist()[:msg_len])
+                    categories.append(cat)
    
     '''
     messages = []
