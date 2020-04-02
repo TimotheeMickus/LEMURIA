@@ -303,6 +303,7 @@ class AliceBob(Game):
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome, receiver_outcome = self(batch)
 
+                # Maybe we could add only the successful messages (when args.correct_only is True)
                 messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
                 categories.extend([x.category for x in batch.original])
 
