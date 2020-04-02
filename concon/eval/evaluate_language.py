@@ -58,6 +58,9 @@ def main(args):
     batch_numbers = range(nb_batch)
     if(args.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers)
     with torch.no_grad():
+        success = []
+        scrambled_success = []
+
         for _ in batch_numbers:
             model.start_episode(train_episode=False) # Selects agents at random if necessary
 
@@ -65,7 +68,9 @@ def main(args):
             sender_outcome, receiver_outcome = model(batch)
 
             receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
+            success.append(receiver_pointing['dist'].probs[:, 0])
             
+            scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
             for i, datapoint in enumerate(batch.original):
                 msg = sender_outcome.action[0][i]
                 msg_len = sender_outcome.action[1][i]
@@ -74,6 +79,17 @@ def main(args):
                 if((not args.correct_only) or (receiver_pointing['action'][i] == 0)):
                     messages.append(msg.tolist()[:msg_len])
                     categories.append(cat)
+
+                # Here, I am scrambling the whole message, including the EOS (but not the padding symbols, of course)
+                l = msg_len.item()
+                scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
+
+            scrambled_receiver_outcome = model.receiver(model._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+            scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
+            scrambled_success.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+
+        print('Success: %f' % torch.stack(success).mean().item())
+        print('Scrambled success: %f' % torch.stack(scrambled_success).mean().item())
    
     '''
     messages = []
