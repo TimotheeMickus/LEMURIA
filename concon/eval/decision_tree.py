@@ -205,7 +205,7 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
         assert (max_length > 0)
         for s in message: yield SeqTerm((s,)) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
 
-        message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end
+        message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end # TODO May I could use -1
         for k in range(2, (min(max_length, len(message_tmp)) + 1)): # Length of the n-gram
             for i in range(len(message_tmp) - k + 1):
                 yield SeqTerm(tuple(message_tmp[i:(i + k)]))

@@ -121,17 +121,18 @@ class MessageDecoder(nn.Module):
         has_stopped = torch.zeros(encoded.size(0)).bool().to(encoded.device)
         has_stopped.requires_grad = False
 
-        # produces message
+        # Produces the messages
+        # TODO Je serais d'avis à ne pas utiliser de EOS. Si l'action EOS est choisie, le message serait terminé sans qu'aucun symbol ne soit ajouté (ou plus techniquement, on ajoute un padding symbol). En fait, ça revient plus ou moins à fusionner le EOS et le padding symbol. Cela permettrait d'éviter d'avoir un symbol spécial apparaissant souvent mais pas toujours dans les "vrais" messages, ce qui peut compliquer l'analyse.
         for i in range(self.max_msg_len):
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
-            # selects action
+            # Selects actions
             probs = F.softmax(output, dim=-1)
             dist = Categorical(probs)
             action = dist.sample() if self.training else probs.argmax(dim=-1)
 
-            # ignores prediction for completed messages
+            # Ignores prediction for completed messages
             ent = dist.entropy() * (~has_stopped).float()
             log_p = dist.log_prob(action) * (~has_stopped).float()
             log_probs.append(log_p)
@@ -140,19 +141,19 @@ class MessageDecoder(nn.Module):
             action = action.masked_fill(has_stopped, self.padding_idx)
             message.append(action)
 
-            # If all messages are finished
+            # Stops if all messages are complete
             has_stopped = has_stopped | (action == self.eos_index)
             if has_stopped.all():
                 break
 
             last_symbol = action
 
-        # converts output to tensor
+        # Converts output to tensor
         message = torch.stack(message, dim=1)
         message_len = (message != self.padding_idx).sum(dim=1)[:,None]
         log_probs = torch.stack(log_probs, dim=1)
 
-        # average entropy over timesteps, hence ignore padding
+        # Average entropy over timesteps, hence ignore padding
         entropy = torch.stack(entropy, dim=1)
         entropy = entropy.sum(dim=1, keepdim=True)
         entropy = entropy / message_len.float() # The average symbol distribution entropy over the message
