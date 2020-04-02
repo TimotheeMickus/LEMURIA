@@ -88,8 +88,17 @@ def main(args):
             scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
             scrambled_success.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
-        print('Success: %f' % torch.stack(success).mean().item())
-        print('Scrambled success: %f' % torch.stack(scrambled_success).mean().item())
+        success = torch.stack(success)
+        success_rate = success.mean().item()
+        print('Success: %f' % success_rate)
+
+        scrambled_success = torch.stack(scrambled_success)
+        scrambled_success_rate = scrambled_success.mean().item()
+        print('Scrambled success: %f' % scrambled_success_rate)
+
+        # TODO c'est pas mal cool. à logguer dans la phase d'évaluation
+        scrambling_resistance = (torch.stack([success, scrambled_success]).min(0).values.mean().item() / success_rate) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
+        print('Scrambling resistance: %f' % scrambling_resistance)
    
     '''
     messages = []
