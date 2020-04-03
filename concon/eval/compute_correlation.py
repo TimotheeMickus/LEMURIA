@@ -245,7 +245,7 @@ def mantel(messages, categories, message_distance=levenshtein, meaning_distance=
     return mantel_test(tM, sM, method=method, perms=perms)
 
 def main(args):
-    assert args.message_dump_file is not None, "Messages are required."
+    assert args.message_dump_file is not None, "'message_dump_file' is required."
     
     messages, categories, alphabet_size, concepts = read_csv(args.message_dump_file, string_msgs=args.string_msgs)
 
