@@ -68,6 +68,8 @@ class AliceBobPopulation(AliceBob):
         if(self.use_baseline):
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
+        
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
 
     def to(self, *vargs, **kwargs):
         #self = super().to(*vargs, **kwargs)

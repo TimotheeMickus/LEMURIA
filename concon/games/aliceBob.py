@@ -51,6 +51,8 @@ class AliceBob(Game):
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
 
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
+
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
 
@@ -296,27 +298,72 @@ class AliceBob(Game):
         categories = []
         batch_numbers = range(nb_batch)
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
-        for _ in batch_numbers:
-            self.start_episode(train_episode=False) # Select agents at random if necessary
+        with torch.no_grad():
+            success = []
+            scrambled_success = []
 
-            with torch.no_grad():
+            for _ in batch_numbers:
+                self.start_episode(train_episode=False) # Select agents at random if necessary
+
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome, receiver_outcome = self(batch)
 
-                # Maybe we could add only the successful messages (when args.correct_only is True)
-                messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
-                categories.extend([x.category for x in batch.original])
-
-                receiver_pointing = pointing(receiver_outcome.scores)
-                failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
+                receiver_pointing = pointing(receiver_outcome.scores, argmax=True)
+                success.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
+                failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
                 data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
 
                 np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
                 np.add.at(failure_matrix, (target_category, distractor_category), failure)
+
+                scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
+                for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepare for scrambling
+                    msg = sender_outcome.action[0][i]
+                    msg_len = sender_outcome.action[1][i]
+                    cat = datapoint.category
+
+                    if((not self.correct_only) or (receiver_pointing['action'][i] == 0)):
+                        messages.append(msg.tolist()[:msg_len])
+                        categories.append(cat)
+
+                    # Here, I am scrambling the whole message, including the EOS (but not the padding symbols, of course)
+                    l = msg_len.item()
+                    scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
+
+                scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+                scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
+                scrambled_success.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+
+            success = torch.stack(success)
+            scrambled_success = torch.stack(scrambled_success)
+            scrambling_resistance = (torch.stack([success, scrambled_success]).min(0).values.mean().item() / success.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
+            if(event_writer is not None): event_writer.add_scalar('eval/scrambling-resistance', scrambling_resistance, epoch, period=1)
+            if(display != 'minimal'): print('Scrambling resistance %s' % scrambling_resistance)
+        
+            # Here, we try to see how much the messages describe the categories and not the praticular images
+            # To do so, we use the original image as target, and an image of the same category as distractor
+            abstractness = []
+            n = (32 * data_iterator.nb_categories)
+            n = min(max_datapoints, n) 
+            nb_batch = int(np.ceil(n / batch_size))
+            for _ in range(nb_batch):
+                self.start_episode(train_episode=False) # Selects agents at random if necessary
+
+                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
+
+                sender_outcome, receiver_outcome = self(batch)
+
+                receiver_pointing = misc.pointing(receiver_outcome.scores)
+                abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0) 
+
+            abstractness = torch.stack(abstractness)
+            abstractness_rate = abstractness.mean().item()
+            if(event_writer is not None): event_writer.add_scalar('eval/abstractness', scrambling_resistance, epoch, period=1)
+            if(display != 'minimal'): print('Abstractness %s' % scrambling_resistance)
 
         # Computes the accuracy when the images are selected from all categories
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())

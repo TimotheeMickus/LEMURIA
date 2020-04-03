@@ -8,6 +8,7 @@ import torch.optim as optim
 import torchvision
 
 import collections
+import itertools
 
 class Averager:
     def __init__(self, size, mem_factor=2, dtype=None):
@@ -56,12 +57,20 @@ def h_compress(img):
 def combine_images(img1, img2):
     return torch.cat((h_compress(img1), h_compress(img2)), dim=-1)
 
+# Groups elements by keys
+# Returns a dictionary from keys to lists of values
 # Accepts either a list `l1` of pairs (element, key) or a list `l1` of elements and a list `l2` of keys
 def group_by(l1, l2=None):
     if(l2 is not None): l1 = zip(l1, l2)
     d = collections.defaultdict(list)
-    for e, k in l1: d[k].append(e)
+    for e, k in l1:
+        d[k].append(e)
 
+    return d
+
+def count(l):
+    d = collections.defaultdict(int)
+    for e in l: d[e] += 1
     return d
 
 # A simple class the purpose of which is to assign ids to object

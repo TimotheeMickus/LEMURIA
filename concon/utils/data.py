@@ -265,9 +265,12 @@ class Dataset():
 
             return self.category_tuple(sample_idx)
 
+        if(sampling_strategy == 'same'): # Should not be used during training
+            return category
+
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, keep_category=False):
+    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=False, keep_category=False):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
         'data_type' (train, test, any) indicates, when selecting an image from a category, from what part of this category we take it.
@@ -280,6 +283,7 @@ class Dataset():
         batch = []
         if(size is None): size = self.batch_size
         if(sampling_strategies is None): sampling_strategies = self.sampling_strategies
+        if(target_is_original is None): target_is_original = self.same_img
         for _ in range(size):
             # Choice of the original/target category
             categories = self.training_categories
@@ -291,7 +295,7 @@ class Dataset():
             _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device)
 
             # Target image
-            if(self.same_img): _target = _original.copy()
+            if(target_is_original): _target = _original.copy()
             else:_target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
             
             # Noise is applied independently to the two images

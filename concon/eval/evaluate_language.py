@@ -96,9 +96,23 @@ def main(args):
         scrambled_success_rate = scrambled_success.mean().item()
         print('Scrambled success: %f' % scrambled_success_rate)
 
-        # TODO c'est pas mal cool. à logguer dans la phase d'évaluation
         scrambling_resistance = (torch.stack([success, scrambled_success]).min(0).values.mean().item() / success_rate) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
         print('Scrambling resistance: %f' % scrambling_resistance)
+
+        # Here, we try to see how much the messages describe the categories and not the praticular images
+        # To do so, we use the original image as target, and an image of the same category as distractor
+        abstractness = []
+        for _ in batch_numbers:
+            model.start_episode(train_episode=False) # Selects agents at random if necessary
+
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # Highly unusual batch. Don't try this at home.
+            sender_outcome, receiver_outcome = model(batch)
+
+            receiver_pointing = misc.pointing(receiver_outcome.scores)
+            abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0) # Will this be close to 1?
+        abstractness = torch.stack(abstractness)
+        abstractness_rate = abstractness.mean().item()
+        print('Abstractness: %f' % abstractness_rate)
    
     '''
     messages = []

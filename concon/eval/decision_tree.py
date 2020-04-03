@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 
 from collections import defaultdict
 
+from ..utils import misc
+
 # `data` should either be a pair (dataset, messages) or None. If None, then messages will be generated
 # Except for generating the messages,
 #   we need model for _.base_alphabet_size
@@ -132,7 +134,6 @@ def apply_disj(l, max_disj, max_val):
                             incr_loop = False
                             outer_loop = False
 
-
 # Used to represent disjunctions of n-grams
 class DisjTerm():
     def __init__(self, seq_terms):
@@ -197,6 +198,7 @@ class SeqTerm():
 
 # The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
 # `gram_size` is the k max of k-grams to consider
+# `concepts` is a list of dictionaries {value name -> value idx}
 def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=1, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
     result = {}
 
@@ -324,7 +326,7 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
     print('Decision tree accuracy: %s' % full_tree_accuracy)
     print('Number of leaves: %i' % n_leaves)
     print('Depth: %i' % depth)
-    if(True):
+    if(False):
         print(sklearn.tree.export_text(full_tree, feature_names=[str(f) for f in features], show_weights=True))
         
         plt.figure(figsize=(12, 12))
@@ -339,11 +341,12 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
         print('Decision tree accuracy: %s' % accuracy)
         print('Number of leaves: %i' % n_leaves)
         print('Depth: %i' % depth)
-        #print(sklearn.tree.export_text(tree, feature_names=[str(f) for f in features], show_weights=True))
+        if(True):
+            print(sklearn.tree.export_text(tree, feature_names=[str(f) for f in features], show_weights=True))
 
-        #plt.figure(figsize=(12, 12))
-        #sklearn.tree.plot_tree(tree, filled=True)
-        #plt.show()
+            #plt.figure(figsize=(12, 12))
+            #sklearn.tree.plot_tree(tree, filled=True)
+            #plt.show()
 
     # Rules stuff
     rule_precision_threshold = 0.95
@@ -501,8 +504,43 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
             # On regarde si tous les disjuncts entail la rhs
             # Si c'est le cas, on jarte
             
-
         if(ok):
             str_lhs1 = str(lhs1[1])
             if(lhs1[0] == 'NOT'): str_lhs1 = 'NOT(%s)' % str_lhs1
             print('%s => %s' % (str_lhs1, sorted(list(rhs1))))
+
+    # Prints the language
+    print()
+    messages = [tuple(m) for m in messages]
+    categories = [tuple(c) for c in categories]
+    sorted_messages = {} # Categories to list of messages with count, sorted by count
+    for category, l in misc.group_by(messages, categories).items():
+        print('Category %s:' % (category,))
+        sorted_l = sorted(misc.count(l).items(), key=(lambda x: x[1]), reverse=True) # Add the number of occurrences for each unique message and then sort
+        sorted_l = [(message, (count/len(l))) for (message, count) in sorted_l] # Converts counts into percentages
+        
+        sorted_messages[category] = sorted_l
+
+        for message, ratio in sorted_l: print('\t%s\t%i%%' % (message, (ratio*100)))
+        #for message, count in sorted_l: print('\t%s\tx %i' % (message, count))
+
+    value_names = [] # List of dictionaries {value idx -> value name}
+    for concept in concepts: value_names.append({idx: name for (name, idx) in concept.items()})
+    def category_name(category):
+        return tuple([value_names[dim_idx][idx] for dim_idx, idx in enumerate(category)])
+
+    print()
+    for dim_idx, concept in enumerate(concepts):
+        for value_name, value_idx in concept.items():
+            print('Translation to %s:' % value_name)
+            for category, l in sorted_messages.items():
+                if(category[dim_idx] == value_idx): continue
+                other_cat = list(category)
+                other_cat[dim_idx] = value_idx
+                other_cat = tuple(other_cat)
+
+                msg, msg_ratio = sorted_messages[category][0]
+                trans, trans_ratio = sorted_messages[other_cat][0]
+                print('from %s to %s:' % (category_name(category), category_name(other_cat)))
+                print('\t%s ==> %s' % (msg, trans))
+                #print('%s (%i%% of %s) ==> %s (%i%% of %s)' % (msg, (msg_ratio*100), category, trans, (trans_ratio*100), other_cat))
