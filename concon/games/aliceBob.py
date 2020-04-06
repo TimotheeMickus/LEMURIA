@@ -299,8 +299,9 @@ class AliceBob(Game):
         batch_numbers = range(nb_batch)
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
         with torch.no_grad():
-            success = []
-            scrambled_success = []
+            success = [] # Binary
+            success_prob = [] # Probabilities
+            scrambled_success_prob = [] # Probabilities
 
             for _ in batch_numbers:
                 self.start_episode(train_episode=False) # Select agents at random if necessary
@@ -309,7 +310,8 @@ class AliceBob(Game):
                 sender_outcome, receiver_outcome = self(batch)
 
                 receiver_pointing = pointing(receiver_outcome.scores, argmax=True)
-                success.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
+                success.append((receiver_pointing['action'] == 0).float())
+                success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
@@ -336,11 +338,11 @@ class AliceBob(Game):
 
                 scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
                 scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
-                scrambled_success.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+                scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
-            success = torch.stack(success)
-            scrambled_success = torch.stack(scrambled_success)
-            scrambling_resistance = (torch.stack([success, scrambled_success]).min(0).values.mean().item() / success.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
+            success_prob = torch.stack(success_prob)
+            scrambled_success_prob = torch.stack(scrambled_success_prob)
+            scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
             if(event_writer is not None): event_writer.add_scalar('eval/scrambling-resistance', scrambling_resistance, epoch, period=1)
             if(display != 'minimal'): print('Scrambling resistance %s' % scrambling_resistance)
         
@@ -364,6 +366,12 @@ class AliceBob(Game):
             abstractness_rate = abstractness.mean().item()
             if(event_writer is not None): event_writer.add_scalar('eval/abstractness', scrambling_resistance, epoch, period=1)
             if(display != 'minimal'): print('Abstractness %s' % scrambling_resistance)
+
+        # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
+        success = torch.stack(success)
+        success_rate = success.mean().item()
+        if(event_writer is not None): event_writer.add_scalar('eval/success_rate', success_rate, epoch, period=1)
+        if(display != 'minimal'): print('Success rate: %s' % success_rate)
 
         # Computes the accuracy when the images are selected from all categories
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
