@@ -8,7 +8,7 @@ import numpy as np
 from itertools import permutations
 from scipy import spatial, stats
 
-def test(X, Y, perms=10000, method='pearson', tail='two-tail'):
+def test(X, Y, perms=10000, method='pearson', tail='two-tail', correl_only=False):
   """
   Takes two distance matrices (either redundant matrices or condensed vectors)
   and performs a Mantel test. The Mantel test is a significance test of the
@@ -31,6 +31,8 @@ def test(X, Y, perms=10000, method='pearson', tail='two-tail'):
   tail : str, optional
       Which tail to test in the calculation of the empirical p-value; either
       'upper', 'lower', or 'two-tail' (default: 'two-tail').
+  correl_only : boolean, optional
+      If True, compute only the veridical correlation (default: False).
   Returns
   -------
   r : float
@@ -101,6 +103,9 @@ def test(X, Y, perms=10000, method='pearson', tail='two-tail'):
   # Calculate the X and Y residuals, which will be used to compute the
   # covariance under each permutation.
   X_residuals, Y_residuals = X - X.mean(), Y - Y.mean()
+
+  if correl_only:
+    return (X_residuals * Y_residuals).sum(), None, None, None
 
   # Expand the Y residuals to a redundant matrix.
   Y_residuals_as_matrix = spatial.distance.squareform(Y_residuals, force='tomatrix', checks=False)

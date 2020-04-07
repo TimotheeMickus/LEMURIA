@@ -230,9 +230,9 @@ def analyze_correlation(messages, categories, scrambling_pool_size=1000, **kwarg
 
     return cor, μ, σ, impr
 
-def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True):
+def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True, correl_only=False):
     assert len(messages) == len(categories)
-    
+
     if map_msg_to_str:
         messages = [''.join(map(chr, msg)) for msg in messages] # Each integer is mapped to the corresponding unicode character
 
@@ -241,12 +241,12 @@ def mantel(messages, categories, message_distance=levenshtein, meaning_distance=
 
     tM = np.array(list(it.starmap(message_distance, it.combinations(messages, 2))))
     sM = np.array(list(it.starmap(meaning_distance, it.combinations(categories, 2))))
-    
-    return mantel_test(tM, sM, method=method, perms=perms)
+
+    return mantel_test(tM, sM, method=method, perms=perms, correl_only=correl_only)
 
 def main(args):
     assert args.message_dump_file is not None, "'message_dump_file' is required."
-    
+
     messages, categories, alphabet_size, concepts = read_csv(args.message_dump_file, string_msgs=args.string_msgs)
 
     # Logs some information

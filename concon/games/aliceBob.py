@@ -244,12 +244,12 @@ class AliceBob(Game):
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
         loss = torch.tensor(0.0).to(log_prob.device)
-        
+
         if(self.use_baseline):
             r_baseline = self._sender_avg_reward.get(default=0.0)
             self._sender_avg_reward.update_batch(rewards.cpu().numpy())
         else: r_baseline = 0.0
-        
+
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
         loss += reinforce_loss
 
@@ -272,18 +272,18 @@ class AliceBob(Game):
         rewards = successes.clone()
 
         loss = torch.tensor(0.0).to(log_prob.device)
-        
+
         if(self.use_baseline):
             r_baseline = self._receiver_avg_reward.get(default=0.0)
             self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
         else: r_baseline = 0.0
-        
+
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
         loss += reinforce_loss
 
         entropy_loss = -(self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
         loss += entropy_loss
-        
+
         if return_entropy: return (loss, receiver_pointing['dist'].entropy().mean())
         return loss
 
@@ -296,7 +296,7 @@ class AliceBob(Game):
         max_datapoints = 32768 # (2^15)
         n = (8 * (data_iterator.nb_categories**2))
         #n = data_iterator.size(data_type='test', no_evaluation=False)
-        n = min(max_datapoints, n) 
+        n = min(max_datapoints, n)
         nb_batch = int(np.ceil(n / batch_size))
 
         messages = []
@@ -350,12 +350,12 @@ class AliceBob(Game):
             scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
             if(event_writer is not None): event_writer.add_scalar('eval/scrambling-resistance', scrambling_resistance, epoch, period=1)
             if(display != 'minimal'): print('Scrambling resistance %s' % scrambling_resistance)
-        
+
             # Here, we try to see how much the messages describe the categories and not the praticular images
             # To do so, we use the original image as target, and an image of the same category as distractor
             abstractness = []
             n = (32 * data_iterator.nb_categories)
-            n = min(max_datapoints, n) 
+            n = min(max_datapoints, n)
             nb_batch = int(np.ceil(n / batch_size))
             for _ in range(nb_batch):
                 self.start_episode(train_episode=False) # Selects agents at random if necessary
@@ -365,7 +365,7 @@ class AliceBob(Game):
                 sender_outcome, receiver_outcome = self(batch)
 
                 receiver_pointing = misc.pointing(receiver_outcome.scores)
-                abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0) 
+                abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
@@ -449,22 +449,22 @@ class AliceBob(Game):
             sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
 
             #timepoint = time.time()
-            l_cor, *_, l_cor_n, l_cor_rd = compute_correlation.mantel(sample_messages, sample_categories)
-            if(display != 'minimal'): print('Levenshtein: %f - %f (%f)' % (l_cor, l_cor_n, l_cor_rd))
+            l_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, correl_only=True)
+            if(display != 'minimal'): print('Levenshtein: %f ' % l_cor)
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            l_n_cor, *_, l_n_cor_n, l_n_cor_rd = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised)
-            if(display != 'minimal'): print('Levenshtein (normalised): %f - %f (%f)' % (l_n_cor, l_n_cor_n, l_cor_rd))
+            l_n_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised, correl_only=True)
+            if(display != 'minimal'): print('Levenshtein (length normalised): %f' % l_n_cor)
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            j_cor, *_, j_cor_n, j_cor_rd = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
-            if(display != 'minimal'): print('Jaccard: %f - %f (%f)' % (j_cor, j_cor_n, l_cor_rd))
+            j_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False, correl_only=True)
+            if(display != 'minimal'): print('Jaccard: %f' % j_cor)
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
@@ -476,14 +476,14 @@ class AliceBob(Game):
 
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
-                event_writer.add_scalar('eval/Lev-based comp (z-score)', l_cor_n, epoch, period=1)
-                event_writer.add_scalar('eval/Lev-based comp (random)', l_cor_rd, epoch, period=1)
+                #event_writer.add_scalar('eval/Lev-based comp (z-score)', l_cor_n, epoch, period=1)
+                #event_writer.add_scalar('eval/Lev-based comp (random)', l_cor_rd, epoch, period=1)
                 event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)
-                event_writer.add_scalar('eval/Normalised Lev-based comp (z-score)', l_n_cor_n, epoch, period=1)
-                event_writer.add_scalar('eval/Normalised Lev-based comp (random)', l_n_cor_rd, epoch, period=1)
+                #event_writer.add_scalar('eval/Normalised Lev-based comp (z-score)', l_n_cor_n, epoch, period=1)
+                #event_writer.add_scalar('eval/Normalised Lev-based comp (random)', l_n_cor_rd, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
-                event_writer.add_scalar('eval/Jaccard-based comp (z-score)', j_cor_n, epoch, period=1)
-                event_writer.add_scalar('eval/Jaccard-based comp (random)', j_cor_rd, epoch, period=1)
+                #event_writer.add_scalar('eval/Jaccard-based comp (z-score)', j_cor_n, epoch, period=1)
+                #event_writer.add_scalar('eval/Jaccard-based comp (random)', j_cor_rd, epoch, period=1)
                 minH, meanH, medH, maxH, varH = entropy_stats
                 event_writer.add_scalar('eval/min Entropy category per msgs', minH, epoch, period=1)
                 event_writer.add_scalar('eval/mean Entropy category per msgs', meanH, epoch, period=1)

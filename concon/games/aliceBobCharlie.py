@@ -197,7 +197,7 @@ class AliceBobCharlie(Game):
         max_datapoints = 32768 # (2^15)
         n = (8 * (data_iterator.nb_categories**2))
         #n = data_iterator.size(data_type='test', no_evaluation=False)
-        n = min(max_datapoints, n) 
+        n = min(max_datapoints, n)
         nb_batch = int(np.ceil(n / batch_size))
 
         batch_numbers = range(nb_batch)
@@ -287,22 +287,22 @@ class AliceBobCharlie(Game):
 
 
             #timepoint = time.time()
-            l_cor,*_, l_cor_n = compute_correlation.mantel(sample_messages, sample_categories)
-            if(display != 'minimal'): print('Levenshtein: %f - %f' % (l_cor, l_cor_n))
+            l_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, correl_only=True)
+            if(display != 'minimal'): print('Levenshtein: %f' % l_cor)
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            l_n_cor, *_, l_n_cor_n = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised)
-            if(display != 'minimal'): print('Levenshtein (normalised): %f - %f' % (l_n_cor, l_n_cor_n))
+            l_n_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised, correl_only=True)
+            if(display != 'minimal'): print('Levenshtein (normalised): %f' % l_n_cor)
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
             #timepoint2 = timepoint
 
-            j_cor, *_, j_cor_n = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False)
-            if(display != 'minimal'): print('Jaccard: %f - %f' % (j_cor, j_cor_n))
+            j_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False, correl_only=True)
+            if(display != 'minimal'): print('Jaccard: %f' % j_cor)
 
             #timepoint2 = time.time()
             #print(timepoint2 - timepoint)
@@ -315,11 +315,11 @@ class AliceBobCharlie(Game):
 
             if(event_writer is not None):
                 event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
-                event_writer.add_scalar('eval/Lev-based comp (normalised)', l_cor_n, epoch, period=1)
+                #event_writer.add_scalar('eval/Lev-based comp (normalised)', l_cor_n, epoch, period=1)
                 event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)
-                event_writer.add_scalar('eval/Normalised Lev-based comp (normalised)', l_n_cor_n, epoch, period=1)
+                #event_writer.add_scalar('eval/Normalised Lev-based comp (normalised)', l_n_cor_n, epoch, period=1)
                 event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
-                event_writer.add_scalar('eval/Jaccard-based comp (normalised)', j_cor_n, epoch, period=1)
+                #event_writer.add_scalar('eval/Jaccard-based comp (normalised)', j_cor_n, epoch, period=1)
                 minH, meanH, medH, maxH, varH = entropy_stats
                 event_writer.add_scalar('eval/min Entropy category per msgs', minH, epoch, period=1)
                 event_writer.add_scalar('eval/mean Entropy category per msgs', meanH, epoch, period=1)
