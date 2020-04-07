@@ -81,15 +81,11 @@ class AliceBobPopulation(AliceBob):
 
         return self
 
-    def __call__(self, batch):
-        """
-        Input:
-            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
-        Output:
-            `sender_outcome`, sender.Outcome
-            `receiver_outcome`, receiver.Outcome
-        """
-        return AliceBob.__call__(self, batch, sender=self._sender, receiver=self._receiver)
+    def get_sender(self):
+        return self._sender
+
+    def get_receiver(self):
+        return self._receiver
 
     def start_episode(self, train_episode=True):
         self._sender = random.choice(self.senders)
@@ -114,6 +110,7 @@ class AliceBobPopulation(AliceBob):
                     print("[%s] %s reinitialized." %(datetime.now(), agent_name))
             self._current_epoch += 1
 
+    # TODO À quoi sert cette méthode ?
     @property
     def agents(self):
         return self._sender, self._receiver

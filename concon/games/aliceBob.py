@@ -79,7 +79,13 @@ class AliceBob(Game):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
         return self
 
-    def __call__(self, batch, sender=None, receiver=None):
+    def get_sender(self):
+        return self.sender
+
+    def get_receiver(self):
+        return self.receiver
+
+    def __call__(self, batch):
         """
         Input:
             `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
@@ -87,15 +93,16 @@ class AliceBob(Game):
             `sender_outcome`, sender.Outcome
             `receiver_outcome`, receiver.Outcome
         """
-        sender = sender or self.sender
-        receiver = receiver or self.receiver
+        sender = self.get_sender()
+        receiver = self.get_receiver()
+
         sender_outcome = sender(self._alice_input(batch))
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
         return sender_outcome, receiver_outcome
 
     def test_visualize(self, data_iterator, learning_rate):
-        self.eval() # Sets the model in evaluation mode; good idea or not?
+        self.start_episode(train_episode=False)
 
         batch_size = 4
         batch = data_iterator.get_batch(batch_size, data_type='any') # Standard training batch
@@ -149,7 +156,7 @@ class AliceBob(Game):
         receiver_dream = receiver_dream.clone().detach() # Creates a leaf that is a copy of `receiver_dream`
         receiver_dream.requires_grad = True
 
-        encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
+        encoded_message = self.get_receiver().encode_message(*sender_outcome.action).detach()
 
         # Defines a filter for checking smoothness
         channels = 3
@@ -172,7 +179,7 @@ class AliceBob(Game):
 
             optimizer.zero_grad()
 
-            tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_message)
+            tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message)
             loss = -tmp_outcome.scores[:, 0].sum()
 
             regularisation_loss = 0.0
@@ -281,8 +288,6 @@ class AliceBob(Game):
         return loss
 
     def evaluate(self, data_iterator, epoch, event_writer=None, display='tqdm', debug=False, log_lang_progress=True):
-        self.eval()
-
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
@@ -336,7 +341,7 @@ class AliceBob(Game):
                     l = msg_len.item()
                     scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
-                scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+                scrambled_receiver_outcome = self.get_receiver()(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
                 scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
                 scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
@@ -530,6 +535,7 @@ class AliceBob(Game):
             if(event_writer is not None): event_writer.add_scalar('decision_tree/depth_ratio', tree_depth_ratio, epoch, period=1)
             if(display != 'minimal'): print('tree depth ratio: %s' % (tree_depth_ratio))
 
+    # TODO À quoi sert cette méthode ? (Ici, ca me semble assez naturel, mais l'équivalent dans AliceBobPopulation pourrait porter à confusion.)
     @property
     def agents(self):
         return self.sender, self.receiver
