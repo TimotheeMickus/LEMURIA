@@ -105,7 +105,8 @@ def test(X, Y, perms=10000, method='pearson', tail='two-tail', correl_only=False
   X_residuals, Y_residuals = X - X.mean(), Y - Y.mean()
 
   if correl_only:
-    return (X_residuals * Y_residuals).sum(), None, None, None
+    correl_denom = np.sqrt((X_residuals ** 2).sum() * (Y_residuals ** 2).sum())
+    return (X_residuals * Y_residuals).sum() / correl_denom, None, None, None
 
   # Expand the Y residuals to a redundant matrix.
   Y_residuals_as_matrix = spatial.distance.squareform(Y_residuals, force='tomatrix', checks=False)
