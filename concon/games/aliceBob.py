@@ -369,8 +369,8 @@ class AliceBob(Game):
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
-            if(event_writer is not None): event_writer.add_scalar('eval/abstractness', scrambling_resistance, epoch, period=1)
-            if(display != 'minimal'): print('Abstractness %s' % scrambling_resistance)
+            if(event_writer is not None): event_writer.add_scalar('eval/abstractness', abstractness_rate, epoch, period=1)
+            if(display != 'minimal'): print('Abstractness %s' % abstractness_rate)
 
         # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
         success = torch.stack(success)

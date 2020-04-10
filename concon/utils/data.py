@@ -296,7 +296,7 @@ class Dataset():
 
             # Target image
             if(target_is_original): _target = _original.copy()
-            else:_target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
+            else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
             
             # Noise is applied independently to the two images
             _original.add_normal_noise_(self.noise)
