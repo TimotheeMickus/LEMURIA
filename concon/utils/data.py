@@ -270,7 +270,7 @@ class Dataset():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
-    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=False, keep_category=False):
+    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=None, keep_category=False):
         """Generates a batch as a Batch object.
         'size' is the size of the batch.
         'data_type' (train, test, any) indicates, when selecting an image from a category, from what part of this category we take it.
