@@ -445,26 +445,28 @@ class AliceBob(Game):
             sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
 
             l_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, correl_only=True)
-            log('eval/Lev-based comp', l_cor)
-            #log('eval/Lev-based comp (z-score)', l_cor_n)
-            #log('eval/Lev-based comp (random)', l_cor_rd)
+            log('FM_corr/Lev-based comp', l_cor)
+            #log('FM_corr/Lev-based comp (z-score)', l_cor_n)
+            #log('FM_corr/Lev-based comp (random)', l_cor_rd)
 
             l_n_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised, correl_only=True)
-            log('eval/Normalised Lev-based comp', l_n_cor)
-            #log('eval/Normalised Lev-based comp (z-score)', l_n_cor_n)
-            #log('eval/Normalised Lev-based comp (random)', l_n_cor_rd)
+            log('FM_corr/Normalised Lev-based comp', l_n_cor)
+            #log('FM_corr/Normalised Lev-based comp (z-score)', l_n_cor_n)
+            #log('FM_corr/Normalised Lev-based comp (random)', l_n_cor_rd)
 
             j_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False, correl_only=True)
-            log('eval/Jaccard-based comp', j_cor)
-            #log('eval/Jaccard-based comp (z-score)', j_cor_n)
-            #log('eval/Jaccard-based comp (random)', j_cor_rd)
+            log('FM_corr/Jaccard-based comp', j_cor)
+            #log('FM_corr/Jaccard-based comp (z-score)', j_cor_n)
+            #log('FM_corr/Jaccard-based comp (random)', j_cor_rd)
+            
+            if(l_n_cor > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (j_cor / l_n_cor))
 
             minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_messages, sample_categories, base=2)
-            log('eval/min Entropy category per msgs', minH)
-            log('eval/mean Entropy category per msgs', meanH)
-            log('eval/med Entropy category per msgs', medH)
-            log('eval/max Entropy category per msgs', maxH)
-            log('eval/var Entropy category per msgs', varH)
+            log('FM_corr/min Entropy category per msgs', minH)
+            log('FM_corr/mean Entropy category per msgs', meanH)
+            log('FM_corr/med Entropy category per msgs', medH)
+            log('FM_corr/max Entropy category per msgs', maxH)
+            log('FM_corr/var Entropy category per msgs', varH)
 
         # Decision tree stuff
         alphabet_size = (self.base_alphabet_size + 1)
