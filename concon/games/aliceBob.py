@@ -439,7 +439,7 @@ class AliceBob(Game):
                 break
 
         if(ok == False):
-            print('Compositionality measures cannot be computed (%i messages and %i different categories in the sample).' % (len(mes), len(cat)))
+            print('Compositionality measures cannot be computed (%i messages and %i categories in the sample).' % (len(mes), len(cat))) # Unique messages and unique categories
         else:
             sample_messages, sample_categories = zip(*sample)
             sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
