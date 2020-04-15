@@ -288,6 +288,10 @@ class AliceBob(Game):
         return loss
 
     def evaluate(self, data_iterator, epoch, event_writer=None, display='tqdm', debug=False, log_lang_progress=True):
+        def log(name, value):
+            if(event_writer is not None): event_writer.add_scalar(name, value, epoch, period=1)
+            if(display != 'minimal'): print('%s\t%s' % (name, value))
+
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
@@ -348,8 +352,7 @@ class AliceBob(Game):
             success_prob = torch.stack(success_prob)
             scrambled_success_prob = torch.stack(scrambled_success_prob)
             scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
-            if(event_writer is not None): event_writer.add_scalar('eval/scrambling-resistance', scrambling_resistance, epoch, period=1)
-            if(display != 'minimal'): print('Scrambling resistance %s' % scrambling_resistance)
+            log('eval/scrambling-resistance', scrambling_resistance)
 
             # Here, we try to see how much the messages describe the categories and not the praticular images
             # To do so, we use the original image as target, and an image of the same category as distractor
@@ -369,19 +372,16 @@ class AliceBob(Game):
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
-            if(event_writer is not None): event_writer.add_scalar('eval/abstractness', abstractness_rate, epoch, period=1)
-            if(display != 'minimal'): print('Abstractness %s' % abstractness_rate)
+            log('eval/abstractness', abstractness_rate)
 
         # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
         success = torch.stack(success)
         success_rate = success.mean().item()
-        if(event_writer is not None): event_writer.add_scalar('eval/success_rate', success_rate, epoch, period=1)
-        if(display != 'minimal'): print('Success rate: %s' % success_rate)
+        log('eval/success_rate', success_rate)
 
         # Computes the accuracy when the images are selected from all categories
         accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
-        if(event_writer is not None): event_writer.add_scalar('eval/accuracy', accuracy_all, epoch, period=1)
-        if(display != 'minimal'): print('Accuracy: %s' % accuracy_all)
+        log('eval/accuracy', accuracy_all)
 
         train_categories = data_iterator.training_categories_idx
         eval_categories = data_iterator.evaluation_categories_idx
@@ -392,8 +392,7 @@ class AliceBob(Game):
 
             counts = counts_matrix_train_td.sum()
             accuracy_train_td = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
-            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-train-td', accuracy_train_td, epoch, period=1)
-            if(display != 'minimal'): print('Accuracy train-td %s' % accuracy_train_td)
+            log('eval/accuracy-train-td', accuracy_train_td)
 
             # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
             failure_matrix_eval_t = failure_matrix[eval_categories, :]
@@ -401,8 +400,7 @@ class AliceBob(Game):
 
             counts = counts_matrix_eval_t.sum()
             accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
-            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-t', accuracy_eval_t, epoch, period=1)
-            if(display != 'minimal'): print('Accuracy eval-t: %s' % accuracy_eval_t)
+            log('eval/accuracy-eval-t', accuracy_eval_t)
 
             # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
             failure_matrix_eval_d = failure_matrix[:, eval_categories]
@@ -410,8 +408,7 @@ class AliceBob(Game):
 
             counts = counts_matrix_eval_d.sum()
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
-            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-d', accuracy_eval_d, epoch, period=1)
-            if(display != 'minimal'): print('Accuracy eval-d %s' % accuracy_eval_d)
+            log('eval/accuracy-eval-d', accuracy_eval_d)
 
             # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
             failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
@@ -419,8 +416,7 @@ class AliceBob(Game):
 
             counts = counts_matrix_eval_td.sum()
             accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
-            if(event_writer is not None): event_writer.add_scalar('eval/accuracy-eval-td', accuracy_eval_td, epoch, period=1)
-            if(display != 'minimal'): print('Accuracy eval-td %s' % accuracy_eval_td)
+            log('eval/accuracy-eval-td', accuracy_eval_td)
 
         # Computes compositionality measures
         # First selects a sample of (message, category) pairs
@@ -448,48 +444,27 @@ class AliceBob(Game):
             sample_messages, sample_categories = zip(*sample)
             sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
 
-            #timepoint = time.time()
             l_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, correl_only=True)
-            if(display != 'minimal'): print('Levenshtein: %f ' % l_cor)
-
-            #timepoint2 = time.time()
-            #print(timepoint2 - timepoint)
-            #timepoint2 = timepoint
+            log('eval/Lev-based comp', l_cor)
+            #log('eval/Lev-based comp (z-score)', l_cor_n)
+            #log('eval/Lev-based comp (random)', l_cor_rd)
 
             l_n_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised, correl_only=True)
-            if(display != 'minimal'): print('Levenshtein (length normalised): %f' % l_n_cor)
-
-            #timepoint2 = time.time()
-            #print(timepoint2 - timepoint)
-            #timepoint2 = timepoint
+            log('eval/Normalised Lev-based comp', l_n_cor)
+            #log('eval/Normalised Lev-based comp (z-score)', l_n_cor_n)
+            #log('eval/Normalised Lev-based comp (random)', l_n_cor_rd)
 
             j_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False, correl_only=True)
-            if(display != 'minimal'): print('Jaccard: %f' % j_cor)
+            log('eval/Jaccard-based comp', j_cor)
+            #log('eval/Jaccard-based comp (z-score)', j_cor_n)
+            #log('eval/Jaccard-based comp (random)', j_cor_rd)
 
-            #timepoint2 = time.time()
-            #print(timepoint2 - timepoint)
-            #timepoint2 = timepoint
-
-            entropy_stats = compute_entropy_stats(sample_messages, sample_categories, base=2)
-            if(display != 'minimal'):
-                print('Entropy category/msgs: min: %f, mean: %f, median: %f, max: %f, var: %f' % (entropy_stats))
-
-            if(event_writer is not None):
-                event_writer.add_scalar('eval/Lev-based comp', l_cor, epoch, period=1)
-                #event_writer.add_scalar('eval/Lev-based comp (z-score)', l_cor_n, epoch, period=1)
-                #event_writer.add_scalar('eval/Lev-based comp (random)', l_cor_rd, epoch, period=1)
-                event_writer.add_scalar('eval/Normalised Lev-based comp', l_n_cor, epoch, period=1)
-                #event_writer.add_scalar('eval/Normalised Lev-based comp (z-score)', l_n_cor_n, epoch, period=1)
-                #event_writer.add_scalar('eval/Normalised Lev-based comp (random)', l_n_cor_rd, epoch, period=1)
-                event_writer.add_scalar('eval/Jaccard-based comp', j_cor, epoch, period=1)
-                #event_writer.add_scalar('eval/Jaccard-based comp (z-score)', j_cor_n, epoch, period=1)
-                #event_writer.add_scalar('eval/Jaccard-based comp (random)', j_cor_rd, epoch, period=1)
-                minH, meanH, medH, maxH, varH = entropy_stats
-                event_writer.add_scalar('eval/min Entropy category per msgs', minH, epoch, period=1)
-                event_writer.add_scalar('eval/mean Entropy category per msgs', meanH, epoch, period=1)
-                event_writer.add_scalar('eval/med Entropy category per msgs', medH, epoch, period=1)
-                event_writer.add_scalar('eval/max Entropy category per msgs', maxH, epoch, period=1)
-                event_writer.add_scalar('eval/var Entropy category per msgs', varH, epoch, period=1)
+            minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_messages, sample_categories, base=2)
+            log('eval/min Entropy category per msgs', minH)
+            log('eval/mean Entropy category per msgs', meanH)
+            log('eval/med Entropy category per msgs', medH)
+            log('eval/max Entropy category per msgs', maxH)
+            log('eval/var Entropy category per msgs', varH)
 
         # Decision tree stuff
         alphabet_size = (self.base_alphabet_size + 1)
@@ -499,43 +474,34 @@ class AliceBob(Game):
         conceptual_trees = tmp['conceptual_trees']
 
         n_leaves, depth = full_tree.get_n_leaves(), full_tree.get_depth()
-        if(event_writer is not None): event_writer.add_scalar('decision_tree/full_accuracy', full_tree_accuracy, epoch, period=1)
-        if(display != 'minimal'): print('Full tree accuracy: %s' % full_tree_accuracy)
-        if(event_writer is not None): event_writer.add_scalar('decision_tree/full_n_leaves', n_leaves, epoch, period=1)
-        if(display != 'minimal'): print('Full tree n leaves: %s' % n_leaves)
-        if(event_writer is not None): event_writer.add_scalar('decision_tree/full_depth', depth, epoch, period=1)
-        if(display != 'minimal'): print('Full tree depth: %s' % depth)
+        log('decision_tree/full_accuracy', full_tree_accuracy)
+        log('decision_tree/full_n_leaves', n_leaves)
+        log('decision_tree/full_depth', depth)
 
         for i, (tree, accuracy) in conceptual_trees:
             name = data_iterator.concept_names[i]
 
             n_leaves, depth = tree.get_n_leaves(), tree.get_depth()
-            if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_accuracy' % name), accuracy, epoch, period=1)
-            if(display != 'minimal'): print('%s tree accuracy: %s' % (name, accuracy))
-            if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_n_leaves' % name), n_leaves, epoch, period=1)
-            if(display != 'minimal'): print('%s tree n leaves: %s' % (name, n_leaves))
-            if(event_writer is not None): event_writer.add_scalar(('decision_tree/%s_depth' % name), depth, epoch, period=1)
-            if(display != 'minimal'): print('%s tree depth: %s' % (name, depth))
+            log(('decision_tree/%s_accuracy' % name), accuracy)
+            log(('decision_tree/%s_n_leaves' % name), n_leaves)
+            log(('decision_tree/%s_depth' % name), depth)
 
         prod_conceptual_accuracy = np.array([accuracy for (_, (_, accuracy)) in conceptual_trees]).prod()
         if(prod_conceptual_accuracy > 0.0):
             tree_accuracy_ratio = (full_tree_accuracy / prod_conceptual_accuracy)
-            if(event_writer is not None): event_writer.add_scalar('decision_tree/accuracy_ratio', tree_accuracy_ratio, epoch, period=1)
-            if(display != 'minimal'): print('tree accuracy ratio: %s' % (tree_accuracy_ratio))
+            log('decision_tree/accuracy_ratio', tree_accuracy_ratio)
 
         prod_conceptual_n_leaves = np.array([tree.get_n_leaves() for (_, (tree, _)) in conceptual_trees]).prod()
         if(prod_conceptual_n_leaves > 0):
             tree_n_leaves_ratio = (full_tree.get_n_leaves() / prod_conceptual_n_leaves)
-            if(event_writer is not None): event_writer.add_scalar('decision_tree/n_leaves_ratio', tree_n_leaves_ratio, epoch, period=1)
-            if(display != 'minimal'): print('tree n_leaves ratio: %s' % (tree_n_leaves_ratio))
+            log('decision_tree/n_leaves_ratio', tree_n_leaves_ratio)
 
         sum_conceptual_depth = sum([tree.get_depth() for (_, (tree, _)) in conceptual_trees])
         if(sum_conceptual_depth > 0):
             tree_depth_ratio = (full_tree.get_depth() / sum_conceptual_depth)
-            if(event_writer is not None): event_writer.add_scalar('decision_tree/depth_ratio', tree_depth_ratio, epoch, period=1)
-            if(display != 'minimal'): print('tree depth ratio: %s' % (tree_depth_ratio))
+            log('decision_tree/depth_ratio', tree_depth_ratio)
 
-    # TODO À quoi sert cette méthode ? (Ici, ca me semble assez naturel, mais l'équivalent dans AliceBobPopulation pourrait porter à confusion.)
+    # TODO À quoi sert cette méthode ? (Ici, ça me semble assez naturel, mais l'équivalent dans AliceBobPopulation pourrait porter à confusion.)
     @property
     def agents(self):
         return self.sender, self.receiver
