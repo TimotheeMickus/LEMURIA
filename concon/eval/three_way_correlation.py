@@ -8,6 +8,7 @@ import os
 import torch
 from scipy.stats import pearsonr as spearman
 import scipy
+import scipy.spatial
 import numpy as np
 
 import tqdm
@@ -60,14 +61,31 @@ def read_csv(csv_filename, string_msgs=False):
 
 def l2(v1, v2): return np.linalg.norm(v1 - v2)
 
+# Computes a value between 0 and 1
+class CosineDissimilarity:
+    def __call__(self, u, v):
+        return 0.5 * scipy.spatial.distance.cosine(u, v)
+        
+# Computes a value between 0 and 1
+# If the distance (2) between `u` and `v` is higher (resp. lower) than the typical distance, returns a value that is higher (resp. lower) than the typical dissimilarity
+class EuclideanDissimilarity:
+    def __init__(self, typical_dst, typical_diss):
+        self.alpha = typical_diss / ((1 - typical_diss) * typical_dst)
+
+    def __call__(self, u, v):
+         dst = np.linalg.norm(u - v) # Distance 2 (or L2 norm of the difference)
+         c = 1 - (1 / (1 + (self.alpha * dst)))
+
+         return c
+
 # `seq1` and `seq2` can be any sequences
 # `embeddings` must currently have a get method for element of the sequences to Numpy arrays (or None)
-# `average_distance` and `r` are two hyperparameters: substituting two items the embeddings of which are at distance `average_distance` (in L2) will have a cost `r`. For smaller (resp. higher) distance, the cost of the substitution will be smaller (resp. higher), but, of course, always between 0 and 1.
-def word_embedding_levenshtein(seq1, seq2, embeddings, average_distance, r=0.9, normalise=False):
+# 2020/07/02 I have made some change, now you need can supply a dissimilarity function as argument. To get the same behaviour as previously, use EclideanDissimilarity(typical_dst=average_distance, typical_diss=r)
+def word_embedding_levenshtein(seq1, seq2, embeddings, diss_f=None, normalise=False):
     x1 = 1 + len(seq1)
     x2 = 1 + len(seq2)
 
-    alpha = r / ((1 - r) * average_distance)
+    if(diss_f is None): diss_f = CosineDissimilarity()
 
     # Initialisation of the matrix
     d = [] # Using Numpy structures for this is probably not more efficient
@@ -87,13 +105,7 @@ def word_embedding_levenshtein(seq1, seq2, embeddings, average_distance, r=0.9, 
                 v2 = embeddings.get(e2)
 
                 if((v1 is None) or (v2 is None)): c = 1
-                else:
-                    dst = np.linalg.norm(v1 - v2) # Distance 2 (or L2 norm of the difference)
-
-                    # Now, we need a function increasing function mapping 0 to 0 and +inf to 1
-                    c = 1 - (1 / (1 + (alpha * dst)))
-
-                    #c /= r # If you uncomment this line, the cost of a substitution at distance `average_distance` will be 1 and substitutions might have higher cost, up to 1/r. This might be justified as long as `r` is above 0.5 (otherwise, some substitutions might be more expensive than an insertion followed by a deletion).
+                else: c = diss_f(v1, v2)
 
             d[i][j] = min(
                 (d[(i-1)][j] + 1), # Deletion of seq1[i]
@@ -111,8 +123,6 @@ def word_embedding_levenshtein(seq1, seq2, embeddings, average_distance, r=0.9, 
 def weighted_levenshtein(seq1, seq2, weights, normalise=False):
     x1 = 1 + len(seq1)
     x2 = 1 + len(seq2)
-
-    alpha = r / ((1 - r) * average_distance)
 
     # Initialisation of the matrix
     d = [] # Using Numpy structures for this is probably not more efficient
