@@ -61,7 +61,7 @@ class CosineDissimilarity:
 # Computes a value between 0 and 1
 # If the distance (2) between `u` and `v` is higher (resp. lower) than the typical distance, returns a value that is higher (resp. lower) than the typical dissimilarity
 class EuclideanDissimilarity:
-    def __init__(self, typical_dst, typical_diss):
+    def __init__(self, typical_dst, typical_diss=0.9):
         self.alpha = typical_diss / ((1 - typical_diss) * typical_dst)
 
     def __call__(self, u, v):
