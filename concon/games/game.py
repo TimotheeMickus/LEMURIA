@@ -228,7 +228,7 @@ class Game(metaclass=ABCMeta):
         device = next(agent.parameters()).device
         model = nn.Sequential(
             agent.image_encoder,
-            Unflatten(),
+            #Unflatten(),
             deconvolution_factory(),
         ).to(device)
 

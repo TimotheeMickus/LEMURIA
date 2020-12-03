@@ -14,7 +14,7 @@ class MultiHeadsClassifier:
 
     def train(self, batch): # Only the target images will be used
         self.optimizer.zero_grad()
-        
+
         hits, losses = self.forward(batch)
 
         loss = 0. # Will be the sum over all heads of the mean over the batch
@@ -24,7 +24,7 @@ class MultiHeadsClassifier:
         self.optimizer.step()
 
         return hits, loss
-    
+
     def forward(self, batch): # Only the target images will be used
         batch_img = batch.target_img(stack=True)
         activation = self.image_encoder(batch_img)
@@ -198,6 +198,58 @@ class Randomizer(nn.Module):
     def from_args(cls, args):
         return cls(input_dim=args.hidden_size, random_dim=args.hidden_size)
 
+def _dcgan_tuto_cnn(img_size, hidden_size):
+    # params of convs:
+    # input chans, output chans, kernel, stride, padding
+    # ignore coms which are incorrect wrt. our IMG size
+    return nn.Sequential(
+            # input is (3) x 64 x 64
+            nn.Conv2d(3, img_size, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(img_size, img_size * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            nn.Conv2d(img_size * 2, img_size * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(img_size * 4, img_size * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(img_size * 8, hidden_size, 4, 1, 0, bias=False),
+            nn.Tanh()
+        )
+
+
+def _dcgan_tuto_decnn(img_size, hidden_size):
+    # params of convs:
+    # input chans, output chans, kernel, stride, padding
+    # ignore coms which are incorrect wrt. our IMG size
+    return nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(hidden_size, img_size * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(img_size * 8),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 4 x 4
+            nn.ConvTranspose2d(img_size * 8, img_size * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size * 4),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 8 x 8
+            nn.ConvTranspose2d( img_size * 4, img_size * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size * 2),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 16 x 16
+            nn.ConvTranspose2d( img_size * 2, img_size, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size),
+            nn.ReLU(True),
+            # state size. (ngf) x 32 x 32
+            nn.ConvTranspose2d(img_size, 3, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (3) x 128 x 128
+        )
 
 def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
     strides=(), kernel_size=None, paddings=None, flatten_last=True,
@@ -291,6 +343,10 @@ def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
     """
+    short_cut = _dcgan_tuto_cnn(128, args.hidden_size)
+    return short_cut
+
+    # for legacy or now
     layer_classes = (["conv"] * args.conv_layers)
     input_channels = ([args.img_channel] + [args.filters] * (args.conv_layers - 1))
     output_channels = ([args.filters] * (args.conv_layers - 1) + [args.hidden_size])
@@ -306,6 +362,9 @@ def build_cnn_decoder_from_args(args):
     """
     Factory for deconvolutionnal networks
     """
+    short_cut = _dcgan_tuto_decnn(128, args.hidden_size)
+    return short_cut
+
     layer_classes = (["convTranspose"] * args.conv_layers)
     strides = args.strides[::-1]
     inputs = [args.hidden_size] + ([args.filters] * (args.conv_layers - 1))
