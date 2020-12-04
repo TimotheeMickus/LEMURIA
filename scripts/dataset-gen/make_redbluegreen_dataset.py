@@ -1,3 +1,8 @@
+# How to use this (disgusting) script:
+# For the default browser opened by VPython, make sure you automatically accept
+# downloads of PNG files to wherever directory you want the dataset to be in.
+# See variable PATH below
+
 import vpython as vp
 from time import sleep
 from random import uniform
