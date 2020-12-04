@@ -101,7 +101,7 @@ class AutoLogger(object):
 
         self.device = device
 
-        self.log_charlie_acc = log_charlie_acc # C'est variable fait référence à Charlie, qui n'existe pas forcément.
+        self.log_charlie_acc = False #log_charlie_acc # C'est variable fait référence à Charlie, qui n'existe pas forcément.
 
         if no_summary:
             self.summary_writer = None
@@ -164,8 +164,8 @@ class AutoLogger(object):
             number_ex_seen = supplementary_info['index'] * supplementary_info['batch'].size
             self._state['number_ex_seen'] = number_ex_seen
             if self.log_charlie_acc:
-                charlie_acc, charlie_turn = external_output
-                tag = 'charlie' if charlie_turn else 'alice-bob'
+                #charlie_acc, charlie_turn = external_output
+                tag = 'charlie' #if charlie_turn else 'alice-bob'
                 self.summary_writer.add_scalar('train-%s/reward' % tag, avg_reward, number_ex_seen)
                 self.summary_writer.add_scalar('train-%s/success' % tag, avg_success, number_ex_seen)
                 self.summary_writer.add_scalar('train-%s/loss' % tag, loss.item(), number_ex_seen)
@@ -180,9 +180,9 @@ class AutoLogger(object):
             self.summary_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
             self.summary_writer.add_scalar('llp/length_ratio', length_ratio, number_ex_seen)
 
-            if self.log_charlie_acc:
-                charlie_acc = charlie_acc.mean().item()
-                self.summary_writer.add_scalar('train-%s/charlie_acc' % tag, charlie_acc, number_ex_seen)
+            # if self.log_charlie_acc:
+            #     charlie_acc = charlie_acc.mean().item()
+            #     self.summary_writer.add_scalar('train-%s/charlie_acc' % tag, charlie_acc, number_ex_seen)
 
             if self.log_lang_progress:
                 for batch in supplementary_info['batches']:
