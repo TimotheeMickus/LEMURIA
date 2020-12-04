@@ -218,9 +218,14 @@ def _dcgan_tuto_cnn(img_size, hidden_size):
             nn.Conv2d(img_size * 4, img_size * 8, 4, 2, 1, bias=False),
             nn.BatchNorm2d(img_size * 8),
             nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(img_size * 8, img_size * 16, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(img_size * 16),
+            nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(img_size * 8, hidden_size, 4, 1, 0, bias=False),
-            nn.Tanh()
+            nn.Conv2d(img_size * 16, hidden_size, 4, 1, 0, bias=False),
+            nn.Tanh(),
+            nn.Flatten(),
         )
 
 
@@ -230,7 +235,11 @@ def _dcgan_tuto_decnn(img_size, hidden_size):
     # ignore coms which are incorrect wrt. our IMG size
     return nn.Sequential(
             # input is Z, going into a convolution
-            nn.ConvTranspose2d(hidden_size, img_size * 8, 4, 1, 0, bias=False),
+            nn.ConvTranspose2d(hidden_size, img_size * 16, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(img_size * 16),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 4 x 4
+            nn.ConvTranspose2d(img_size * 16, img_size * 8, 4, 2, 1, bias=False),
             nn.BatchNorm2d(img_size * 8),
             nn.ReLU(True),
             # state size. (ngf*8) x 4 x 4

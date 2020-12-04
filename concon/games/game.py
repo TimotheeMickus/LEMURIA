@@ -228,7 +228,7 @@ class Game(metaclass=ABCMeta):
         device = next(agent.parameters()).device
         model = nn.Sequential(
             agent.image_encoder,
-            #Unflatten(),
+            Unflatten(),
             deconvolution_factory(),
         ).to(device)
 
@@ -245,7 +245,6 @@ class Game(metaclass=ABCMeta):
 
                     batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
-
                     output = model(batch_img)
 
                     loss = F.mse_loss(output, batch_img, reduction="sum")
