@@ -260,134 +260,135 @@ def _dcgan_tuto_decnn(img_size, hidden_size):
             # state size. (3) x 128 x 128
         )
 
-def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
-    strides=(), kernel_size=None, paddings=None, flatten_last=True,
-    sigmoid_after=False,):
-    """
-    Factory for convolutionnal encoders.
-    Input:
-        `layer_classes`: a list of classes to stack, taken from `{"conv", "convTranspose", "maxpool", "avgpool"}`
-        `input_channels`: a list of expected input channels per layer
-        `output_channels`: a list of expected output channels per layer
-        `strides`: a list of strides per layer each layer
-        `kernel_size`: a valid kernel size used throughout the convolutionnal network encoder, or a list of kernel sizes per layer
-        `padding`: an optional list of (output) padding per layer
-        `flatten_last`: flatten output instead of performing batch normalization after the last layer.
-    Output:
-        `cnn`: a convolutionnal network
-    Raises:
-        `AssertionError` if the provided lists `layer_classes`, `input_channels`, `output_channels`, and `strides` have different lengths
-        `ValueError` if a given layer class is not "conv", "maxpool", or "avgpool"
-    """
-
-    lens = map(len, (layer_classes, input_channels, output_channels, strides))
-    assert len(set(lens)) == 1, "provided parameters have different lengths!"
-
-    if paddings is None:
-        paddings = ([0] * len(layer_classes))
-    else:
-        assert len(layer_classes) == len(paddings), "provided parameters have different lengths!"
-
-    if (type(kernel_size) is int) or (len(kernel_size) == 2):
-        kernel_size = ([kernel_size] * len(layer_classes))
-    else:
-        assert len(layer_classes) == len(kernel_size), "provided parameters have different lengths!"
-
-    if flatten_last:
-        norms = ([nn.BatchNorm2d] * (len(layer_classes) - 1)) + [lambda _ : nn.Flatten()]
-    else:
-        norms = ([nn.BatchNorm2d] * len(layer_classes))
-
-    layers = []
-
-    for s,i,o,n,l,p,k in zip(
-        strides,
-        input_channels,
-        output_channels,
-        norms,
-        layer_classes,
-        paddings,
-        kernel_size,):
-        if l == "conv":
-            core_layer = nn.Sequential(
-                nn.Conv2d(
-                    in_channels=i,
-                    out_channels=o,
-                    kernel_size=k,
-                    stride=s,
-                    padding=p,),
-                nn.ReLU())
-        elif l == "convTranspose":
-            core_layer = nn.Sequential(
-                nn.ConvTranspose2d(
-                    in_channels=i,
-                    out_channels=o,
-                    kernel_size=k,
-                    stride=s,
-                    output_padding=p,),
-                nn.ReLU())
-        elif l == "maxpool":
-            core_layer = nn.MaxPool2d(
-                kernel_size=k,
-                stride=s,
-                padding=p,)
-        elif l == "avgpool":
-            core_layer = nn.AvgPool2d(
-                kernel_size=k,
-                stride=s,
-                padding=p,)
-        else:
-            raise ValueError("layer of type %s is not supported.")
-        layers.append(
-            nn.Sequential(
-                core_layer,
-                n(o),
-        ))
-    if sigmoid_after:
-        layers.append(nn.Sigmoid())
-    cnn = nn.Sequential(*layers)
-    return cnn
+# def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
+#     strides=(), kernel_size=None, paddings=None, flatten_last=True,
+#     sigmoid_after=False,):
+#     """
+#     Factory for convolutionnal encoders.
+#     Input:
+#         `layer_classes`: a list of classes to stack, taken from `{"conv", "convTranspose", "maxpool", "avgpool"}`
+#         `input_channels`: a list of expected input channels per layer
+#         `output_channels`: a list of expected output channels per layer
+#         `strides`: a list of strides per layer each layer
+#         `kernel_size`: a valid kernel size used throughout the convolutionnal network encoder, or a list of kernel sizes per layer
+#         `padding`: an optional list of (output) padding per layer
+#         `flatten_last`: flatten output instead of performing batch normalization after the last layer.
+#     Output:
+#         `cnn`: a convolutionnal network
+#     Raises:
+#         `AssertionError` if the provided lists `layer_classes`, `input_channels`, `output_channels`, and `strides` have different lengths
+#         `ValueError` if a given layer class is not "conv", "maxpool", or "avgpool"
+#     """
+#
+#     lens = map(len, (layer_classes, input_channels, output_channels, strides))
+#     assert len(set(lens)) == 1, "provided parameters have different lengths!"
+#
+#     if paddings is None:
+#         paddings = ([0] * len(layer_classes))
+#     else:
+#         assert len(layer_classes) == len(paddings), "provided parameters have different lengths!"
+#
+#     if (type(kernel_size) is int) or (len(kernel_size) == 2):
+#         kernel_size = ([kernel_size] * len(layer_classes))
+#     else:
+#         assert len(layer_classes) == len(kernel_size), "provided parameters have different lengths!"
+#
+#     if flatten_last:
+#         norms = ([nn.BatchNorm2d] * (len(layer_classes) - 1)) + [lambda _ : nn.Flatten()]
+#     else:
+#         norms = ([nn.BatchNorm2d] * len(layer_classes))
+#
+#     layers = []
+#
+#     for s,i,o,n,l,p,k in zip(
+#         strides,
+#         input_channels,
+#         output_channels,
+#         norms,
+#         layer_classes,
+#         paddings,
+#         kernel_size,):
+#         if l == "conv":
+#             core_layer = nn.Sequential(
+#                 nn.Conv2d(
+#                     in_channels=i,
+#                     out_channels=o,
+#                     kernel_size=k,
+#                     stride=s,
+#                     padding=p,),
+#                 nn.ReLU())
+#         elif l == "convTranspose":
+#             core_layer = nn.Sequential(
+#                 nn.ConvTranspose2d(
+#                     in_channels=i,
+#                     out_channels=o,
+#                     kernel_size=k,
+#                     stride=s,
+#                     output_padding=p,),
+#                 nn.ReLU())
+#         elif l == "maxpool":
+#             core_layer = nn.MaxPool2d(
+#                 kernel_size=k,
+#                 stride=s,
+#                 padding=p,)
+#         elif l == "avgpool":
+#             core_layer = nn.AvgPool2d(
+#                 kernel_size=k,
+#                 stride=s,
+#                 padding=p,)
+#         else:
+#             raise ValueError("layer of type %s is not supported.")
+#         layers.append(
+#             nn.Sequential(
+#                 core_layer,
+#                 n(o),
+#         ))
+#     if sigmoid_after:
+#         layers.append(nn.Sigmoid())
+#     cnn = nn.Sequential(*layers)
+#     return cnn
 
 def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
     """
-    short_cut = _dcgan_tuto_cnn(128, args.hidden_size)
+    short_cut = _dcgan_tuto_cnn(args.img_size, args.hidden_size)
     return short_cut
-
-    # for legacy or now
-    layer_classes = (["conv"] * args.conv_layers)
-    input_channels = ([args.img_channel] + [args.filters] * (args.conv_layers - 1))
-    output_channels = ([args.filters] * (args.conv_layers - 1) + [args.hidden_size])
-    return build_cnn(
-        layer_classes=layer_classes,
-        input_channels=input_channels,
-        output_channels=output_channels,
-        strides=args.strides,
-        kernel_size=args.kernel_size,
-        paddings=None,)
+    #
+    # # for legacy or now
+    # layer_classes = (["conv"] * args.conv_layers)
+    # input_channels = ([args.img_channel] + [args.filters] * (args.conv_layers - 1))
+    # output_channels = ([args.filters] * (args.conv_layers - 1) + [args.hidden_size])
+    # return build_cnn(
+    #     layer_classes=layer_classes,
+    #     input_channels=input_channels,
+    #     output_channels=output_channels,
+    #     strides=args.strides,
+    #     kernel_size=args.kernel_size,
+    #     paddings=None,)
 
 def build_cnn_decoder_from_args(args):
     """
     Factory for deconvolutionnal networks
     """
-    short_cut = _dcgan_tuto_decnn(128, args.hidden_size)
+    short_cut = _dcgan_tuto_decnn(args.img_size, args.hidden_size)
     return short_cut
 
-    layer_classes = (["convTranspose"] * args.conv_layers)
-    strides = args.strides[::-1]
-    inputs = [args.hidden_size] + ([args.filters] * (args.conv_layers - 1))
-    outputs = ([args.filters] * (args.conv_layers - 1)) + [args.img_channel]
-    paddings = [0, 0, 1, 0, 0, 0, 0, 1] # guessworking it out
-    return build_cnn(
-        layer_classes=layer_classes,
-        input_channels=inputs,
-        output_channels=outputs,
-        strides=strides,
-        paddings=paddings,
-        kernel_size=args.kernel_size,
-        flatten_last=False,
-        sigmoid_after=True,)
+    # #for legacy for now
+    # layer_classes = (["convTranspose"] * args.conv_layers)
+    # strides = args.strides[::-1]
+    # inputs = [args.hidden_size] + ([args.filters] * (args.conv_layers - 1))
+    # outputs = ([args.filters] * (args.conv_layers - 1)) + [args.img_channel]
+    # paddings = [0, 0, 1, 0, 0, 0, 0, 1] # guessworking it out
+    # return build_cnn(
+    #     layer_classes=layer_classes,
+    #     input_channels=inputs,
+    #     output_channels=outputs,
+    #     strides=strides,
+    #     paddings=paddings,
+    #     kernel_size=args.kernel_size,
+    #     flatten_last=False,
+    #     sigmoid_after=True,)
 
 def build_embeddings(base_alphabet_size, dim, use_bos=False):
     vocab_size = (base_alphabet_size + 3) if use_bos else (base_alphabet_size + 2) # +3: EOS symbol, padding symbol, BOS symbol; +2: EOS symbol, padding symbol

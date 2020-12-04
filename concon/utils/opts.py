@@ -74,11 +74,12 @@ def get_args():
     group.add_argument('--runs', help='number of runs', default=1, type=int)
 
     group = arg_parser.add_argument_group(title='Conv', description='arguments relative to convolutional structure')
-    group.add_argument('--img_channel', help='number of input channels in images', type=int, default=3)
-    group.add_argument('--conv_layers', help='number of convolution layers', type=int, default=8)
-    group.add_argument('--filters', help='number of filters per convolution layers', type=int, default=32)
-    group.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
-    group.add_argument('--strides', help='stride at each convolution layer', type=int, nargs='+', default=[2, 2, 1, 2, 1, 2, 1, 2]) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
+    # group.add_argument('--img_channel', help='number of input channels in images', type=int, default=3)
+    group.add_argument('--img_size', help='Width/height of images', type=int, default=128)
+    # group.add_argument('--conv_layers', help='number of convolution layers', type=int, default=8)
+    # group.add_argument('--filters', help='number of filters per convolution layers', type=int, default=32)
+    # group.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
+    # group.add_argument('--strides', help='stride at each convolution layer', type=int, nargs='+', default=[2, 2, 1, 2, 1, 2, 1, 2]) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
     group.add_argument('--pretrain_CNNs', help='pretrain CNNs on specified task', type=str, choices=['category-wise', 'feature-wise', 'auto-encoder'])
     group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining', type=float)
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
