@@ -11,11 +11,11 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from .games import AliceBob, AliceBobCharlie, AliceBobPopulation
+from .games import AliceBob, AliceBobCharlie, AliceBobPopulation, AliceBobCharliePopulation
 from .utils.data import get_data_loader
 from .utils.opts import get_args
 from .utils.misc import build_optimizer, get_default_fn
-from .utils.modules import build_cnn_decoder_from_args
+from .utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
 from .utils.logging import AutoLogger
 from .utils.data import Batch
 
@@ -36,20 +36,22 @@ def train(args):
         if((not args.no_summary) and (not os.path.isdir(run_summary_dir))): os.makedirs(run_summary_dir)
         if((args.save_every > 0) and (not os.path.isdir(run_models_dir))): os.makedirs(run_models_dir)
 
-        if(args.population is not None): model = AliceBobPopulation(args)
-        elif args.charlie: model = AliceBobCharlie(args)
+        if((args.population is not None) and (args.charlie)): model = AliceBobCharliePopulation(args)
+        elif(args.population is not None): model = AliceBobPopulation(args)
+        elif(args.charlie): model = AliceBobCharlie(args)
         else: model = AliceBob(args)
         model = model.to(args.device)
         #print(model)
 
         data_loader = get_data_loader(args)
-        autologger = AutoLogger(game=model, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period, log_charlie_acc=args.charlie)
+        autologger = AutoLogger(game=model, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)# log_charlie_acc=args.charlie)
 
         if args.pretrain_CNNs:
             print(("[%s] pretraining start…" % datetime.now()), flush=True)
 
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
-            pretrained_models = model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, shared=args.shared)
+            cnn_factory_fn = get_default_fn(build_cnn_encoder_from_args, args)
+            pretrained_models = model.pretrain_CNNs(data_loader, autologger.summary_writer, pretrain_CNN_mode=args.pretrain_CNNs, freeze_pretrained_CNN=args.freeze_pretrained_CNNs, learning_rate=args.pretrain_learning_rate or args.learning_rate, nb_epochs=args.pretrain_epochs, steps_per_epoch=args.steps_per_epoch, display_mode=args.display, pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval, deconvolution_factory=dcnn_factory_fn, convolution_factory=cnn_factory_fn, shared=args.shared)
 
             if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
                 (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())
@@ -110,6 +112,7 @@ def train(args):
         if args.charlie:
             if hasattr(autologger, "log_charlie_acc"):
                 autologger.log_charlie_acc = True
+            autologger.tag_header = "Charlie"
             model.switch_charlie(True)
             for epoch in range(args.epochs):
                 timepoint_0 = time.time()
@@ -128,6 +131,7 @@ def train(args):
 
                 if((args.save_every > 0) and (((epoch + 1) % args.save_every) == 0)):
                     model.save(os.path.join(run_models_dir, ("model_charlie_e%i.pt" % epoch)))
+            model.switch_charlie(False)
 
 if(__name__ == "__main__"):
     args = get_args()

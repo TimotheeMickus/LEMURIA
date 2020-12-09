@@ -68,7 +68,7 @@ class AliceBobPopulation(AliceBob):
         if(self.use_baseline):
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
-        
+
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
 
     def to(self, *vargs, **kwargs):
@@ -110,14 +110,15 @@ class AliceBobPopulation(AliceBob):
                     print("[%s] %s reinitialized." %(datetime.now(), agent_name))
             self._current_epoch += 1
 
-    # TODO À quoi sert cette méthode ?
     @property
     def agents(self):
+        """Defines the property self.agents"""
+        # for an example use, see game.py:l154
         return self._sender, self._receiver
 
     @property
     def optims(self):
-        return (self.optim,)
+        return (self._optim,)
 
     def save(self, path):
         state = {
@@ -135,10 +136,10 @@ class AliceBobPopulation(AliceBob):
         instance._optim = checkpoint['optims'][0]
         return instance
 
-    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
+    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False):
         agents = self._agents if not shared else [a.sender for a in self._agents]
         trained_models = {}
         for i, agent in enumerate(agents):
             agent_name = ("agent %i" % i)
-            trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
+            trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
         return trained_models

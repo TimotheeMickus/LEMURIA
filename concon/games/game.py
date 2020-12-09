@@ -148,24 +148,26 @@ class Game(metaclass=ABCMeta):
 
     # Caution: as this function pretrains all agents, be careful with shared parameters
     # It is likely that this method should be overriden
-    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, shared=False):
+    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False):
         pretrained_models = {}
         # TODO: handle Drawer agents
         agents = (a for a in self.agents if hasattr(a, 'image_encoder'))
+        if pretrain_CNN_mode == 'auto-encoder':
+            agents = (a for a in self.agents if hasattr(a, 'image_decoder') or hasattr(a, 'image_encoder'))
         for i, agent in enumerate(agents):
             agent_name = ("agent %i" % i)
-            pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, agent_name=agent_name)
+            pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
         return pretrained_models
 
-    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, agent_name="agent"):
+    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, agent_name="agent"):
         print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
 
         if pretrain_CNN_mode != 'auto-encoder':
             pretrained_model = self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
-            pretrained_model = self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+            pretrained_model = self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, convolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
 
-        if freeze_pretrained_CNN:
+        if freeze_pretrained_CNN and hasattr(agent, 'image_encoder') :
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
 
@@ -225,13 +227,28 @@ class Game(metaclass=ABCMeta):
         return model
 
     # Pretrains the CNN of an agent in auto-encoder mode
-    def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
+    def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
         device = next(agent.parameters()).device
+
+        found = False
+        if hasattr(agent, 'image_encoder'):
+            encoder = agent.image_encoder
+            found = True
+        else:
+            encoder = convolution_factory()
+        if hasattr(agent, 'image_decoder'):
+            decoder = agent.image_decoder
+            found = True
+        else:
+            decoder = deconvolution_factory()
+
+        assert found, "Agent must have an image encoder or decoder!"
+
         model = nn.Sequential(
-            agent.image_encoder,
+            encoder,
             Unflatten(),
-            deconvolution_factory(),
+            decoder,
         ).to(device)
 
         optimizer = build_optimizer(model.parameters(), learning_rate)
@@ -243,7 +260,7 @@ class Game(metaclass=ABCMeta):
             pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L'})
             with pbar:
                 for _ in range(steps_per_epoch):
-                    self.optim.zero_grad()
+                    optimizer.zero_grad()
 
                     batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)

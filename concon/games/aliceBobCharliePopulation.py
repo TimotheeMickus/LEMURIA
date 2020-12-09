@@ -13,32 +13,42 @@ from ..agents import Sender, Receiver, Drawer
 from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing, compute_entropy_stats
 from ..eval import compute_correlation
 
-from .aliceBob import AliceBob
+from .aliceBobPopulation import AliceBobPopulation
 
-class AliceBobCharlie(AliceBob):
+class AliceBobCharliePopulation(AliceBobPopulation):
     def __init__(self, args):
+        size = args.population
+        self.drawers = nn.ModuleList([Drawer.from_args(args) for _ in range(size)])
+        self._drawer = None
         super().__init__(args)
-        self.drawer = Drawer.from_args(args)
         self._optim_alice_bob = self._optim
-        self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
+        self._optim_charlie = build_optimizer(self.drawers.parameters(), args.learning_rate)
         self.switch_charlie(False)
+        self._agents += self.drawers
 
     def switch_charlie(self, train_charlie):
         self.train_charlie = train_charlie
         # for a in super().agents:
         #     for p in a.parameters():
         #         p.requires_grad = not train_charlie
-        # for p in self.drawer.parameters():
+        # for p in self.drawers.parameters():
         #     p.requires_grad = train_charlie
         self._optim = self._optim_charlie if train_charlie else self._optim_alice_bob
+
+    def get_drawer(self):
+        return self._drawer
+
+    def start_episode(self, train_episode=True):
+        self._drawer = random.choice(self.drawers)
+        super().start_episode(train_episode=train_episode)
+
+    @property
+    def agents(self):
+        return self._sender, self._receiver, self._drawer
 
     @property
     def optims(self):
         return (self._optim_alice_bob, self._optim_charlie)
-
-    @property
-    def agents(self):
-        return self.sender, self.receiver, self.drawer
 
     def compute_interaction(self, batch):
         if not self.train_charlie:
@@ -54,16 +64,16 @@ class AliceBobCharlie(AliceBob):
 
     def to(self, *vargs, **kwargs):
         _ = super().to(*vargs, **kwargs)
-        self.drawer = self.drawer.to(*vargs, **kwargs)
+        self.drawers = self.drawers.to(*vargs, **kwargs)
         return self
 
     def compute_interaction_charlie(self, batch):
-        sender, receiver = self.get_sender(), self.get_receiver()
+        sender, receiver, drawer = self.agents
         # send
         sender_outcome = sender(self._alice_input(batch))
 
         # adversarial step
-        drawer_outcome = self.drawer(*sender_outcome.action)
+        drawer_outcome = drawer(*sender_outcome.action)
 
         # receive
         receiver_outcome = receiver(self._charlied_bob_input(batch, drawer_outcome.image), *sender_outcome.action)

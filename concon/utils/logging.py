@@ -82,8 +82,8 @@ class DummyLogger(object):
 class AutoLogger(object):
     def __init__(self, game, data_loader, display='tqdm', steps_per_epoch=1000, debug=False,
         log_lang_progress=False, log_entropy=False,
-        device='cpu', no_summary=False, summary_dir=None, default_period=10,
-        log_charlie_acc=False):
+        device='cpu', no_summary=False, summary_dir=None, default_period=10,):
+        #log_charlie_acc=False):
 
         self.game = game
         self.data_loader = data_loader
@@ -101,7 +101,7 @@ class AutoLogger(object):
 
         self.device = device
 
-        self.log_charlie_acc = False #log_charlie_acc # C'est variable fait référence à Charlie, qui n'existe pas forcément.
+        #self.log_charlie_acc = log_charlie_acc # Commented out: use self.tag_header to highlight when results pertain to Charlie
 
         if no_summary:
             self.summary_writer = None
@@ -110,6 +110,8 @@ class AutoLogger(object):
         self._pbar = None
 
         self._state = {}
+
+        self.tag_header = ""
 
     def new_progress_bar(self):
         self._pbar = Progress(self.display, self.steps_per_epoch, self.current_epoch, self.logged_items)
@@ -136,9 +138,19 @@ class AutoLogger(object):
 
         return self
 
+    def _write(self, tag, val, step, direct=False):
+        """Convenience method for writing to summary. Prepends with tag_header on the fly if necessary.
+            args:
+                tag, val, step: for summary
+            direct: target summary_writer.writer (wrapped object) instead of summary_writer
+        """
+        writer = self.summary_writer.writer if direct else self.summary_writer
+        if self.tag_header: tag = '%s-%s' % (self.tag_header, tag)
+        return writer.add_scalar(tag, val, step)
+
     def __exit__(self, type, value, traceback):
         if self.log_entropy and self.summary_writer is not None:
-            self.summary_writer.writer.add_scalar('llp/language_entropy', compute_entropy(self._state['symbol_counts'], base=2), self._state['number_ex_seen'])
+            self._write('llp/language_entropy', compute_entropy(self._state['symbol_counts'], base=2), self._state['number_ex_seen'], direct=True)
 
         self._pbar.__exit__(type, value, traceback)
         self._state = {}
@@ -163,22 +175,15 @@ class AutoLogger(object):
             avg_success = successes.mean().item() # average success of the batch
             number_ex_seen = supplementary_info['index'] * supplementary_info['batch'].size
             self._state['number_ex_seen'] = number_ex_seen
-            if self.log_charlie_acc:
-                #charlie_acc, charlie_turn = external_output
-                tag = 'charlie' #if charlie_turn else 'alice-bob'
-                self.summary_writer.add_scalar('train-%s/reward' % tag, avg_reward, number_ex_seen)
-                self.summary_writer.add_scalar('train-%s/success' % tag, avg_success, number_ex_seen)
-                self.summary_writer.add_scalar('train-%s/loss' % tag, loss.item(), number_ex_seen)
-                self.summary_writer.add_scalar('train-%s/sender_entropy' % tag, sender_entropy.item(), number_ex_seen)
-                self.summary_writer.add_scalar('train-%s/receiver_entropy' % tag, receiver_entropy.item(), number_ex_seen)
-            else:
-                self.summary_writer.add_scalar('train/reward', avg_reward, number_ex_seen)
-                self.summary_writer.add_scalar('train/success', avg_success, number_ex_seen)
-                self.summary_writer.add_scalar('train/loss', loss.item(), number_ex_seen)
-                self.summary_writer.add_scalar('train/sender_entropy', sender_entropy.item(), number_ex_seen)
-                self.summary_writer.add_scalar('train/receiver_entropy', receiver_entropy.item(), number_ex_seen)
-            self.summary_writer.add_scalar('llp/msg_length', avg_msg_length, number_ex_seen)
-            self.summary_writer.add_scalar('llp/length_ratio', length_ratio, number_ex_seen)
+
+            self._write('train/reward', avg_reward, number_ex_seen)
+            self._write('train/success', avg_success, number_ex_seen)
+            self._write('train/loss', loss.item(), number_ex_seen)
+            self._write('train/sender_entropy', sender_entropy.item(), number_ex_seen)
+            self._write('train/receiver_entropy', receiver_entropy.item(), number_ex_seen)
+
+            self._write('llp/msg_length', avg_msg_length, number_ex_seen)
+            self._write('llp/length_ratio', length_ratio, number_ex_seen)
 
             # if self.log_charlie_acc:
             #     charlie_acc = charlie_acc.mean().item()
@@ -205,7 +210,7 @@ class AutoLogger(object):
                     logit_c = (current_dist.view(1, -1) / current_dist.sum()).log()
                     prev_p = (past_dist.view(1, -1) / past_dist.sum())
                     kl = F.kl_div(logit_c, prev_p, reduction='batchmean').item()
-                    self.summary_writer.writer.add_scalar('llp/kl_div', kl, number_ex_seen)
+                    self._write('llp/kl_div', kl, number_ex_seen, direct=True)
                     self._state['past_dist'], self._state['current_dist'] = self._state['current_dist'], torch.zeros((self.game.base_alphabet_size, 5), dtype=torch.float).to(self.device)
 
             if self.log_debug:
@@ -230,8 +235,8 @@ class AutoLogger(object):
         norm_grad = torch.stack([p.grad.view(-1).detach().data.norm(2.) for p in parameters])
         mean_norm_grad = norm_grad.mean().item()
         max_norm_grad = norm_grad.max().item()
-        self.summary_writer.add_scalar('grad/median_grad', median_grad, number_ex_seen)
-        self.summary_writer.add_scalar('grad/mean_grad', mean_grad, number_ex_seen)
-        self.summary_writer.add_scalar('grad/max_grad', max_grad, number_ex_seen)
-        self.summary_writer.add_scalar('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
-        self.summary_writer.add_scalar('grad/max_norm_grad', max_norm_grad, number_ex_seen)
+        self._write('grad/median_grad', median_grad, number_ex_seen)
+        self._write('grad/mean_grad', mean_grad, number_ex_seen)
+        self._write('grad/max_grad', max_grad, number_ex_seen)
+        self._write('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
+        self._write('grad/max_norm_grad', max_norm_grad, number_ex_seen)
