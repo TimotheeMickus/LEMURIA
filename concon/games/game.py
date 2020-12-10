@@ -1,14 +1,12 @@
 from abc import ABCMeta, abstractmethod
+from datetime import datetime
+import itertools as it
+import time
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
-import itertools as it
-import more_itertools as m_it
-import collections
-from datetime import datetime
 
 from ..utils.logging import DummyLogger, Progress
 from ..utils.misc import build_optimizer, Unflatten
@@ -59,10 +57,16 @@ class Game(metaclass=ABCMeta):
         pass
 
     def train(self):
+        """
+        Set all agents to train mode.
+        """
         for agent in self.agents:  # Sets the agents in training mode
             agent.train()
 
     def eval(self):
+        """
+        Set all agents to eval mode.
+        """
         for agent in self.agents:  # Sets the agents in evaluation mode
             agent.eval()
 
@@ -85,26 +89,30 @@ class Game(metaclass=ABCMeta):
         """
         self.eval()
 
+    @property
+    @abstractmethod
+    def autologger(self):
+        pass
+
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, autologger=DummyLogger()):
+    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000):
         """
-            Model training function
-            Input:
-                `data_iterator`, an infinite iterator over (batched) data
-                `optim`, the optimizer
-            Optional arguments:
-                `epoch`: epoch number to display in progressbar
-                `steps_per_epoch`: number of steps for epoch
-                `event_writer`: tensorboard writer to log evolution of values
+        Model training function
+        Input:
+            `data_iterator`, an infinite iterator over (batched) data
+        Optional arguments:
+            `epoch`: epoch number to display in progressbar
+            `steps_per_epoch`: number of steps for epoch
+            `event_writer`: tensorboard writer to log evolution of values
         """
 
-        self.start_epoch(data_iterator, autologger.summary_writer)
-        with autologger:
+        self.start_epoch(data_iterator)
+        with self.autologger:
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
             running_avg_success = 0.
             for index in range(start_i, end_i):
-                batch = data_iterator.get_batch(data_type='train', keep_category=autologger.log_lang_progress)
+                batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress)
                 self.start_episode()
 
                 self.optim.zero_grad()
@@ -123,7 +131,7 @@ class Game(metaclass=ABCMeta):
 
                 self.optim.step()
 
-                udpated_state = autologger.update(
+                udpated_state = self.autologger.update(
                     loss, *external_output,
                     parameters=(p for a in self.agents for p in a.parameters()),
                     batch=batch,
@@ -144,28 +152,36 @@ class Game(metaclass=ABCMeta):
     @classmethod
     @abstractmethod
     def load(cls, path, args, _old_model=False):
+        """
+        Load model from file `path`.
+        """
         pass
 
     # Caution: as this function pretrains all agents, be careful with shared parameters
     # It is likely that this method should be overriden
-    def pretrain_CNNs(self, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False):
+    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False, pretrain_charlie=False):
+        """
+        Pretrain (de)convolution of all agents.
+        """
         pretrained_models = {}
-        # TODO: handle Drawer agents
         agents = (a for a in self.agents if hasattr(a, 'image_encoder'))
-        if pretrain_CNN_mode == 'auto-encoder':
+        if pretrain_CNN_mode == 'auto-encoder' and pretrain_charlie:
             agents = (a for a in self.agents if hasattr(a, 'image_decoder') or hasattr(a, 'image_encoder'))
         for i, agent in enumerate(agents):
             agent_name = ("agent %i" % i)
-            pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, summary_writer, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
+            pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
         return pretrained_models
 
-    def pretrain_agent_CNN(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, agent_name="agent"):
+    def pretrain_agent_CNN(self, agent, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, agent_name="agent"):
+        """
+        Pretrain (de)convolution of agent.
+        """
         print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
 
         if pretrain_CNN_mode != 'auto-encoder':
-            pretrained_model = self._pretrain_classif(agent, data_iterator, summary_writer, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+            pretrained_model = self._pretrain_classif(agent, data_iterator, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
-            pretrained_model = self._pretrain_ae(agent, data_iterator, summary_writer, pretrain_CNN_mode, deconvolution_factory, convolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+            pretrained_model = self._pretrain_ae(agent, data_iterator, pretrain_CNN_mode, deconvolution_factory, convolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
 
         if freeze_pretrained_CNN and hasattr(agent, 'image_encoder') :
             for p in agent.image_encoder.parameters():
@@ -174,7 +190,7 @@ class Game(metaclass=ABCMeta):
         return pretrained_model
 
     # Pretrains the CNN of an agent in category- or feature-wise mode
-    def _pretrain_classif(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='category-wise', learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
+    def _pretrain_classif(self, agent, data_iterator, pretrain_CNN_mode='category-wise', learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
 
         concept_sizes = [len(concept) for concept in data_iterator.concepts]
@@ -207,7 +223,8 @@ class Game(metaclass=ABCMeta):
 
         total_items = 0
         for epoch in range(nb_epochs):
-            pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L', 'acc'})
+
+            pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch, logged_items={'L', 'acc'})
             epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
             with pbar:
                 for step_i in range(steps_per_epoch):
@@ -219,7 +236,7 @@ class Game(metaclass=ABCMeta):
                     epoch_items += batch.size
                     total_items += batch.size
 
-                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
+                    if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
                     pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
 
                 # Here there could be an evaluation phase
@@ -227,7 +244,7 @@ class Game(metaclass=ABCMeta):
         return model
 
     # Pretrains the CNN of an agent in auto-encoder mode
-    def _pretrain_ae(self, agent, data_iterator, summary_writer, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
+    def _pretrain_ae(self, agent, data_iterator, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
         device = next(agent.parameters()).device
 
@@ -257,7 +274,7 @@ class Game(metaclass=ABCMeta):
 
         for epoch in range(nb_epochs):
             epoch_loss, epoch_items = 0., 0.
-            pbar = Progress(display_mode, steps_per_epoch, epoch, logged_items={'L'})
+            pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch, logged_items={'L'})
             with pbar:
                 for _ in range(steps_per_epoch):
                     optimizer.zero_grad()
@@ -271,7 +288,7 @@ class Game(metaclass=ABCMeta):
                     epoch_loss += loss.item()
                     epoch_items += batch_img.size(0)
                     total_items += batch_img.size(0)
-                    if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), total_items)
+                    if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), total_items)
                     pbar.update(L=(epoch_loss / epoch_items))
 
                     loss.backward()
@@ -279,6 +296,40 @@ class Game(metaclass=ABCMeta):
 
                 # Here there could an evaluation phase
         return {'model': model}
+
+    def evaluate(self, data_iterator, epoch):
+        """
+        Called after each epoch. Override to add an evaluation after each epoch.
+        """
+        print("No evaluation performed.")
+        pass
+
+    def train_agents(self, epochs, steps_per_epoch, data_loader, run_models_dir=None, save_every=0):
+        """
+        Train all agents over multiple epochs
+        """
+        label = self.autologger.summary_writer and self.autologger.summary_writer.prefix
+        for epoch in range(epochs):
+            timepoint_0 = time.time()
+
+            self.train_epoch(data_loader, epoch=epoch, steps_per_epoch=steps_per_epoch)
+
+            timepoint_1 = time.time()
+            if(label is not None): print('Training %s took %f s.' % (label, (timepoint_1 - timepoint_0)))
+            else: print('Training took %f s.' % (timepoint_1 - timepoint_0))
+            timepoint_0 = timepoint_1
+
+            self.evaluate(data_loader, epoch=epoch)
+
+            timepoint_1 = time.time()
+            if(label is not None): print('Evaluating %s took %f s.' % (label, (timepoint_1 - timepoint_0)))
+            else: print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
+            timepoint_0 = timepoint_1
+
+            if((save_every > 0) and (((epoch + 1) % save_every) == 0)):
+                if(label is not None): model_name = "model_%s_e%i.pt" % (label, epoch)
+                else: model_name = "model_e%i.pt" % epoch
+                self.save(run_models_dir / model_name)
 
     def kill(self, agent):
         '''

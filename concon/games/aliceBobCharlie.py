@@ -16,21 +16,24 @@ from ..eval import compute_correlation
 from .aliceBob import AliceBob
 
 class AliceBobCharlie(AliceBob):
-    def __init__(self, args):
-        super().__init__(args)
+    def __init__(self, args, logger):
+        super().__init__(args, logger)
         self.drawer = Drawer.from_args(args)
         self._optim_alice_bob = self._optim
         self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
-        self.switch_charlie(False)
+        # self.switch_charlie(False)
+        self.train_charlie = None
 
     def switch_charlie(self, train_charlie):
         self.train_charlie = train_charlie
-        # for a in super().agents:
-        #     for p in a.parameters():
-        #         p.requires_grad = not train_charlie
-        # for p in self.drawer.parameters():
-        #     p.requires_grad = train_charlie
+        for a in super().agents:
+            for p in a.parameters():
+                p.requires_grad = not train_charlie
+        for p in self.drawer.parameters():
+            p.requires_grad = train_charlie
         self._optim = self._optim_charlie if train_charlie else self._optim_alice_bob
+        if(self.autologger.summary_writer is not None):
+            self.autologger.summary_writer.prefix = "Charlie" if train_charlie else None
 
     @property
     def optims(self):
@@ -46,24 +49,33 @@ class AliceBobCharlie(AliceBob):
         return self.compute_interaction_charlie(batch)
 
     def _charlied_bob_input(self, batch, charlie_img):
-        return torch.cat([
-            charlie_img.unsqueeze(1),
-            batch.target_img(stack=True).unsqueeze(1),
-            batch.base_distractors_img(stack=True)
-        ], dim=1)
+        base_input = self._bob_input(batch)
+        if self.train_charlie:
+            return torch.cat([
+                charlie_img.unsqueeze(1),
+                base_input,
+            ], dim=1)
+        else:
+            return torch.cat([
+                base_input,
+                charlie_img.unsqueeze(1),
+            ], dim=1)
 
     def to(self, *vargs, **kwargs):
         _ = super().to(*vargs, **kwargs)
         self.drawer = self.drawer.to(*vargs, **kwargs)
         return self
 
+    def get_drawer(self):
+        return drawer
+
     def compute_interaction_charlie(self, batch):
-        sender, receiver = self.get_sender(), self.get_receiver()
+        sender, receiver, drawer = self.agents
         # send
         sender_outcome = sender(self._alice_input(batch))
 
         # adversarial step
-        drawer_outcome = self.drawer(*sender_outcome.action)
+        drawer_outcome = drawer(*sender_outcome.action)
 
         # receive
         receiver_outcome = receiver(self._charlied_bob_input(batch, drawer_outcome.image), *sender_outcome.action)
@@ -76,3 +88,11 @@ class AliceBobCharlie(AliceBob):
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
         return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+
+    def get_images(self, batch):
+        with torch.no_grad():
+            sender, drawer = self.get_sender(), self.get_drawer()
+            # send
+            action = sender(self._alice_input(batch)).action
+            images = drawer(*action).image
+        return torch.cat([batch.target_img().unsqueeze(1), images.unsqueeze(1)], dim=1)

@@ -1,3 +1,7 @@
+import collections
+import itertools
+import pathlib
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -6,9 +10,6 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import torchvision
-
-import collections
-import itertools
 
 class Averager:
     def __init__(self, size, mem_factor=2, dtype=None):
@@ -45,15 +46,15 @@ class Averager:
     def get(self, default=None):
         l = min(self._i, self.size) # The number of values to consider might be smaller than `size` at the beginning
         if(l == 0): return default
-        
+
         return self._buffer[(self._i-l):self._i].mean()
 
 def h_compress(img):
     shape = img.shape
     width = shape[-1]
-        
+
     return img.view(shape[:-1] + ((width // 2), 2)).mean(dim=-1)
-    
+
 def combine_images(img1, img2):
     return torch.cat((h_compress(img1), h_compress(img2)), dim=-1)
 
@@ -147,10 +148,10 @@ def compute_entropy_stats(sample_messages, sample_categories, base=None):
     entropy_dict = collections.defaultdict(collections.Counter)
     for msg, cat in zip(sample_messages, sample_categories): entropy_dict[cat][msg] += 1.0
 
-    # We then computes the entropy of each category's distribution 
+    # We then computes the entropy of each category's distribution
     entropy_cats = [compute_entropy(torch.tensor(list(messages_counter.values())), base=base) for messages_counter in entropy_dict.values()]
     entropy_cats = np.array(entropy_cats)
-    
+
     return entropy_cats.min(), entropy_cats.mean(), np.median(entropy_cats), entropy_cats.max(), entropy_cats.var()
 
 def max_tensor(t, dim, abs_val=True, unsqueeze=True):
@@ -210,3 +211,6 @@ def build_optimizer(θ, learning_rate):
         `θ`, the model parameters
     """
     return optim.RMSprop(θ, lr=learning_rate)
+
+def path_replace(path, substring, replacement):
+    return pathlib.Path(str(path).replace(str(substring), str(replacement)))

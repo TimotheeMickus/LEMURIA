@@ -1,6 +1,7 @@
-import os
-import sys
 import argparse
+import os
+import pathlib
+import sys
 
 #this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
 
@@ -10,12 +11,12 @@ from datetime import datetime
 def get_args():
     arg_parser = argparse.ArgumentParser()
 
-    default_data_set = os.path.join('data', 'concon')
-    default_models = os.path.join('[summary]', 'models')
-    default_summary = os.path.join('runs', 'cbc', ('[now]_' + socket.gethostname()))
+    default_data_set = pathlib.Path('data') / 'concon'
+    default_models = pathlib.Path('[summary]') / 'models'
+    default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + socket.gethostname())
 
     group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
-    group.add_argument('--data_set', help='the path to the data set', default=default_data_set)
+    group.add_argument('--data_set', help='the path to the data set', default=default_data_set, type=pathlib.Path)
     group.add_argument('--binary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
     group.add_argument('--constrain_dim', help='restrict specific dimensions in dataset', nargs=5, choices=[1,2,3], default=None, type=int)
     group.add_argument('--pair_images', '-pi', help='generates a new dataset by combining pairs of images', action='store_true')
@@ -26,13 +27,14 @@ def get_args():
     group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=5, type=int)
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
-    group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary)
+    group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
-    group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models)
+    group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     group.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
-    group.add_argument('--debug', '-d', help='log more stuff', action='store_true')
+    group.add_argument('--debug', '-d', help='log more stuf', action='store_true')
+    group.add_argument('--detect_anomaly', help='autodetect grad anomalies', action='store_true')
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
     group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
@@ -85,6 +87,7 @@ def get_args():
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
     group.add_argument('--freeze_pretrained_CNNs', help='do not backpropagate gradient on pretrained CNNs', action='store_true')
+    group.add_argument('--pretrain_charlie', help="pretrain adversarial agent's deconvolution as well", action='store_true')
     group.add_argument('--detect_outliers', help='if pretraining, then after, the trained model analyses the dataset in order to detect problems', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
@@ -97,9 +100,9 @@ def get_args():
     group.add_argument('--threeway_correlation', help='compute three-way correlation between image vectors, meaning distance and message distance instead of training', action='store_true')
 
     # For visualize.py / evaluate_language.py
-    group.add_argument('--load_model', help='the path to the model to load')
+    group.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path)
     # For evaluate_language.py
-    group.add_argument('--load_other_model', help='path to a second model to load')
+    group.add_argument('--load_other_model', help='path to a second model to load', type=pathlib.Path)
     group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
     group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
 

@@ -16,24 +16,29 @@ from ..eval import compute_correlation
 from .aliceBobPopulation import AliceBobPopulation
 
 class AliceBobCharliePopulation(AliceBobPopulation):
-    def __init__(self, args):
+    def __init__(self, args, logger):
         size = args.population
         self.drawers = nn.ModuleList([Drawer.from_args(args) for _ in range(size)])
         self._drawer = None
-        super().__init__(args)
+        super().__init__(args, logger)
         self._optim_alice_bob = self._optim
         self._optim_charlie = build_optimizer(self.drawers.parameters(), args.learning_rate)
-        self.switch_charlie(False)
+        self.train_charlie = None
         self._agents += self.drawers
 
     def switch_charlie(self, train_charlie):
+        """
+        Convenience method to turn charlie training on/off
+        """
         self.train_charlie = train_charlie
-        # for a in super().agents:
-        #     for p in a.parameters():
-        #         p.requires_grad = not train_charlie
-        # for p in self.drawers.parameters():
-        #     p.requires_grad = train_charlie
+        for a in super().agents:
+            for p in a.parameters():
+                p.requires_grad = not train_charlie
+        for p in self.drawers.parameters():
+            p.requires_grad = train_charlie
         self._optim = self._optim_charlie if train_charlie else self._optim_alice_bob
+        if(self.autologger.summary_writer is not None):
+            self.autologger.summary_writer.prefix = "Charlie" if train_charlie else None
 
     def get_drawer(self):
         return self._drawer
@@ -86,3 +91,14 @@ class AliceBobCharliePopulation(AliceBobPopulation):
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
         return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+
+    def get_images(self, batch):
+        """
+        Produce images for batch
+        """
+        with torch.no_grad():
+            sender, drawer = self.get_sender(), self.get_drawer()
+            # send
+            action = sender(self._alice_input(batch)).action
+            images = drawer(*action).image
+        return torch.cat([batch.target_img(stack=True).unsqueeze(1), images.unsqueeze(1)], dim=1).cpu()

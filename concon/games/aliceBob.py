@@ -19,7 +19,8 @@ from ..eval import decision_tree
 from .game import Game
 
 class AliceBob(Game):
-    def __init__(self, args):
+    def __init__(self, args, logger):
+        self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
 
@@ -287,10 +288,10 @@ class AliceBob(Game):
         if return_entropy: return (loss, receiver_pointing['dist'].entropy().mean())
         return loss
 
-    def evaluate(self, data_iterator, epoch, event_writer=None, display='tqdm', debug=False, log_lang_progress=True):
+    def evaluate(self, data_iterator, epoch):
         def log(name, value):
-            if(event_writer is not None): event_writer.add_scalar(name, value, epoch, period=1)
-            if(display != 'minimal'): print('%s\t%s' % (name, value))
+            self.autologger._write(name, value, epoch, direct=True)
+            if(self.autologger.display != 'minimal'): print('%s\t%s' % (name, value))
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
@@ -306,7 +307,7 @@ class AliceBob(Game):
         messages = []
         categories = []
         batch_numbers = range(nb_batch)
-        if(display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
+        if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
         with torch.no_grad():
             success = [] # Binary
             success_prob = [] # Probabilities
@@ -458,7 +459,7 @@ class AliceBob(Game):
             log('FM_corr/Jaccard-based comp', j_cor)
             #log('FM_corr/Jaccard-based comp (z-score)', j_cor_n)
             #log('FM_corr/Jaccard-based comp (random)', j_cor_rd)
-            
+
             if(l_n_cor > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (j_cor / l_n_cor))
 
             minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_messages, sample_categories, base=2)
@@ -511,6 +512,10 @@ class AliceBob(Game):
     @property
     def optim(self):
         return self._optim
+
+    @property
+    def autologger(self):
+        return self._logger
 
     @classmethod
     def load(cls, path, args, _old_model=False):
