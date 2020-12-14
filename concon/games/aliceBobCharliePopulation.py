@@ -1,4 +1,5 @@
 import itertools as it
+import pathlib
 import random
 
 import numpy as np
@@ -6,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
+import torchvision
 import tqdm
 
 from .game import Game
@@ -25,6 +27,8 @@ class AliceBobCharliePopulation(AliceBobPopulation):
         self._optim_charlie = build_optimizer(self.drawers.parameters(), args.learning_rate)
         self.train_charlie = None
         self._agents += self.drawers
+        self._n_batches_cycle = args.n_discriminator_batches + 1
+        self._n_batches_seen = 0
 
     def switch_charlie(self, train_charlie):
         """
@@ -47,6 +51,18 @@ class AliceBobCharliePopulation(AliceBobPopulation):
         self._drawer = random.choice(self.drawers)
         super().start_episode(train_episode=train_episode)
 
+        if train_episode:
+            if((self._n_batches_seen % self._n_batches_cycle) == 0):
+                # if we are at the end of a batch cycle, turn charlie off
+                self.switch_charlie(False)
+
+            elif(((self._n_batches_seen + 1) % self._n_batches_cycle) == 0):
+                # if we are at the last batch of a batch cycle, turn charlie on
+                self.switch_charlie(True)
+
+            self._n_batches_seen += 1
+
+
     @property
     def agents(self):
         return self._sender, self._receiver, self._drawer
@@ -55,24 +71,27 @@ class AliceBobCharliePopulation(AliceBobPopulation):
     def optims(self):
         return (self._optim_alice_bob, self._optim_charlie)
 
-    def compute_interaction(self, batch):
-        if not self.train_charlie:
-            return super().compute_interaction(batch)
-        return self.compute_interaction_charlie(batch)
+    # def compute_interaction(self, batch):
+    #     if not self.train_charlie:
+    #         return super().compute_interaction(batch)
+    #     return self.compute_interaction_charlie(batch)
 
     def _charlied_bob_input(self, batch, charlie_img):
-        return torch.cat([
-            charlie_img.unsqueeze(1),
+        images = [
             batch.target_img(stack=True).unsqueeze(1),
-            batch.base_distractors_img(stack=True)
-        ], dim=1)
+            batch.base_distractors_img(stack=True),
+            charlie_img.unsqueeze(1),
+        ]
+        # put charlie's img first if we're training it
+        if self.train_charlie: images = images[-1] + images[:-1]
+        return torch.cat(images, dim=1)
 
     def to(self, *vargs, **kwargs):
         _ = super().to(*vargs, **kwargs)
         self.drawers = self.drawers.to(*vargs, **kwargs)
         return self
 
-    def compute_interaction_charlie(self, batch):
+    def compute_interaction(self, batch):
         sender, receiver, drawer = self.agents
         # send
         sender_outcome = sender(self._alice_input(batch))
@@ -91,6 +110,20 @@ class AliceBobCharliePopulation(AliceBobPopulation):
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
         return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+
+    def evaluate(self, data_loader, epoch):
+
+        super().evaluate(data_loader, epoch=epoch)
+
+        img_directory = pathlib.Path('img') / str(epoch)
+        img_directory.mkdir(parents=True, exist_ok=True)
+
+        with torch.no_grad():
+            train_images = self.get_images(data_loader.get_batch(data_type='train'))
+            for batch_idx in range(train_images.size(0)):
+                imgs = train_images[batch_idx]
+                torchvision.utils.save_image(imgs, img_directory / ("img_%i.png" % batch_idx))
+
 
     def get_images(self, batch):
         """

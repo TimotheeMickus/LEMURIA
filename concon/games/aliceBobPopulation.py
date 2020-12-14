@@ -39,6 +39,7 @@ class AliceBobPopulation(AliceBob):
 
         self._sender, self._receiver = None, None # Set before each episode by `start_episode`
 
+
         # Mathusalemian dynamics
         self._reaper_step = args.reaper_step
         if self._reaper_step is not None:
@@ -58,7 +59,9 @@ class AliceBobPopulation(AliceBob):
         else:
             self._pretrain_args = {"pretrain_CNN_mode":args.pretrain_CNNs,}
 
-        self.start_episode() # TODO Really useful?
+        # self.start_episode() # TODO Really useful?
+        self._sender = random.choice(self.senders)
+        self._receiver = random.choice(self.receivers)
 
         self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
 

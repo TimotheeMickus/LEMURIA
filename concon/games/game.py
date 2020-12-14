@@ -308,27 +308,23 @@ class Game(metaclass=ABCMeta):
         """
         Train all agents over multiple epochs
         """
-        label = self.autologger.summary_writer and self.autologger.summary_writer.prefix
         for epoch in range(epochs):
             timepoint_0 = time.time()
 
             self.train_epoch(data_loader, epoch=epoch, steps_per_epoch=steps_per_epoch)
 
             timepoint_1 = time.time()
-            if(label is not None): print('Training %s took %f s.' % (label, (timepoint_1 - timepoint_0)))
-            else: print('Training took %f s.' % (timepoint_1 - timepoint_0))
+            print('Training took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
 
             self.evaluate(data_loader, epoch=epoch)
 
             timepoint_1 = time.time()
-            if(label is not None): print('Evaluating %s took %f s.' % (label, (timepoint_1 - timepoint_0)))
-            else: print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
+            print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
 
             if((save_every > 0) and (((epoch + 1) % save_every) == 0)):
-                if(label is not None): model_name = "model_%s_e%i.pt" % (label, epoch)
-                else: model_name = "model_e%i.pt" % epoch
+                model_name = "model_e%i.pt" % epoch
                 self.save(run_models_dir / model_name)
 
     def kill(self, agent):

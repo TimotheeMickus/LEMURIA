@@ -23,6 +23,8 @@ class AliceBobCharlie(AliceBob):
         self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
         # self.switch_charlie(False)
         self.train_charlie = None
+        self._n_batches_cycle = args.n_discriminator_batches + 1
+        self._n_batches_seen = 0
 
     def switch_charlie(self, train_charlie):
         self.train_charlie = train_charlie
@@ -34,6 +36,22 @@ class AliceBobCharlie(AliceBob):
         self._optim = self._optim_charlie if train_charlie else self._optim_alice_bob
         if(self.autologger.summary_writer is not None):
             self.autologger.summary_writer.prefix = "Charlie" if train_charlie else None
+
+    def start_episode(self, train_episode=True):
+        super().start_episode(train_episode=train_episode)
+
+        if train_episode:
+            if((self._n_batches_seen % self._n_batches_cycle) == 0):
+                # if we are at the end of a batch cycle, turn charlie off
+                self.switch_charlie(False)
+
+            elif(((self._n_batches_seen + 1) % self._n_batches_cycle) == 0):
+                # if we are at the last batch of a batch cycle, turn charlie on
+                self.switch_charlie(True)
+
+            self._n_batches_seen += 1
+
+
 
     @property
     def optims(self):

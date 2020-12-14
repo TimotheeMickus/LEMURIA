@@ -102,23 +102,9 @@ def train(args):
         if(args.save_every > 0): model.save(run_models_dir / ("model_e%i.pt" % -1))
 
         print(("[%s] training start…" % datetime.now()), flush=True)
-        # make Charlie not trainable
-        if(args.charlie):
-            model.switch_charlie(False)
+
         model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
 
-        if args.charlie:
-            # make Charlie trainable
-            model.switch_charlie(True)
-
-            model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
-
-            # make Charlie not trainable
-            model.switch_charlie(False)
-
-    # train_images = model.get_images(data_loader.get_batch(data_type='train'))
-    # for batch_idx in range(train_images.size(0)):
-    #     show_imgs(train_images[batch_idx])
 
 if(__name__ == "__main__"):
     args = get_args()

@@ -39,7 +39,7 @@ class AverageSummaryWriter:
             self.add_scalar(key, value, global_step)
 
     def apply_prefix(self, tag):
-        return tag if(self.prefix is None) else (self.prefix + ':' +  tag)
+        return tag if(self.prefix is None) else ('%s-%s' % (self.prefix, tag))
 
 # TM: for now, I'm using the `display` attribute in the code.
 class Progress(metaclass=ABCMeta):
