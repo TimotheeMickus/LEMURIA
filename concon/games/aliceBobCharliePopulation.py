@@ -83,7 +83,7 @@ class AliceBobCharliePopulation(AliceBobPopulation):
             charlie_img.unsqueeze(1),
         ]
         # put charlie's img first if we're training it
-        if self.train_charlie: images = images[-1] + images[:-1]
+        if self.train_charlie: images = [images[-1]] + images[:-1]
         return torch.cat(images, dim=1)
 
     def to(self, *vargs, **kwargs):

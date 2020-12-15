@@ -67,17 +67,14 @@ class AliceBobCharlie(AliceBob):
         return self.compute_interaction_charlie(batch)
 
     def _charlied_bob_input(self, batch, charlie_img):
-        base_input = self._bob_input(batch)
-        if self.train_charlie:
-            return torch.cat([
-                charlie_img.unsqueeze(1),
-                base_input,
-            ], dim=1)
-        else:
-            return torch.cat([
-                base_input,
-                charlie_img.unsqueeze(1),
-            ], dim=1)
+        images = [
+            batch.target_img(stack=True).unsqueeze(1),
+            batch.base_distractors_img(stack=True),
+            charlie_img.unsqueeze(1),
+        ]
+        # put charlie's img first if we're training it
+        if self.train_charlie: images = [images[-1]] + images[:-1]
+        return torch.cat(images, dim=1)
 
     def to(self, *vargs, **kwargs):
         _ = super().to(*vargs, **kwargs)
