@@ -161,7 +161,7 @@ class AliceBob(Game):
 
         # Defines a filter for checking smoothness
         channels = 3
-        filter_weight = torch.tensor([[1.2, 2, 1.2], [2, -12.8, 2], [1.2, 2, 1.2]]) # -12.8 (at the center) is equal to the opposite of sum of the other coefficient
+        filter_weight = torch.tensor([[1.2, 2, 1.2], [2, -12.8, 2], [1.2, 2, 1.2]]) # -12.8 (at the center) is equal to the opposite of the sum of the other coefficients
         filter_weight = filter_weight.view(1, 1, 3, 3)
         filter_weight = filter_weight.repeat(channels, 1, 1, 1) # Shape: [channel, 1, 3, 3]
         filter_layer = torch.nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, groups=channels, bias=False)
@@ -194,6 +194,9 @@ class AliceBob(Game):
             loss += smoothness_loss
 
             loss.backward()
+
+            # TODO In Deep Dream, they blur the gradient before applying it. (https://hackernoon.com/deep-dream-with-tensorflow-a-practical-guide-to-build-your-first-deep-dream-experience-f91df601f479)
+            # This can probably be done by modifying receiver_dream.grad.
 
             optimizer.step()
         receiver_dream = receiver_dream.squeeze(axis=1)
