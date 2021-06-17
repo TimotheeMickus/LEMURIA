@@ -198,7 +198,8 @@ class Randomizer(nn.Module):
     def from_args(cls, args):
         return cls(input_dim=args.hidden_size, random_dim=args.hidden_size)
 
-def _dcgan_tuto_cnn(img_size, hidden_size):
+
+def _dcgan_tuto_cnn(hidden_size):
     # params of convs:
     # input chans, output chans, kernel, stride, padding
     # ignore coms which are incorrect wrt. our IMG size
@@ -206,30 +207,30 @@ def _dcgan_tuto_cnn(img_size, hidden_size):
             # input is (3) x 64 x 64
             nn.Conv2d(3, hidden_size, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
+            # state size. (hidden_size) x 32 x 32
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
+            # state size. (hidden_size*2) x 16 x 16
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
+            # state size. (hidden_size*4) x 8 x 8
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
+            # state size. (hidden_size*4) x 8 x 8
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
+            # state size. (hidden_size*8) x 4 x 4
             nn.Conv2d(hidden_size, hidden_size, 4, 1, 0, bias=False),
             nn.Tanh(),
             nn.Flatten(),
         )
 
 
-def _dcgan_tuto_decnn(img_size, hidden_size):
+def _dcgan_tuto_decnn(hidden_size):
     # params of convs:
     # input chans, output chans, kernel, stride, padding
     # ignore coms which are incorrect wrt. our IMG size
@@ -238,27 +239,108 @@ def _dcgan_tuto_decnn(img_size, hidden_size):
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 1, 0, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.ReLU(True),
-            # state size. (ngf*8) x 4 x 4
+            # state size. (hidden_size*8) x 4 x 4
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.ReLU(True),
-            # state size. (ngf*8) x 4 x 4
+            # state size. (hidden_size*8) x 4 x 4
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.ReLU(True),
-            # state size. (ngf*4) x 8 x 8
+            # state size. (hidden_size*4) x 8 x 8
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.ReLU(True),
-            # state size. (ngf*2) x 16 x 16
+            # state size. (hidden_size*2) x 16 x 16
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
             nn.BatchNorm2d(hidden_size),
             nn.ReLU(True),
-            # state size. (ngf) x 32 x 32
+            # state size. (hidden_size) x 32 x 32
             nn.ConvTranspose2d(hidden_size, 3, 4, 2, 1, bias=False),
             nn.Tanh()
             # state size. (3) x 128 x 128
         )
+
+def _dcgan_decnn(hidden_size):
+    """A more viable CNN/DCNN architecture"""
+    # params of convs:
+    # input chans, output chans, kernel, stride, padding
+    # ignore coms which are incorrect wrt. our IMG size
+    return nn.Sequential(
+            # input is Z, going into a convolution
+            #1
+            nn.Upsample(scale_factor=4, mode='nearest'),
+            #nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_size, hidden_size * 16, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(hidden_size * 16),
+            nn.ReLU(True),
+             # state size. (hidden_size*16) x 4 x 4
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_size * 16, hidden_size * 8, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(hidden_size * 8),
+            nn.ReLU(True),
+            # state size. (hidden_size*8) x 8 x 8
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_size * 8, hidden_size * 4, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(hidden_size * 4),
+            nn.ReLU(True),
+            # state size. (hidden_size*4) x 16 x 16
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_size * 4, hidden_size *2, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(hidden_size * 2),
+            nn.ReLU(True),
+            # state size. (hidden_size*2) x 32 x 32
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_size * 2, hidden_size, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(hidden_size),
+            nn.ReLU(True),
+            # state size. (hidden_size) x 64 x 64
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_size, 3, 3, stride=1, padding=1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 128 x 128
+        )
+
+def _dcgan_cnn(hidden_size):
+    """A more viable CNN/DCNN architecture"""
+    # params of convs:
+    # input chans, output chans, kernel, stride, padding
+    # ignore coms which are incorrect wrt. our IMG size
+    return nn.Sequential(
+            # input is (nc) x 128 x 128
+            nn.Conv2d(3, hidden_size, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # state size. (hidden_size) x 64 x 64
+            nn.Conv2d(hidden_size, hidden_size * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(hidden_size * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # state size. (hidden_size) x 32 x 32
+            nn.Conv2d(hidden_size * 2, hidden_size * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(hidden_size * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # state size. (hidden_size*2) x 16 x 16
+            nn.Conv2d(hidden_size * 4, hidden_size * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(hidden_size * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # state size. (hidden_size*4) x 8 x 8
+            nn.Conv2d(hidden_size * 8, hidden_size * 16, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(hidden_size * 16),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # state size. (hidden_size*8) x 4 x 4
+            nn.Conv2d(hidden_size * 16, hidden_size, 4, 1, 0, bias=False),
+            nn.Flatten(),
+        )
+
 
 # def build_cnn(layer_classes=(), input_channels=(), output_channels=(),
 #     strides=(), kernel_size=None, paddings=None, flatten_last=True,
@@ -352,7 +434,13 @@ def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
     """
-    short_cut = _dcgan_tuto_cnn(args.img_size, args.hidden_size)
+    features = args.cnn_channel_size or args.hidden_size
+    if args.use_legacy_cnn or args.use_legacy_convolutions:
+        if not args.quiet: print("Using legacy convolution architecture")
+        short_cut = _dcgan_tuto_cnn(features)
+    else:
+        if not args.quiet: print("Using modern convolution architecture")
+        short_cut = _dcgan_cnn(features)
     return short_cut
     #
     # # for legacy or now
@@ -371,7 +459,13 @@ def build_cnn_decoder_from_args(args):
     """
     Factory for deconvolutionnal networks
     """
-    short_cut = _dcgan_tuto_decnn(args.img_size, args.hidden_size)
+    features = args.decnn_channel_size or args.hidden_size
+    if args.use_legacy_decnn or args.use_legacy_convolutions:
+        if not args.quiet: print("Using legacy deconvolution architecture")
+        short_cut = _dcgan_tuto_decnn(features)
+    else:
+        if not args.quiet: print("Using modern deconvolution architecture")
+        short_cut = _dcgan_decnn(features)
     return short_cut
 
     # #for legacy for now

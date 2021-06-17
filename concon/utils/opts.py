@@ -1,6 +1,7 @@
 import argparse
 import os
 import pathlib
+import pprint
 import sys
 
 #this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
@@ -79,6 +80,11 @@ def get_args():
     group = arg_parser.add_argument_group(title='Conv', description='arguments relative to convolutional structure')
     # group.add_argument('--img_channel', help='number of input channels in images', type=int, default=3)
     group.add_argument('--img_size', help='Width/height of images', type=int, default=128)
+    group.add_argument('--decnn_channel_size', help="factor to determine number of channel features in deconvolutions (defaults to hidden size)", type=int, default=None)
+    group.add_argument('--cnn_channel_size', help="factor to determine number of channel features in convolutions (defaults to hidden size)", type=int, default=None)
+    group.add_argument('--use_legacy_convolutions', help="use old architectures for both CNN and DeCNN", action="store_true")
+    group.add_argument('--use_legacy_decnn', help="use old architecture for DeCNN", action="store_true")
+    group.add_argument('--use_legacy_cnn', help="use old architecture for CNN", action="store_true")
     # group.add_argument('--conv_layers', help='number of convolution layers', type=int, default=8)
     # group.add_argument('--filters', help='number of filters per convolution layers', type=int, default=32)
     # group.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
@@ -109,5 +115,6 @@ def get_args():
 
     args = arg_parser.parse_args()
     if not args.quiet:
-        print(args)
+        print("command-line arguments:")
+        pprint.pprint(vars(args), indent=4)
     return args
