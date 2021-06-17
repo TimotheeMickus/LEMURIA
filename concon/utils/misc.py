@@ -176,12 +176,13 @@ def to_color(t, dim):
 
     return y.repeat(tmp.tolist())
 
-#
+# Doesn't affect the input tensor.
 def max_normalize(t, dim, abs_val=True):
     x = max_tensor(t, dim, abs_val, unsqueeze=True)
 
     return (t / x)
 
+# In-place.
 def max_normalize_(t, dim, abs_val=True):
     x = max_tensor(t, dim, abs_val, unsqueeze=True)
 
