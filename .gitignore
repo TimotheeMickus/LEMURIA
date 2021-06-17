@@ -4,3 +4,4 @@ models/
 data/
 .venv/
 .vimrc
+.ipynb_checkpoints/
