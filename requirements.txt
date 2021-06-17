@@ -30,7 +30,6 @@ flaky==3.6.1
 Flask==1.1.1
 Flask-Cors==3.0.8
 ftfy==5.7
-gensim==3.8.1
 gevent==1.4.0
 google-auth==1.9.0
 google-auth-oauthlib==0.4.1
