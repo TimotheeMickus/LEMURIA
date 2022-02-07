@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
+from torch.distributions.relaxed_categorical import RelaxedOneHotCategorical
 
 class MultiHeadsClassifier:
     def __init__(self, image_encoder, optimizer, heads, n_heads, get_head_targets, device):
@@ -49,12 +50,15 @@ class MessageEncoder(nn.Module):
         base_alphabet_size,
         embedding_dim,
         output_dim,
-        symbol_embeddings):
+        symbol_embeddings,
+        is_gumbel=False):
         super(MessageEncoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
 
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
+
+        self.is_gumbel = is_gumbel
 
     def forward(self, message, length):
         """
@@ -63,24 +67,29 @@ class MessageEncoder(nn.Module):
             `message`, of shape [args.batch_size x <=MSG_LEN], message produced by sender
             `length`, of shape [args.batch_size x 1], length of message produced by sender
         Output:
-            encoded message, of shape [args.batch_size x output_dim]
+            encoded message, of shape [args.batch_size x output_dim] for reinforce, or
+            encoded message at each timestep of shape
+            [args.batch_size x <=MSG_LEN x output_dim] for GumbelSoftmax
         """
         # encode
         embeddings = self.symbol_embeddings(message)
-        embeddings = self.lstm(embeddings)[0]
-        # select last step corresponding to message
-        index = torch.arange(message.size(-1)).expand_as(message).to(message.device)
-        output = embeddings.masked_select((index == (length-1)).unsqueeze(-1))
-
-        return output.view(embeddings.size(0), embeddings.size(-1))
+        lstm_output, _ = self.lstm(embeddings)
+        # if REINFORCE / out of training, select last step corresponding to message
+        if((not self.is_gumbel) or (self.is_gumbel and not self.training)):
+            index = torch.arange(message.size(-1)).expand_as(message).to(message.device)
+            output = lstm_output.masked_select((index == (length-1)).unsqueeze(-1))
+            return output.view(lstm_output.size(0), lstm_output.size(-1))
+        # If gumbel softmax, we'll weight the loss by the prob of this being the last step
+        else:
+            return lstm_output.squeeze(-1)
 
     @classmethod
     def from_args(cls, args, symbol_embeddings=None):
-        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=False)
-        return cls(args.base_alphabet_size, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings)
+        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=False, is_gumbel=args.is_gumbel)
+        return cls(args.base_alphabet_size, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings, is_gumbel=args.is_gumbel)
 
-# Vector -> message
-class MessageDecoder(nn.Module):
+# Vector -> message (REINFORCE)
+class ReinforceMessageDecoder(nn.Module):
     def __init__(self,
         base_alphabet_size,
         embedding_dim,
@@ -88,7 +97,7 @@ class MessageDecoder(nn.Module):
         max_msg_len,
         symbol_embeddings,
         ):
-        super(MessageDecoder, self).__init__()
+        super(ReinforceMessageDecoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
 
@@ -161,6 +170,7 @@ class MessageDecoder(nn.Module):
         outputs = {
             "entropy": entropy,
             "log_probs": log_probs,
+            "eos_probs": None, # for parallel with GS variant
             "message": message,
             "message_len": message_len}
 
@@ -168,13 +178,179 @@ class MessageDecoder(nn.Module):
 
     @classmethod
     def from_args(cls, args, symbol_embeddings=None):
-        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True)
+        if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True, is_gumbel=args.is_gumbel)
         return cls(
             base_alphabet_size=args.base_alphabet_size,
             embedding_dim=args.hidden_size,
             output_dim=args.hidden_size,
             max_msg_len=args.max_len,
             symbol_embeddings=symbol_embeddings,)
+
+
+# embedding layer for GumbelSoftmax sampled symbols
+class GumbelEmbedding(nn.Embedding):
+    def forward(self, input_tensor):
+        if input_tensor.dtype == torch.long:
+            # argmax output and / or classical embedding
+            return F.embedding(
+                input_tensor,
+                self.weight,
+                self.padding_idx,
+                self.max_norm,
+                self.norm_type,
+                self.scale_grad_by_freq,
+                self.sparse,
+            )
+        # float sampled output
+        if input_tensor.size(-1) <= self.weight.size(0):
+            assert self.weight.size(0) - input_tensor.size(-1) <= 2, "eh!"
+            # we don't the model to generate BOS or PAD, so we don't generate
+            # predictions for these. This corresponds to p(BOS) == p(PAD) == 0
+            n_unreachable_symbols = self.weight.size(0) - input_tensor.size(-1)
+            zeros_stack = torch.zeros(
+                *input_tensor.shape[:-1],
+                n_unreachable_symbols,
+                dtype=input_tensor.dtype)
+            zeros_stack = zeros_stack.to(input_tensor.device)
+            try:
+                input_tensor = torch.cat([input_tensor, zeros_stack], dim=-1)
+            except:
+                import pdb; pdb.set_trace()
+        return torch.matmul(input_tensor, self.weight)
+
+# Vector -> message (GumbelSoftmax)
+class GumbelSoftmaxMessageDecoder(nn.Module):
+    def __init__(self,
+        base_alphabet_size,
+        embedding_dim,
+        output_dim,
+        max_msg_len,
+        symbol_embeddings,
+        temperature=1.0,
+        ):
+        super(GumbelSoftmaxMessageDecoder, self).__init__()
+
+        self.symbol_embeddings = symbol_embeddings
+
+        self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
+        # project encoded img onto cell
+        self.cell_proj = nn.Linear(embedding_dim, embedding_dim)
+        # project encoded img onto hidden
+        self.hidden_proj = nn.Linear(embedding_dim, embedding_dim)
+        # project lstm output onto action space
+        self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size + 1)
+
+        self.max_msg_len = max_msg_len
+        self.bos_index = base_alphabet_size + 2
+        self.eos_index = 0
+        self.padding_idx = base_alphabet_size + 1
+        self.temperature = temperature
+
+    def forward(self, encoded):
+        # Initialisation
+        last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
+        cell = self.cell_proj(encoded).unsqueeze(0)
+        hidden = self.hidden_proj(encoded).unsqueeze(0)
+        state = (cell, hidden)
+
+        # outputs
+        message = []
+        log_probs = []
+        eos_probs = []
+        entropy = []
+
+        # Used in the stopping mechanism (when EOS has been produced)
+        has_stopped = torch.zeros(encoded.size(0)).bool().to(encoded.device)
+        has_stopped.requires_grad = False
+
+        # Produces the messages
+        # TODO Je serais d'avis à ne pas utiliser de EOS. Si l'action EOS est choisie, le message serait terminé sans qu'aucun symbol ne soit ajouté (ou plus techniquement, on ajoute un padding symbol). En fait, ça revient plus ou moins à fusionner le EOS et le padding symbol. Cela permettrait d'éviter d'avoir un symbol spécial apparaissant souvent mais pas toujours dans les "vrais" messages, ce qui peut compliquer l'analyse.
+        for i in range(self.max_msg_len):
+            embeddings = self.symbol_embeddings(last_symbol).unsqueeze(0)
+            output, state = self.lstm(embeddings, state)
+            output = self.action_space_proj(output).squeeze(0)
+
+            # Selects actions
+            probs = F.softmax(output, dim=-1)
+            dist = RelaxedOneHotCategorical(temperature=self.temperature, probs=probs)
+            action = dist.rsample() if self.training else probs.argmax(dim=-1)
+
+            # Ignores prediction for completed messages
+            # ent = dist.entropy() * (~has_stopped).float()
+            # log_p = dist.log_prob(action) * (~has_stopped).float()
+            # log_probs.append(log_p)
+            eos_probs.append(probs[:,self.eos_index])
+            # entropy.append(ent)
+
+            if not self.training:
+                action = action.masked_fill(has_stopped, self.padding_idx)
+                message.append(action)
+
+                # Stops if all messages are complete
+                # TODO: this is bad, we should check if the sum of logprobs for
+                # eos is >=  0 instead.
+                # that way we could also use it in training
+                has_stopped = has_stopped | (action == self.eos_index)
+                if has_stopped.all():
+                    break
+            else:
+                message.append(action)
+            last_symbol = action
+
+        # ensure stopping
+        if self.training:
+            eos_final = torch.zeros_like(message[-1])
+            eos_final[...,self.eos_index] = 1.
+            message.append(eos_final)
+        # Converts output to tensor
+        message = torch.stack(message, dim=1)
+        if self.training:
+            message_len = self.max_msg_len
+
+            eos_probs.append(torch.ones_like(eos_probs[-1]))
+        else:
+            message_len = (message != self.padding_idx).sum(dim=1)[:,None]
+        # log_probs = torch.stack(log_probs, dim=1)
+
+
+        outputs = {
+            "entropy": None,
+            "log_probs": None, #log_probs,
+            "eos_probs": torch.stack(eos_probs, dim=-1),
+            "message": message,
+            "message_len": message_len
+        }
+
+        return outputs
+
+    @classmethod
+    def from_args(cls, args, symbol_embeddings=None):
+        if(symbol_embeddings is None):
+            symbol_embeddings = build_embeddings(
+                args.base_alphabet_size,
+                args.hidden_size,
+                use_bos=True,
+                is_gumbel=True
+            )
+        return cls(
+            base_alphabet_size=args.base_alphabet_size,
+            embedding_dim=args.hidden_size,
+            output_dim=args.hidden_size,
+            max_msg_len=args.max_len,
+            temperature=args.temperature,
+            symbol_embeddings=symbol_embeddings,)
+
+class MessageDecoder():
+    def __init__(*_, **__):
+        raise NotImplementedError('This is a convenience class; call MessageDecoder.from_args(args) instead.')
+
+    @staticmethod
+    def from_args(args, symbol_embeddings=None):
+        if args.is_gumbel:
+            return GumbelSoftmaxMessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        else:
+            return ReinforceMessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
+
 
 # vector -> vector + random noise
 class Randomizer(nn.Module):
@@ -484,6 +660,7 @@ def build_cnn_decoder_from_args(args):
     #     flatten_last=False,
     #     sigmoid_after=True,)
 
-def build_embeddings(base_alphabet_size, dim, use_bos=False):
+def build_embeddings(base_alphabet_size, dim, use_bos=False, is_gumbel=False):
     vocab_size = (base_alphabet_size + 3) if use_bos else (base_alphabet_size + 2) # +3: EOS symbol, padding symbol, BOS symbol; +2: EOS symbol, padding symbol
-    return nn.Embedding(vocab_size, dim, padding_idx=base_alphabet_size + 1)
+    EmbeddingClass = GumbelEmbedding if is_gumbel else nn.Embedding
+    return EmbeddingClass(vocab_size, dim, padding_idx=base_alphabet_size + 1)

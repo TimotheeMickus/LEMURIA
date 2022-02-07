@@ -6,7 +6,7 @@ from .agent import Agent
 from ..utils.modules import MessageDecoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
+Outcome = namedtuple("Outcome", ["entropy", "log_prob", "eos_probs", "action"])
 
 # Image -(vector)-> message
 class Sender(Agent):
@@ -28,6 +28,7 @@ class Sender(Agent):
         outcome = Outcome(
             entropy=outputs["entropy"],
             log_prob=outputs["log_probs"],
+            eos_probs=outputs["eos_probs"], # for gumbel softmax
             action=(outputs["message"], outputs["message_len"]))
         return outcome
 

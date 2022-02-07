@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
+from torch.distributions.relaxed_categorical import RelaxedOneHotCategorical
 import torch.optim as optim
 import torchvision
 
@@ -116,12 +117,16 @@ def get_default_fn(base_fn, args):
         return base_fn(args)
     return _wrap
 
-def pointing(scores, argmax=False):
+def pointing(scores, argmax=False, is_gumbel=False):
     probs = F.softmax(scores, dim=-1)
-    dist = Categorical(probs)
+    dist = RelaxedOneHotCategorical(probs=probs) if is_gumbel else Categorical(probs)
 
-    if(argmax): action = scores.max(-1).indices
-    else: action = dist.sample()
+    if(argmax): 
+        action = scores.max(-1).indices
+    elif(is_gumbel):
+        action = dist.rsample()
+    else:
+        action = dist.sample()
 
     return {'dist': dist, 'action': action}
 

@@ -20,7 +20,7 @@ class SenderReceiver(Agent):
     @classmethod
     def from_args(cls, args):
         image_encoder = build_cnn_encoder_from_args(args)
-        symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # +2: padding symbol, BOS symbol
+        symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True, is_gumbel=args.is_gumbel) # +2: padding symbol, BOS symbol
         sender = Sender.from_args(args, image_encoder=image_encoder, symbol_embeddings=symbol_embeddings)
         receiver = Receiver.from_args(args, image_encoder=image_encoder, symbol_embeddings=symbol_embeddings)
         return cls(sender, receiver)

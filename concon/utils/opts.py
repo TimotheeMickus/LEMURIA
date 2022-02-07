@@ -71,6 +71,8 @@ def get_args():
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
+    group.add_argument('--is_gumbel', help="train with GumbelSoftmax rather than REINFORCE", action='store_true')
+    group.add_argument('--temperature', help="GumbelSoftmax temperature", type=float, default=1.0)
     group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)

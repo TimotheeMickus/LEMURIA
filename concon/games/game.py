@@ -95,7 +95,7 @@ class Game(metaclass=ABCMeta):
         pass
 
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000):
+    def train_epoch(self, data_iterator, event_writer=None, epoch=1, steps_per_epoch=1000):
         """
         Model training function
         Input:
@@ -106,7 +106,7 @@ class Game(metaclass=ABCMeta):
             `event_writer`: tensorboard writer to log evolution of values
         """
 
-        self.start_epoch(data_iterator)
+        self.start_epoch(data_iterator, event_writer)
         with self.autologger:
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
