@@ -65,14 +65,16 @@ class AliceBob(Game):
     def compute_interaction(self, batch):
         sender_outcome, receiver_outcome = self(batch)
 
-        if self.is_gumbel:
-            probs = F.softmax(receiver_outcome.scores.transpose(1, 2), dim=-1)
+        if self.is_gumbel and self.sender.training:
+            probs = F.log_softmax(receiver_outcome.scores.transpose(1, 2), dim=-1)
             flat_probs = probs.view(-1, probs.size(-1))
             targets = torch.zeros(flat_probs.size(0), dtype=torch.long).to(probs.device)
             unweighted_loss = F.nll_loss(flat_probs, targets, reduction='none').view(probs.shape[:-1])
             weighted_loss = sender_outcome.eos_probs * unweighted_loss
             loss = weighted_loss.sum(1).view(probs.size(0))
-            return loss.mean(), torch.tensor(0),torch.tensor(0),torch.tensor(0),torch.tensor(0),torch.tensor(0) #TODO
+            # that's a very debatable way of computing successes, as these eos probs are ill-defined
+            successes = ((sender_outcome.eos_probs * (probs.argmax(-1) == 0)).sum() / sender_outcome.eos_probs.sum()).detach()
+            return loss.mean(), torch.tensor(0), loss.mean(), torch.tensor(0), torch.tensor(0), torch.tensor(0) #TODO
         else:
             # Alice's part
             (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
@@ -275,7 +277,7 @@ class AliceBob(Game):
         return (loss, successes, rewards)
 
     def compute_receiver_loss(self, receiver_scores, return_entropy=False):
-        receiver_pointing = pointing(receiver_scores, is_gumbel=self.is_gumbel) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
+        receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
 
         # By design, the target is the first image
         if(self.use_expectation):

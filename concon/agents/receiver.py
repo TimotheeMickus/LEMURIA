@@ -24,7 +24,7 @@ class Receiver(Agent):
         self.message_encoder = message_encoder
 
     def encode_message(self, message, length):
-        if self.message_encoder.is_gumbel:
+        if(self.message_encoder.is_gumbel and self.message_encoder.training):
             return self.message_encoder(message, length).transpose(-2, -1)
         else:
             return self.message_encoder(message, length).unsqueeze(-1)
