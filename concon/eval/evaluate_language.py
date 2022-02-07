@@ -42,16 +42,16 @@ def main(args):
     ostr = open(args.message_dump_file, 'w') if(args.message_dump_file is not None) else None
     #with open(args.message_dump_file, 'w') as ostr:
     '''
-   
+
     # We try to visit each category on average 32 times
     batch_size = 256
     max_datapoints = 32768 # (2^15)
     n = (32 * data_iterator.nb_categories)
     #n = data_iterator.size(data_type='test', no_evaluation=False)
-    n = min(max_datapoints, n) 
+    n = min(max_datapoints, n)
     nb_batch = int(np.ceil(n / batch_size))
     print('%i datapoints (%i batches)' % (n, nb_batch))
-    
+
     print("Generating the messages…")
     messages = []
     categories = []
@@ -67,9 +67,10 @@ def main(args):
             batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # Standard evaluation batch
             sender_outcome, receiver_outcome = model(batch)
 
-            receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
+            # TODO: is_gumbel is fixed to False here, should be fixed. same below
+            receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True, is_gumbel=False)
             success.append(receiver_pointing['dist'].probs[:, 0])
-            
+
             scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
             for i, datapoint in enumerate(batch.original):
                 msg = sender_outcome.action[0][i]
@@ -85,7 +86,7 @@ def main(args):
                 scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
             scrambled_receiver_outcome = model.receiver(model._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
-            scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
+            scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores, is_gumbel=False)
             scrambled_success.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
         success = torch.stack(success)
@@ -113,7 +114,7 @@ def main(args):
         abstractness = torch.stack(abstractness)
         abstractness_rate = abstractness.mean().item()
         print('Abstractness: %f' % abstractness_rate)
-   
+
     '''
     messages = []
     categories = []
@@ -121,17 +122,17 @@ def main(args):
         batch_numbers = range(nb_batch)
         if(display == 'tqdm'): batch_numbers = tqdm.tqdm(range(nb_batch))
         for _ in batch_numbers:
-        
+
         for datapoint in tqdm.tqdm(dataset):
             sender_outcome = model.sender(datapoint.img.unsqueeze(0).to(args.device))
             message = sender_outcome.action[0].view(-1)
-            
+
             messages.append(message.tolist())
-            
+
             message_str = ' '.join(map(str, message.tolist()))
             category_str = ' '.join(map(str, datapoint.category))
             counts += (torch.arange(args.base_alphabet_size).expand(message.size(0), args.base_alphabet_size) == message.unsqueeze(1)).float().sum(dim=0)
-            
+
             if args.load_other_model is not None:
                 other_sender_outcome = other_model.sender(datapoint.img.unsqueeze(0).to(args.device))
                 other_message = other_sender_outcome.action[0].view(-1)

@@ -24,7 +24,10 @@ class Receiver(Agent):
         self.message_encoder = message_encoder
 
     def encode_message(self, message, length):
-        return self.message_encoder(message, length).unsqueeze(-1)
+        if self.message_encoder.is_gumbel:
+            return self.message_encoder(message, length).transpose(-2, -1)
+        else:
+            return self.message_encoder(message, length).unsqueeze(-1)
 
     def forward(self, images, message, length):
         return self.aux_forward(images, self.encode_message(message, length))

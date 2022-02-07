@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import scipy
 import itertools as it
@@ -24,6 +25,7 @@ class AliceBob(Game):
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
+        self.is_gumbel = args.is_gumbel
 
         if(args.shared):
             print('You currently cannot use AliceBob with shared CNNs. Please use AliceBobPopulation with a population of size 1 instead.')
@@ -64,18 +66,27 @@ class AliceBob(Game):
     def compute_interaction(self, batch):
         sender_outcome, receiver_outcome = self(batch)
 
-        # Alice's part
-        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
+        if self.is_gumbel:
+            probs = F.softmax(receiver_outcome.scores.transpose(1, 2), dim=-1)
+            flat_probs = probs.view(-1, probs.size(-1))
+            targets = torch.zeros(flat_probs.size(0), dtype=torch.long).to(probs.device)
+            unweighted_loss = F.nll_loss(flat_probs, targets, reduction='none').view(probs.shape[:-1])
+            weighted_loss = sender_outcome.eos_probs * unweighted_loss
+            loss = weighted_loss.sum(1).view(probs.size(0))
+            return loss.mean(), torch.tensor(0),torch.tensor(0),torch.tensor(0),torch.tensor(0),torch.tensor(0) #TODO
+        else:
+            # Alice's part
+            (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
 
-        # Bob's part
-        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+            # Bob's part
+            receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
-        loss = sender_loss + receiver_loss
+            loss = sender_loss + receiver_loss
 
-        rewards, successes = sender_rewards, sender_successes
-        avg_msg_length = sender_outcome.action[1].float().mean().item()
+            rewards, successes = sender_rewards, sender_successes
+            avg_msg_length = sender_outcome.action[1].float().mean().item()
 
-        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+            return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
     def to(self, *vargs, **kwargs):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
@@ -103,6 +114,7 @@ class AliceBob(Game):
 
         return sender_outcome, receiver_outcome
 
+    #TODO: move this  somewhere else; e.g. `eval`?
     def test_visualize(self, data_iterator, learning_rate):
         self.start_episode(train_episode=False)
 
@@ -264,7 +276,7 @@ class AliceBob(Game):
         return (loss, successes, rewards)
 
     def compute_receiver_loss(self, receiver_scores, return_entropy=False):
-        receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
+        receiver_pointing = pointing(receiver_scores, is_gumbel=self.is_gumbel) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
 
         # By design, the target is the first image
         if(self.use_expectation):
@@ -292,6 +304,7 @@ class AliceBob(Game):
         if return_entropy: return (loss, receiver_pointing['dist'].entropy().mean())
         return loss
 
+    #TODO: move this  somewhere else; e.g. `eval`?
     def evaluate(self, data_iterator, epoch):
         def log(name, value):
             self.autologger._write(name, value, epoch, direct=True)
