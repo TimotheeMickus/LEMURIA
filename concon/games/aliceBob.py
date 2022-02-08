@@ -322,7 +322,6 @@ class AliceBob(Game):
         if return_entropy: return (loss, receiver_pointing['dist'].entropy().mean())
         return loss
 
-    #TODO: move this  somewhere else; e.g. `eval`?
     def evaluate(self, data_iterator, epoch):
         def log(name, value):
             self.autologger._write(name, value, epoch, direct=True)
