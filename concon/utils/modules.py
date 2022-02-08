@@ -354,25 +354,29 @@ class MessageDecoder():
 
 # vector -> vector + random noise
 class Randomizer(nn.Module):
-    def __init__(self, input_dim, random_dim):
+    def __init__(self, input_dim, random_dim, is_gumbel=False):
         super(Randomizer, self).__init__()
         self.merging_projection = nn.Linear(input_dim + random_dim, input_dim)
         self.random_dim = random_dim
         self.input_dim = input_dim
+        self.is_gumbel = is_gumbel
 
     def forward(self, input_vector):
         """
         Input:
             `input_vector` of dimension [BATCH x self.input_dim]
+            except when using gumbel softmax, where we expect [BATCH x Timesteps x self.input_dim]
         """
         noise = torch.randn(input_vector.size(0), self.random_dim, device=input_vector.device)
-        input_with_noise = torch.cat([input_vector, noise], dim=1)
+        if self.is_gumbel and self.training:
+            noise = noise.unsqueeze(1).expand_as(input_vector)
+        input_with_noise = torch.cat([input_vector, noise], dim=-1)
         merged_input = self.merging_projection(input_with_noise)
         return merged_input
 
     @classmethod
     def from_args(cls, args):
-        return cls(input_dim=args.hidden_size, random_dim=args.hidden_size)
+        return cls(input_dim=args.hidden_size, random_dim=args.hidden_size, is_gumbel=args.is_gumbel)
 
 
 def _dcgan_tuto_cnn(hidden_size):

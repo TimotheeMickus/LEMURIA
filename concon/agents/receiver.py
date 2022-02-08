@@ -29,10 +29,10 @@ class Receiver(Agent):
         else:
             return self.message_encoder(message, length).unsqueeze(-1)
 
-    def forward(self, images, message, length):
-        return self.aux_forward(images, self.encode_message(message, length))
+    def forward(self, images, message, length, charlie_gumbel=False):
+        return self.aux_forward(images, self.encode_message(message, length), charlie_gumbel=charlie_gumbel)
 
-    def aux_forward(self, images, encoded_message):
+    def aux_forward(self, images, encoded_message, charlie_gumbel=False):
         """
             Forward propagation.
             Input:
@@ -44,13 +44,21 @@ class Receiver(Agent):
         """
 
         # Encodes the images
-        original_size = images.size()[:2] #dim 1 & 2 give batch size & K (TODO Je ne comprends pas ce commentaire.)
-        encoded_images = self.image_encoder(images.view(-1, *images.size()[2:]))
+        # the three last dimensions encode images channel, width and height;
+        # the rest correspond to multi-dimensional batching (per batch item, per timestep, target / distractor /charlie prod...)
+        original_size = images.size()[:-3]
+        encoded_images = self.image_encoder(images.view(-1, *images.size()[-3:]))
         encoded_images = encoded_images.view(*original_size, -1)
 
         # Scores the targets
-        scores = torch.bmm(encoded_images, encoded_message).squeeze(-1)
-
+        if charlie_gumbel:
+            encoded_message = encoded_message.transpose(1, 2).unsqueeze(-2).flatten(end_dim=1)
+            encoded_images = encoded_images.transpose(1, 2).transpose(3, 2).flatten(end_dim=1)
+            B, I, T = original_size
+            #TODO: the bmm is backwards wrt to the non-Charlie Gumbel setup.
+            scores = torch.bmm(encoded_message, encoded_images).view(B, T, I)
+        else:
+            scores = torch.bmm(encoded_images, encoded_message).squeeze(-1)
         outcome = Outcome(scores=scores)
         return outcome
 

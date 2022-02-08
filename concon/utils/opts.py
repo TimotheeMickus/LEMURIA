@@ -9,6 +9,8 @@ import sys
 import socket # for `gethostname`
 from datetime import datetime
 
+import torch
+
 def get_args():
     arg_parser = argparse.ArgumentParser()
 
@@ -58,8 +60,7 @@ def get_args():
 
     group = arg_parser.add_argument_group(title='Perfs', description='arguments relative to performances')
 
-    device_choices = ['cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'msnpu']
-    group.add_argument('--device', help='what to run PyTorch on (potentially available: ' + ', '.join(device_choices) + ')', choices=device_choices, default='cpu')
+    group.add_argument('--device', help='what to run PyTorch on', type=torch.device, default=torch.device('cpu'))
 
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
