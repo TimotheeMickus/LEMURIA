@@ -247,7 +247,7 @@ class AliceBobCharlie(AliceBob):
                 receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
                 receiver_pointing = pointing(receiver_outcome.scores)
-                abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
+                abstractness.append(1 - (receiver_pointing['dist'].probs[:, 1] - receiver_pointing['dist'].probs[:, 0]).abs())
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
