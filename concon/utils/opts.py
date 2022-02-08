@@ -10,6 +10,8 @@ import socket # for `gethostname`
 import torch # for device
 from datetime import datetime
 
+import torch
+
 def get_args():
     arg_parser = argparse.ArgumentParser()
 

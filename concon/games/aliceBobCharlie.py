@@ -73,7 +73,11 @@ class AliceBobCharlie(AliceBob):
             charlie_img.unsqueeze(1),
         ]
         # put charlie's img first if we're training it
-        if self.train_charlie: images = [images[-1]] + images[:-1]
+        if self.drawer.is_gumbel and self.drawer.training:
+            images[0] = images[0].unsqueeze(2).expand_as(images[2])
+            images[1] = images[1].unsqueeze(2).expand_as(images[2])
+        if self.train_charlie:
+            images = [images[-1]] + images[:-1]
         return torch.cat(images, dim=1)
 
     def to(self, *vargs, **kwargs):
@@ -84,7 +88,42 @@ class AliceBobCharlie(AliceBob):
     def get_drawer(self):
         return drawer
 
+    def _compute_interaction_charlie_gumbel(self, batch):
+        sender, receiver, drawer = self.agents
+        # send
+        sender_outcome = sender(self._alice_input(batch))
+
+        # adversarial step
+        drawer_outcome = drawer(*sender_outcome.action)
+
+        # receive
+        receiver_outcome = receiver(self._charlied_bob_input(batch, drawer_outcome.image), *sender_outcome.action, charlie_gumbel=True)
+
+        probs = F.log_softmax(receiver_outcome.scores, dim=-1)
+        flat_probs = probs.view(-1, probs.size(-1))
+        targets = torch.zeros(flat_probs.size(0), dtype=torch.long).to(probs.device)
+        unweighted_loss = F.nll_loss(flat_probs, targets, reduction='none').view(probs.shape[:-1])
+        # what's the probability that the message will continue after timestep t?
+        prob_continues = (1 - sender_outcome.eos_probs).cumprod(1)
+        # what's the probability that the message has continued until timestep t - 1?
+        prob_has_lasted = torch.cat([torch.ones_like(prob_continues[:,0]).unsqueeze(1), prob_continues], dim=1)[:, :prob_continues.size(1)]
+        # what's the probability that timestep t is the last?
+        prob_last_step = prob_has_lasted * sender_outcome.eos_probs
+        # weight loss according to the probability that this is the last step
+        weighted_loss = prob_last_step * unweighted_loss
+        loss = weighted_loss.sum(1).mean()
+
+        # compute success, weighted by the likelihood of stopping at step t
+        successes = (prob_last_step * (probs.argmax(-1) == 0)).sum(1)
+        successes = successes.detach()
+        # compute suclengthcess, weighted by the likelihood of stopping at step t
+        lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
+        avg_msg_length = lengths.sum(1).detach()
+        return loss, torch.tensor(0), successes, avg_msg_length, torch.tensor(0), torch.tensor(0) #TODO
+
     def compute_interaction_charlie(self, batch):
+        if self.is_gumbel and self.sender.training:
+            return self._compute_interaction_charlie_gumbel(batch)
         sender, receiver, drawer = self.agents
         # send
         sender_outcome = sender(self._alice_input(batch))
