@@ -243,12 +243,8 @@ class AliceBobCharlie(AliceBob):
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
                 # send
                 sender_outcome = sender(self._alice_input(batch))
-
-                # adversarial step
-                drawer_outcome = drawer(*sender_outcome.action)
-
                 # receive
-                receiver_outcome = receiver(self._charlied_bob_input(batch, drawer_outcome.image), *sender_outcome.action)
+                receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
 
                 receiver_pointing = pointing(receiver_outcome.scores)
                 abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
