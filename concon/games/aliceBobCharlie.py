@@ -204,7 +204,7 @@ class AliceBobCharlie(AliceBob):
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
-                failure = receiver_pointing['dist'].probs[:, 1:].cpu().numpy().sum() # Probability of the distractor(s)
+                failure = receiver_pointing['dist'].probs[:, 1:].sum(1).cpu().numpy() # Probability of the distractor(s)
                 data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
 
                 np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
