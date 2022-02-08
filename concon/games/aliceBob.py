@@ -63,32 +63,48 @@ class AliceBob(Game):
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
+    def compute_interaction_gumbel(self, batch):
+        sender_outcome, receiver_outcome = self(batch)
+        probs = F.log_softmax(receiver_outcome.scores.transpose(1, 2), dim=-1)
+        flat_probs = probs.view(-1, probs.size(-1))
+        targets = torch.zeros(flat_probs.size(0), dtype=torch.long).to(probs.device)
+        unweighted_loss = F.nll_loss(flat_probs, targets, reduction='none').view(probs.shape[:-1])
+        # what's the probability that the message will continue after timestep t?
+        prob_continues = (1 - sender_outcome.eos_probs).cumprod(1)
+        # what's the probability that the message has continued until timestep t - 1?
+        prob_has_lasted = torch.cat([torch.ones_like(prob_continues[:,0]).unsqueeze(1), prob_continues], dim=1)[:, :prob_continues.size(1)]
+        # what's the probability that timestep t is the last?
+        prob_last_step = prob_has_lasted * sender_outcome.eos_probs
+        # weight loss according to the probability that this is the last step
+        weighted_loss = prob_last_step * unweighted_loss
+        loss = weighted_loss.sum(1).mean()
+
+        # compute success, weighted by the likelihood of stopping at step t
+        successes = (prob_last_step * (probs.argmax(-1) == 0)).sum(1)
+        successes = successes.detach()
+        # compute suclengthcess, weighted by the likelihood of stopping at step t
+        lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
+        avg_msg_length = lengths.sum(1).detach()
+        return loss, torch.tensor(0), successes, avg_msg_length, torch.tensor(0), torch.tensor(0) #TODO
+
     def compute_interaction(self, batch):
+        if self.is_gumbel and self.sender.training:
+            return self.compute_interaction_gumbel(batch)
+
         sender_outcome, receiver_outcome = self(batch)
 
-        if self.is_gumbel and self.sender.training:
-            probs = F.log_softmax(receiver_outcome.scores.transpose(1, 2), dim=-1)
-            flat_probs = probs.view(-1, probs.size(-1))
-            targets = torch.zeros(flat_probs.size(0), dtype=torch.long).to(probs.device)
-            unweighted_loss = F.nll_loss(flat_probs, targets, reduction='none').view(probs.shape[:-1])
-            weighted_loss = sender_outcome.eos_probs * unweighted_loss
-            loss = weighted_loss.sum(1).view(probs.size(0))
-            # that's a very debatable way of computing successes, as these eos probs are ill-defined
-            successes = ((sender_outcome.eos_probs * (probs.argmax(-1) == 0)).sum() / sender_outcome.eos_probs.sum()).detach()
-            return loss.mean(), torch.tensor(0), loss.mean(), torch.tensor(0), torch.tensor(0), torch.tensor(0) #TODO
-        else:
-            # Alice's part
-            (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
+        # Alice's part
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
 
-            # Bob's part
-            receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+        # Bob's part
+        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
-            loss = sender_loss + receiver_loss
+        loss = sender_loss + receiver_loss
 
-            rewards, successes = sender_rewards, sender_successes
-            avg_msg_length = sender_outcome.action[1].float().mean().item()
+        rewards, successes = sender_rewards, sender_successes
+        avg_msg_length = sender_outcome.action[1].float().mean().item()
 
-            return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
     def to(self, *vargs, **kwargs):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
