@@ -118,7 +118,7 @@ class AliceBobCharlie(AliceBob):
         successes = successes.detach()
         # compute suclengthcess, weighted by the likelihood of stopping at step t
         lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
-        avg_msg_length = lengths.sum(1).detach()
+        avg_msg_length = lengths.sum(1).mean().item()
         return loss, torch.tensor(0), successes, avg_msg_length, torch.tensor(0), torch.tensor(0) #TODO
 
     def compute_interaction_charlie(self, batch):
