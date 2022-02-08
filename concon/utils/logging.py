@@ -127,7 +127,7 @@ class DummyLogger(object):
 class AutoLogger(object):
     def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, debug=False,
         log_lang_progress=False, log_entropy=False,
-        device='cpu', no_summary=False, summary_dir=None, default_period=10,):
+        device='cpu', no_summary=False, summary_dir=None, default_period=10, ignore_reward=False):
         #log_charlie_acc=False):
 
         self.base_alphabet_size = base_alphabet_size
@@ -145,6 +145,7 @@ class AutoLogger(object):
         self.log_entropy = log_entropy
 
         self.device = device
+        self.ignore_reward = ignore_reward
 
         #self.log_charlie_acc = log_charlie_acc # Commented out: use self.tag_header to highlight when results pertain to Charlie
 
@@ -214,19 +215,22 @@ class AutoLogger(object):
         length_ratio = (avg_msg_length / minimal_compression_len)
 
         # updates running average reward
-        self._state['total_reward'] += rewards.sum().item()
-        self._state['total_success'] += successes.sum().item()
         self._state['total_items'] += supplementary_info['batch'].size
-        self._state['running_avg_reward'] = self._state['total_reward'] / self._state['total_items']
+        self._state['total_success'] += successes.sum().item()
         self._state['running_avg_success'] = self._state['total_success'] / self._state['total_items']
+        if not self.ignore_reward:
+            self._state['total_reward'] += rewards.sum().item()
+            self._state['running_avg_reward'] = self._state['total_reward'] / self._state['total_items']
 
         if self.summary_writer is not None:
-            avg_reward = rewards.mean().item() # average reward of the batch
+            if not self.ignore_reward:
+                avg_reward = rewards.mean().item() # average reward of the batch
             avg_success = successes.mean().item() # average success of the batch
             number_ex_seen = supplementary_info['index'] * supplementary_info['batch'].size
             self._state['number_ex_seen'] = number_ex_seen
 
-            self._write('train/reward', avg_reward, number_ex_seen)
+            if not self.ignore_reward:
+                self._write('train/reward', avg_reward, number_ex_seen)
             self._write('train/success', avg_success, number_ex_seen)
             self._write('train/loss', loss.item(), number_ex_seen)
             self._write('train/sender_entropy', sender_entropy.item(), number_ex_seen)
