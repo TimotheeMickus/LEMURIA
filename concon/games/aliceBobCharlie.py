@@ -100,7 +100,7 @@ class AliceBobCharlie(AliceBob):
         return self
 
     def get_drawer(self):
-        return drawer
+        return self.drawer
 
     def _compute_interaction_charlie_gumbel(self, batch):
         sender, receiver, drawer = self.agents
@@ -189,18 +189,18 @@ class AliceBobCharlie(AliceBob):
             # send
             action = sender(self._alice_input(batch)).action
             images = drawer(*action).image
-        return torch.cat([batch.target_img().unsqueeze(1), images.unsqueeze(1)], dim=1)
+        return torch.cat([batch.target_img(stack=True).unsqueeze(1), images.unsqueeze(1)], dim=1)
 
     def evaluate(self, data_iterator, epoch):
-        for agents in self.agents():
+        for agents in self.agents:
             agents.eval()
         if((epoch % 10 == 0) and (self.test_output_charlie_path is not  None)):
             if(self.autologger.display != 'minimal'): print('constructing sample for epoch', epoch)
-            batch = data_iterator.get_batch(32, data_type='test', no_evaluation=False, sampling_strategies=['different'])
-            images = self.get_images(batch)
-            images = torchvision.utils.make_grid(images, 2)
+            batch = data_iterator.get_batch(256, data_type='test', no_evaluation=False, sampling_strategies=['different'])
+            images = self.get_images(batch).flatten(end_dim=1)
+            images = torchvision.utils.make_grid(images, 8)
             torchvision.transforms.functional.to_pil_image(images).save(f"{self.test_output_charlie_path}epoch_{epoch}.png")
-            
+
         training_state = self.train_charlie
         self.switch_charlie(False) # also controls image ordering
         def log(name, value):
@@ -374,6 +374,6 @@ class AliceBobCharlie(AliceBob):
                 accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
                 log('eval/accuracy-eval-td', accuracy_eval_td)
 
-        for agents in self.agents():
+        for agents in self.agents:
             agents.train()
         self.switch_charlie(training_state)
