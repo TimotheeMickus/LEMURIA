@@ -108,6 +108,7 @@ def get_args():
     group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
     group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')
     group.add_argument('--threeway_correlation', help='compute three-way correlation between image vectors, meaning distance and message distance instead of training', action='store_true')
+    group.add_argument('--test_output_charlie_path', help='if provided, save sample images during training (will append epoch_${EPOCH}.png)', type=str, default=None)
 
     # For visualize.py / evaluate_language.py
     group.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path)
