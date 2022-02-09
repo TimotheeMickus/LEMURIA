@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from ..utils.logging import DummyLogger, Progress
+from ..utils.logging import DummyLogger, Progress, LoggingData
 from ..utils.misc import build_optimizer, Unflatten
 from ..utils.modules import build_cnn_decoder_from_args, MultiHeadsClassifier
 
@@ -117,7 +117,7 @@ class Game(metaclass=ABCMeta):
 
                 self.optim.zero_grad()
 
-                loss, *external_output = self.compute_interaction(batch)
+                loss, logging_data = self.compute_interaction(batch)
 
                 loss.backward() # Backpropagation
 
@@ -131,12 +131,7 @@ class Game(metaclass=ABCMeta):
 
                 self.optim.step()
 
-                udpated_state = self.autologger.update(
-                    loss, *external_output,
-                    parameters=(p for a in self.agents for p in a.parameters()),
-                    batch=batch,
-                    index=index,
-                )
+                udpated_state = self.autologger.update(logging_data)
                 self.end_episode(**udpated_state)
 
     def save(self, path):

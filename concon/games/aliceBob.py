@@ -13,6 +13,7 @@ import time
 
 from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, build_optimizer, compute_entropy_stats
+from ..utils.logging import LoggingData
 from ..utils import misc
 
 from ..eval import compute_correlation
@@ -85,7 +86,17 @@ class AliceBob(Game):
         # compute suclengthcess, weighted by the likelihood of stopping at step t
         lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
         avg_msg_length = lengths.sum(1).mean().item()
-        return loss, torch.tensor(0), successes, avg_msg_length, torch.tensor(0), torch.tensor(0) #TODO
+
+        logging_data = LoggingData(
+            number_ex_seen=batch.size,
+            pbar_items={'S': successes.mean().item()},
+            summary_items={
+                'train/loss': loss.mean().item(),
+                'train/success':  successes.mean().item(),
+                'train/msg_length': avg_msg_length,
+            }
+        )
+        return loss, logging_data
 
     def compute_interaction(self, batch):
         if self.is_gumbel and self.sender.training:
@@ -104,7 +115,21 @@ class AliceBob(Game):
         rewards, successes = sender_rewards, sender_successes
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
-        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+        logging_data = LoggingData(
+            number_ex_seen=batch.size,
+            pbar_items={'S': successes.mean().item()},
+            summary_items={
+                'train/loss': loss.mean().item(),
+                'train/sender_loss': sender_loss.mean.item(),
+                'train/receiver_loss': receiver_loss.mean.item(),
+                'train/rewards': rewards,
+                'train/success':  successes.mean().item(),
+                'train/msg_length': avg_msg_length,
+                'train/sender_entropy': sender_outcome.entropy.mean().item(),
+                'train/receiver_entropy': receiver_entropy.item(),
+            }
+        )
+        return loss, logging_data
 
     def to(self, *vargs, **kwargs):
         self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)

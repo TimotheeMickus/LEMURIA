@@ -13,7 +13,7 @@ from .utils.data import get_data_loader
 from .utils.opts import get_args
 from .utils.misc import build_optimizer, get_default_fn, path_replace
 from .utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
-from .utils.logging import AutoLogger
+from .utils.logging import AutoLogger2
 from .utils.data import Batch
 
 def train(args):
@@ -31,7 +31,7 @@ def train(args):
         run_models_dir = models_dir / str(run)
 
         data_loader = get_data_loader(args)
-        autologger = AutoLogger(
+        autologger = AutoLogger2(
             base_alphabet_size=args.base_alphabet_size,
             data_loader=data_loader,
             display=args.display,
@@ -42,6 +42,7 @@ def train(args):
             device=args.device,
             no_summary=args.no_summary,
             summary_dir=run_summary_dir,
+            default_logged_items={'AB', 'C'} if args.charlie else {'S'},
             default_period=args.logging_period,
             ignore_reward=args.is_gumbel)# log_charlie_acc=args.charlie)
 
