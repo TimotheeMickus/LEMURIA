@@ -308,7 +308,7 @@ class AliceBobCharlie(AliceBob):
                 bob_input = self._charlied_bob_input(batch, drawer_outcome.image)
                 receiver_outcome = receiver(bob_input, *sender_outcome.action)
 
-                receiver_pointing = misc.pointing(receiver_outcome.scores)
+                receiver_pointing = pointing(receiver_outcome.scores)
                 abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
 
             abstractness = torch.stack(abstractness)
