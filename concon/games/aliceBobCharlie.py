@@ -11,6 +11,7 @@ import tqdm
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing, compute_entropy_stats, pointing
+from ..utils.logging import LoggingData
 from ..eval import compute_correlation
 
 from .aliceBob import AliceBob
@@ -63,7 +64,17 @@ class AliceBobCharlie(AliceBob):
 
     def compute_interaction(self, batch):
         if not self.train_charlie:
-            return super().compute_interaction(batch)
+            loss, logging_data_ = super().compute_interaction(batch)
+            short_label, prefix = ('C', 'Charlie-') if self.train_charlie else ('AB', 'AliceBob-')
+            logging_data = LoggingData(
+                number_ex_seen=logging_data_.number_ex_seen,
+                pbar_items={short_label: v for v in logging_data_.pbar_items.values()},
+                summary_items={
+                    prefix + k: v
+                    for k,v in logging_data_.summary_items.items()
+                }
+            )
+            return loss, logging_data
         return self.compute_interaction_charlie(batch)
 
     def _charlied_bob_input(self, batch, charlie_img):
@@ -119,10 +130,21 @@ class AliceBobCharlie(AliceBob):
         # compute suclengthcess, weighted by the likelihood of stopping at step t
         lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
         avg_msg_length = lengths.sum(1).mean().item()
-        return loss, torch.tensor(0), successes, avg_msg_length, torch.tensor(0), torch.tensor(0) #TODO
+
+        short_label, prefix = ('C', 'Charlie-') if self.train_charlie else ('AB', 'AliceBob-')
+        logging_data = LoggingData(
+            number_ex_seen=batch.size,
+            pbar_items={short_label: successes.mean().item()},
+            summary_items={
+                prefix + 'train/loss': loss.mean().item(),
+                prefix + 'train/success':  successes.mean().item(),
+                prefix + 'train/msg_length': avg_msg_length,
+            }
+        )
+        return loss, logging_data
 
     def compute_interaction_charlie(self, batch):
-        if self.is_gumbel and self.sender.training:
+        if self.is_gumbel and self.sender.training or self.drawer.training:
             return self._compute_interaction_charlie_gumbel(batch)
         sender, receiver, drawer = self.agents
         # send
@@ -141,6 +163,21 @@ class AliceBobCharlie(AliceBob):
         rewards, successes = sender_rewards, sender_successes
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
+        short_label, prefix = ('C', 'Charlie-') if self.train_charlie else ('AB', 'AliceBob-')
+        logging_data = LoggingData(
+            number_ex_seen=batch.size,
+            pbar_items={short_label: successes.mean().item()},
+            summary_items={
+                prefix + 'train/loss': loss.mean().item(),
+                prefix + 'train/sender_loss': sender_loss.mean.item(),
+                prefix + 'train/receiver_loss': receiver_loss.mean.item(),
+                prefix + 'train/rewards': rewards,
+                prefix + 'train/success':  successes.mean().item(),
+                prefix + 'train/msg_length': avg_msg_length,
+                prefix + 'train/sender_entropy': sender_outcome.entropy.mean().item(),
+                prefix + 'train/receiver_entropy': receiver_entropy.item(),
+            }
+        )
         return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
     def get_images(self, batch):
@@ -243,62 +280,87 @@ class AliceBobCharlie(AliceBob):
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
                 # send
                 sender_outcome = sender(self._alice_input(batch))
+                # adversarial step
+                drawer_outcome = drawer(*sender_outcome.action)
                 # receive
-                receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
-
+                bob_input = self._charlied_bob_input(batch, drawer_outcome.image)
+                receiver_outcome = receiver(bob_input, *sender_outcome.action)
                 receiver_pointing = pointing(receiver_outcome.scores)
                 abstractness.append(1 - (receiver_pointing['dist'].probs[:, 1] - receiver_pointing['dist'].probs[:, 0]).abs())
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
+            log('eval/abstractness2', abstractness_rate)
+
+            abstractness = []
+            n = (32 * data_iterator.nb_categories)
+            n = min(max_datapoints, n)
+            nb_batch = int(np.ceil(n / batch_size))
+            for _ in range(nb_batch):
+                self.start_episode(train_episode=False) # Selects agents at random if necessary
+
+                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
+                # send
+                sender_outcome = sender(self._alice_input(batch))
+                # adversarial step
+                drawer_outcome = drawer(*sender_outcome.action)
+                # receive
+                bob_input = self._charlied_bob_input(batch, drawer_outcome.image)
+                receiver_outcome = receiver(bob_input, *sender_outcome.action)
+
+                receiver_pointing = misc.pointing(receiver_outcome.scores)
+                abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
+
+            abstractness = torch.stack(abstractness)
+            abstractness_rate = abstractness.mean().item()
             log('eval/abstractness', abstractness_rate)
 
-        # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
-        success = torch.stack(success)
-        success_rate = success.mean().item()
-        log('eval/success_rate', success_rate)
+            # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
+            success = torch.stack(success)
+            success_rate = success.mean().item()
+            log('eval/success_rate', success_rate)
 
-        charlie_success = torch.stack(charlie_success)
-        charlie_success_rate = charlie_success.mean().item()
-        log('eval/charlie_success_rate', charlie_success_rate)
+            charlie_success = torch.stack(charlie_success)
+            charlie_success_rate = charlie_success.mean().item()
+            log('eval/charlie_success_rate', charlie_success_rate)
 
-        # Computes the accuracy when the images are selected from all categories
-        accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
-        log('eval/accuracy', accuracy_all)
+            # Computes the accuracy when the images are selected from all categories
+            accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
+            log('eval/accuracy', accuracy_all)
 
-        train_categories = data_iterator.training_categories_idx
-        eval_categories = data_iterator.evaluation_categories_idx
-        if(eval_categories != []):
-            # Computes the accuracy when both the target and the distractor are selected from training categories
-            failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
-            counts_matrix_train_td = counts_matrix[np.ix_(train_categories, train_categories)]
+            train_categories = data_iterator.training_categories_idx
+            eval_categories = data_iterator.evaluation_categories_idx
+            if(eval_categories != []):
+                # Computes the accuracy when both the target and the distractor are selected from training categories
+                failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
+                counts_matrix_train_td = counts_matrix[np.ix_(train_categories, train_categories)]
 
-            counts = counts_matrix_train_td.sum()
-            accuracy_train_td = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
-            log('eval/accuracy-train-td', accuracy_train_td)
+                counts = counts_matrix_train_td.sum()
+                accuracy_train_td = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
+                log('eval/accuracy-train-td', accuracy_train_td)
 
-            # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
-            failure_matrix_eval_t = failure_matrix[eval_categories, :]
-            counts_matrix_eval_t = counts_matrix[eval_categories, :]
+                # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
+                failure_matrix_eval_t = failure_matrix[eval_categories, :]
+                counts_matrix_eval_t = counts_matrix[eval_categories, :]
 
-            counts = counts_matrix_eval_t.sum()
-            accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
-            log('eval/accuracy-eval-t', accuracy_eval_t)
+                counts = counts_matrix_eval_t.sum()
+                accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
+                log('eval/accuracy-eval-t', accuracy_eval_t)
 
-            # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
-            failure_matrix_eval_d = failure_matrix[:, eval_categories]
-            counts_matrix_eval_d = counts_matrix[:, eval_categories]
+                # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
+                failure_matrix_eval_d = failure_matrix[:, eval_categories]
+                counts_matrix_eval_d = counts_matrix[:, eval_categories]
 
-            counts = counts_matrix_eval_d.sum()
-            accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
-            log('eval/accuracy-eval-d', accuracy_eval_d)
+                counts = counts_matrix_eval_d.sum()
+                accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
+                log('eval/accuracy-eval-d', accuracy_eval_d)
 
-            # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
-            failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
-            counts_matrix_eval_td = counts_matrix[np.ix_(eval_categories, eval_categories)]
+                # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
+                failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
+                counts_matrix_eval_td = counts_matrix[np.ix_(eval_categories, eval_categories)]
 
-            counts = counts_matrix_eval_td.sum()
-            accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
-            log('eval/accuracy-eval-td', accuracy_eval_td)
+                counts = counts_matrix_eval_td.sum()
+                accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
+                log('eval/accuracy-eval-td', accuracy_eval_td)
 
         self.switch_charlie(training_state)

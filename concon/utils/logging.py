@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from collections import namedtuple
 
 import numpy as np
 import torch
@@ -294,3 +295,71 @@ class AutoLogger(object):
         self._write('grad/max_grad', max_grad, number_ex_seen)
         self._write('grad/mean_norm_grad', mean_norm_grad, number_ex_seen)
         self._write('grad/max_norm_grad', max_norm_grad, number_ex_seen)
+
+
+LoggingData = namedtuple("LoggingData", ['number_ex_seen', 'pbar_items', 'summary_items'])
+
+class LoggingDataInterpreter(object):
+    def __init__(self, base_alphabet_size, data_loader):
+        pass
+
+# TODO Duplicate for now, convenience only
+class AutoLogger2(object):
+    def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, debug=False,
+        log_lang_progress=False, log_entropy=False, default_logged_items={"S"},
+        device='cpu', no_summary=False, summary_dir=None, default_period=10, ignore_reward=False):
+        #log_charlie_acc=False):
+
+        self.display = display
+        self.steps_per_epoch = steps_per_epoch
+        self.current_epoch = 0
+        self.n_items = 0
+        self.logged_items = default_logged_items
+        self.log_lang_progress = False
+
+        if no_summary:
+            self.summary_writer = None
+        else:
+            self.summary_writer = AverageSummaryWriter(log_dir=summary_dir, default_period=default_period)
+        self._pbar = None
+        self._state = {}
+
+    def new_progress_bar(self):
+        """
+        Initialize a progress bar.
+        """
+        progress_cls = Progress.get_progress_cls(self.display)
+        self._pbar = progress_cls(self.steps_per_epoch, self.current_epoch, self.logged_items)
+        self.current_epoch += 1
+
+    def __enter__(self):
+        self.new_progress_bar()
+        self._state = {}
+        self._pbar.__enter__()
+        return self
+
+    def _write(self, tag, val, step, direct=False):
+        """Convenience method for writing to summary. Prepends with tag_header on the fly if necessary.
+            args:
+                tag, val, step: for summary
+            direct: target summary_writer.writer (wrapped object) instead of summary_writer
+        """
+        if self.summary_writer is not None:
+            writer = self.summary_writer.writer if direct else self.summary_writer
+            if(direct):
+                tag = self.summary_writer.apply_prefix(tag)
+            return writer.add_scalar(tag, val, step)
+
+    def __exit__(self, type, value, traceback):
+        self._pbar.__exit__(type, value, traceback)
+        self._state = {}
+
+
+    def update(self, logging_data):
+        self.n_items += logging_data.number_ex_seen
+        self._state.update(logging_data.pbar_items)
+        self._pbar.update(**self._state)
+        if self.summary_writer is not None:
+            for tag, value in logging_data.summary_items.items():
+                self._write(tag, value, self.n_items)
+        return {}
