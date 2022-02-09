@@ -7,10 +7,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 import tqdm
+import torchvision
 
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
-from ..utils.misc import show_imgs, max_normalize_, to_color, build_optimizer, pointing, compute_entropy_stats, pointing
+from ..utils.misc import max_normalize_, to_color, build_optimizer, pointing, compute_entropy_stats, pointing
 from ..utils.logging import LoggingData
 from ..eval import compute_correlation
 
@@ -26,6 +27,8 @@ class AliceBobCharlie(AliceBob):
         self.train_charlie = None
         self._n_batches_cycle = args.n_discriminator_batches + 1
         self._n_batches_seen = 0
+
+        self.test_output_charlie_path = args.test_output_charlie_path
 
     def switch_charlie(self, train_charlie):
         self.train_charlie = train_charlie
@@ -189,7 +192,15 @@ class AliceBobCharlie(AliceBob):
         return torch.cat([batch.target_img().unsqueeze(1), images.unsqueeze(1)], dim=1)
 
     def evaluate(self, data_iterator, epoch):
-        print('using charlie specific eval loop')
+        for agents in self.agents():
+            agents.eval()
+        if((epoch % 10 == 0) and (self.test_output_charlie_path is not  None)):
+            if(self.autologger.display != 'minimal'): print('constructing sample for epoch', epoch)
+            batch = data_iterator.get_batch(32, data_type='test', no_evaluation=False, sampling_strategies=['different'])
+            images = self.get_images(batch)
+            images = torchvision.utils.make_grid(images, 2)
+            torchvision.transforms.functional.to_pil_image(images).save(f"{self.test_output_charlie_path}epoch_{epoch}.png")
+            
         training_state = self.train_charlie
         self.switch_charlie(False) # also controls image ordering
         def log(name, value):
@@ -363,4 +374,6 @@ class AliceBobCharlie(AliceBob):
                 accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
                 log('eval/accuracy-eval-td', accuracy_eval_td)
 
+        for agents in self.agents():
+            agents.train()
         self.switch_charlie(training_state)
