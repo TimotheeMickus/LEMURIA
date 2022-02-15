@@ -1,3 +1,4 @@
+from collections import deque
 import itertools as it
 import random
 
@@ -31,12 +32,31 @@ class AliceBobCharlie(AliceBob):
         # self._n_batches_seen = 0
 
         self.test_output_charlie_path = args.test_output_charlie_path
-        # self.dynamic_batch_cycle = args.dynamic_batch_cycle
         self._agent_cycle = it.cycle(['Alice', 'Bob', 'Charlie'])
+        self.dynamic_batch_cycle = args.dynamic_batch_cycle
+        if self.dynamic_batch_cycle:
+            self.success_rate_trackers = {
+                'Alice': (deque(maxlen=args.n_discriminator_batches), deque(maxlen=args.n_discriminator_batches)),
+                'Bob': (deque(maxlen=args.n_discriminator_batches), deque(maxlen=args.n_discriminator_batches)),
+                'Charlie': (deque(maxlen=args.n_discriminator_batches), deque(maxlen=args.n_discriminator_batches)),
+            }
+            self._current_step = 1
 
+
+    def _mean_success_rate(self, agent):
+        n_obs = len(self.success_rate_trackers[agent][0])
+        if n_obs == 0:
+            return 0
+        return sum(
+            success_rate * np.log(step) / np.log(self._current_step) # earlier success are less and less relevant
+            for success_rate, step in zip(*self.success_rate_trackers[agent])
+        ) / n_obs
 
     def switch_trained_agent(self):
-        self.trained_agent = next(self._agent_cycle)
+        if self.dynamic_batch_cycle:
+            self.trained_agent = sorted(self.success_rate_trackers, key=self._mean_success_rate)[0]
+        else:
+            self.trained_agent = next(self._agent_cycle)
         alice, bob, charlie = self.agents
         # turn everything off
         for agent in self.agents:
@@ -111,9 +131,13 @@ class AliceBobCharlie(AliceBob):
                     for k,v in logging_data_.summary_items.items()
                 }
             )
-            return loss, logging_data
         else:
-            return self.compute_interaction_charlie(batch)
+            loss, logging_data = self.compute_interaction_charlie(batch)
+        if self.dynamic_batch_cycle and any(agent.training for agent in self.agents):
+            self.success_rate_trackers[self.trained_agent][0].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
+            self.success_rate_trackers[self.trained_agent][1].append(self._current_step)
+            self._current_step += 1
+        return loss, logging_data
 
     def _charlied_bob_input(self, batch, charlie_img, deterministic):
         images = [
