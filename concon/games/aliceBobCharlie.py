@@ -59,8 +59,7 @@ class AliceBobCharlie(AliceBob):
             self.trained_agent = next(self._agent_cycle)
         alice, bob, charlie = self.agents
         # turn everything off
-        for agent in self.agents:
-            agent.eval()
+        alice.eval()
         #     for p in agent.parameters():
         #         p.requires_grad = False
         # pick and choose the agent to train
@@ -72,12 +71,12 @@ class AliceBobCharlie(AliceBob):
         elif self.trained_agent == 'Bob':
             # for p in self.receiver.parameters():
             #     p.requires_grad = True
-            bob.train()
+            # bob.train()
             self._optim = self._optim_bob
         elif self.trained_agent == 'Charlie':
             # for p in self.drawer.parameters():
             #     p.requires_grad = True
-            charlie.train()
+            # charlie.train()
             self._optim = self._optim_charlie
         # configure autologger
         if self.autologger.summary_writer is not None:
