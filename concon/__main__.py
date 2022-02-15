@@ -42,7 +42,7 @@ def train(args):
             device=args.device,
             no_summary=args.no_summary,
             summary_dir=run_summary_dir,
-            default_logged_items={'AB', 'C'} if args.charlie else {'S'},
+            default_logged_items={'A', 'B', 'C'} if args.charlie else {'S'},
             default_period=args.logging_period,
             ignore_reward=args.is_gumbel)# log_charlie_acc=args.charlie)
 

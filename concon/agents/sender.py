@@ -10,10 +10,11 @@ Outcome = namedtuple("Outcome", ["entropy", "log_prob", "eos_probs", "action"])
 
 # Image -(vector)-> message
 class Sender(Agent):
-    def __init__(self, image_encoder, message_decoder):
+    def __init__(self, image_encoder, message_decoder, is_gumbel=False):
         super(Agent, self).__init__()
         self.image_encoder = image_encoder
         self.message_decoder = message_decoder
+        self.is_gumbel = False
 
     def forward(self, image):
         """
@@ -29,11 +30,12 @@ class Sender(Agent):
             entropy=outputs["entropy"],
             log_prob=outputs["log_probs"],
             eos_probs=outputs["eos_probs"], # for gumbel softmax
-            action=(outputs["message"], outputs["message_len"]))
+            action=(outputs["message"], outputs["message_len"], outputs["deterministic"]),
+        )
         return outcome
 
     @classmethod
     def from_args(cls, args, image_encoder=None, symbol_embeddings=None):
         if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)
         message_decoder = MessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
-        return cls(image_encoder, message_decoder)
+        return cls(image_encoder, message_decoder, is_gumbel=args.is_gumbel)

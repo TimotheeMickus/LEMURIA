@@ -236,7 +236,7 @@ class AliceBob(Game):
 
             optimizer.zero_grad()
 
-            tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message)
+            tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message, True) # TODO: not-Tim: I believe this should be so
             loss = -tmp_outcome.scores[:, 0].sum()
 
             regularisation_loss = 0.0

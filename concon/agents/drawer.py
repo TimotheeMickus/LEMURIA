@@ -16,14 +16,14 @@ class Drawer(Agent):
         self.image_decoder = image_decoder
         self.is_gumbel = is_gumbel
 
-    def forward(self, message, length):
-        encoded_message = self.message_encoder(message, length)
+    def forward(self, message, length, deterministic):
+        encoded_message = self.message_encoder(message, length, deterministic)
 
-        message_with_noise = self.randomizer(encoded_message)
+        message_with_noise = self.randomizer(encoded_message, deterministic_message=deterministic)
         # the deconvolution expects a 1 by 1 image with D channels, hence the unsqueezing
         deconv_input = message_with_noise[:,:,None,None].view(-1, message_with_noise.size(-1), 1, 1)
         image = self.image_decoder(deconv_input)
-        if self.is_gumbel and self.training:
+        if not deterministic:
             image = image.view(*message_with_noise.shape[:2], *image.shape[1:])
 
         outcome = Outcome(image=image)
