@@ -79,6 +79,8 @@ def get_args():
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
     group.add_argument('--runs', help='number of runs', default=1, type=int)
     group.add_argument('--n_discriminator_batches', help='how many batches to train the discriminator (Alice & Bob) per batch to train the generator', default=10, type=int)
+    group.add_argument('--dynamic_batch_cycle', help='swap Alice & Bob training with Charlie training based on success rates', action='store_true')
+
 
     group = arg_parser.add_argument_group(title='Conv', description='arguments relative to convolutional structure')
     # group.add_argument('--img_channel', help='number of input channels in images', type=int, default=3)

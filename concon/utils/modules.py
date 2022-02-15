@@ -60,12 +60,13 @@ class MessageEncoder(nn.Module):
 
         self.is_gumbel = is_gumbel
 
-    def forward(self, message, length):
+    def forward(self, message, length, deterministic):
         """
         Forward propagation.
         Input:
             `message`, of shape [args.batch_size x <=MSG_LEN], message produced by sender
             `length`, of shape [args.batch_size x 1], length of message produced by sender
+            `deterministic`, should these messages be understood as a sequence of symbol or as time-sequence Gumbel distribution
         Output:
             encoded message, of shape [args.batch_size x output_dim] for reinforce, or
             encoded message at each timestep of shape
@@ -75,7 +76,7 @@ class MessageEncoder(nn.Module):
         embeddings = self.symbol_embeddings(message)
         lstm_output, _ = self.lstm(embeddings)
         # if REINFORCE / out of training, select last step corresponding to message
-        if((not self.is_gumbel) or (self.is_gumbel and not self.training)):
+        if deterministic:
             index = torch.arange(message.size(-1)).expand_as(message).to(message.device)
             output = lstm_output.masked_select((index == (length-1)).unsqueeze(-1))
             return output.view(lstm_output.size(0), lstm_output.size(-1))
@@ -115,6 +116,7 @@ class ReinforceMessageDecoder(nn.Module):
         self.padding_idx = base_alphabet_size + 1
 
     def forward(self, encoded):
+        # TODO `deterministic` declared to ensure parallel calls, should be plugged equally
         # Initialisation
         last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
         cell = self.cell_proj(encoded).unsqueeze(0)
@@ -172,7 +174,9 @@ class ReinforceMessageDecoder(nn.Module):
             "log_probs": log_probs,
             "eos_probs": None, # for parallel with GS variant
             "message": message,
-            "message_len": message_len}
+            "message_len": message_len,
+            "deterministic": True,
+        }
 
         return outputs
 
@@ -212,10 +216,7 @@ class GumbelEmbedding(nn.Embedding):
                 n_unreachable_symbols,
                 dtype=input_tensor.dtype)
             zeros_stack = zeros_stack.to(input_tensor.device)
-            try:
-                input_tensor = torch.cat([input_tensor, zeros_stack], dim=-1)
-            except:
-                import pdb; pdb.set_trace()
+            input_tensor = torch.cat([input_tensor, zeros_stack], dim=-1)
         return torch.matmul(input_tensor, self.weight)
 
 # Vector -> message (GumbelSoftmax)
@@ -247,6 +248,8 @@ class GumbelSoftmaxMessageDecoder(nn.Module):
         self.temperature = temperature
 
     def forward(self, encoded):
+        deterministic = not self.training
+
         # Initialisation
         last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
         cell = self.cell_proj(encoded).unsqueeze(0)
@@ -273,7 +276,10 @@ class GumbelSoftmaxMessageDecoder(nn.Module):
             # Selects actions
             probs = F.softmax(output, dim=-1)
             dist = RelaxedOneHotCategorical(temperature=self.temperature, probs=probs)
-            action = dist.rsample() if self.training else probs.argmax(dim=-1)
+            if deterministic:
+                action = probs.argmax(dim=-1)
+            else:
+                action = dist.rsample()
 
             # Ignores prediction for completed messages
             # ent = dist.entropy() * (~has_stopped).float()
@@ -282,7 +288,7 @@ class GumbelSoftmaxMessageDecoder(nn.Module):
             eos_probs.append(probs[:,self.eos_index])
             # entropy.append(ent)
 
-            if not self.training:
+            if deterministic:
                 action = action.masked_fill(has_stopped, self.padding_idx)
                 message.append(action)
 
@@ -298,15 +304,17 @@ class GumbelSoftmaxMessageDecoder(nn.Module):
             last_symbol = action
 
         # ensure stopping
-        if self.training:
+        if not deterministic:
             eos_final = torch.zeros_like(message[-1])
             eos_final[...,self.eos_index] = 1.
             message.append(eos_final)
         # Converts output to tensor
+        elif not has_stopped.all():
+            eos_final = ((~has_stopped) * self.eos_index) + (has_stopped * self.padding_idx)
+            message.append(eos_final)
         message = torch.stack(message, dim=1)
-        if self.training:
-            message_len = self.max_msg_len
-
+        if not deterministic:
+            message_len = self.max_msg_len + 1
             eos_probs.append(torch.ones_like(eos_probs[-1]))
         else:
             message_len = (message != self.padding_idx).sum(dim=1)[:,None]
@@ -318,7 +326,8 @@ class GumbelSoftmaxMessageDecoder(nn.Module):
             "log_probs": None, #log_probs,
             "eos_probs": torch.stack(eos_probs, dim=-1),
             "message": message,
-            "message_len": message_len
+            "message_len": message_len,
+            "deterministic": deterministic,
         }
 
         return outputs
@@ -361,14 +370,14 @@ class Randomizer(nn.Module):
         self.input_dim = input_dim
         self.is_gumbel = is_gumbel
 
-    def forward(self, input_vector):
+    def forward(self, input_vector, deterministic_message=True):
         """
         Input:
             `input_vector` of dimension [BATCH x self.input_dim]
-            except when using gumbel softmax, where we expect [BATCH x Timesteps x self.input_dim]
+            `deterministic_message` if false, we're dealing with gumbel softmax distribution, where we expect an input of [BATCH x Timesteps x self.input_dim]
         """
         noise = torch.randn(input_vector.size(0), self.random_dim, device=input_vector.device)
-        if self.is_gumbel and self.training:
+        if not deterministic_message:
             noise = noise.unsqueeze(1).expand_as(input_vector)
         input_with_noise = torch.cat([input_vector, noise], dim=-1)
         merged_input = self.merging_projection(input_with_noise)
