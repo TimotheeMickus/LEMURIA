@@ -28,7 +28,7 @@ class AliceBobCharlie(AliceBob):
         self._optim_charlie = build_optimizer(self.drawer.parameters(), args.learning_rate)
         # self.switch_charlie(False)
         self.trained_agent = None
-        # self._n_batches_cycle = args.n_discriminator_batches + 1
+        self._cycle_length = args.n_discriminator_batches
         # self._n_batches_seen = 0
 
         self.test_output_charlie_path = args.test_output_charlie_path
@@ -36,20 +36,25 @@ class AliceBobCharlie(AliceBob):
         self.dynamic_batch_cycle = args.dynamic_batch_cycle
         if self.dynamic_batch_cycle:
             self.success_rate_trackers = {
-                'Alice': (deque(maxlen=args.n_discriminator_batches), deque(maxlen=args.n_discriminator_batches)),
-                'Bob': (deque(maxlen=args.n_discriminator_batches), deque(maxlen=args.n_discriminator_batches)),
-                'Charlie': (deque(maxlen=args.n_discriminator_batches), deque(maxlen=args.n_discriminator_batches)),
+                'Alice': deque(maxlen=self._cycle_length), #deque(maxlen=args.n_discriminator_batches)),
+                'Bob': deque(maxlen=self._cycle_length), #deque(maxlen=args.n_discriminator_batches)),
+                'Charlie': deque(maxlen=self._cycle_length), #deque(maxlen=args.n_discriminator_batches)),
             }
             self._current_step = 1
 
 
     def _mean_success_rate(self, agent):
-        n_obs = len(self.success_rate_trackers[agent][0])
+        n_obs = len(self.success_rate_trackers[agent])
         if n_obs == 0:
             return 0
+        if agent == 'Alice':
+            return sum(
+                success_rate / 2
+                for success_rate in self.success_rate_trackers['Alice']
+            ) / n_obs
         return sum(
-            success_rate * np.log(step) / np.log(self._current_step) # earlier success are less and less relevant
-            for success_rate, step in zip(*self.success_rate_trackers[agent])
+            success_rate # should earlier success be less and less relevant?
+            for success_rate in self.success_rate_trackers[agent]
         ) / n_obs
 
     def switch_trained_agent(self):
@@ -79,8 +84,8 @@ class AliceBobCharlie(AliceBob):
             # charlie.train()
             self._optim = self._optim_charlie
         # configure autologger
-        if self.autologger.summary_writer is not None:
-            self.autologger.summary_writer.prefix = self.trained_agent
+        # if self.autologger.summary_writer is not None:
+        #     self.autologger.summary_writer.prefix = self.trained_agent
     # def switch_charlie(self, train_charlie):
     #     self.train_charlie = train_charlie
     #     for a in super().agents:
@@ -133,8 +138,12 @@ class AliceBobCharlie(AliceBob):
         else:
             loss, logging_data = self.compute_interaction_charlie(batch)
         if self.dynamic_batch_cycle and any(agent.training for agent in self.agents):
-            self.success_rate_trackers[self.trained_agent][0].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
-            self.success_rate_trackers[self.trained_agent][1].append(self._current_step)
+            self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
+            #self.success_rate_trackers[self.trained_agent][1].append(self._current_step)
+            if (self._current_step % self._cycle_length) == 0:
+                #print(f'{self._current_step} % {self._cycle_length} == 0, clearing trackers')
+                for agent in self.success_rate_trackers.keys():
+                    self.success_rate_trackers[agent] = deque(maxlen=self._cycle_length)
             self._current_step += 1
         return loss, logging_data
 
@@ -275,6 +284,8 @@ class AliceBobCharlie(AliceBob):
     def evaluate(self, data_iterator, epoch):
         for agents in self.agents:
             agents.eval()
+        if(self.autologger.summary_writer is not None):
+            self.autologger.summary_writer.prefix = None
         if((epoch % 10 == 0) and (self.test_output_charlie_path is not  None)):
             if(self.autologger.display != 'minimal'): print('constructing sample for epoch', epoch)
             batch = data_iterator.get_batch(256, data_type='test', no_evaluation=False, sampling_strategies=['different'])
