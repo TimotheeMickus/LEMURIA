@@ -5,3 +5,5 @@ data/
 .venv/
 .vimrc
 .ipynb_checkpoints/
+imgs/
+.tb/
