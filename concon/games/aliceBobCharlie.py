@@ -139,10 +139,17 @@ class AliceBobCharlie(AliceBob):
             loss, logging_data = self.compute_interaction_charlie(batch)
         if self.dynamic_batch_cycle and any(agent.training for agent in self.agents):
             self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
-            #self.success_rate_trackers[self.trained_agent][1].append(self._current_step)
+            # if we have perfs stats for all agents, plug that to logger
+            if all(map(len, self.success_rate_trackers.values())):
+                A = self.success_rate_trackers['Alice'][-1]
+                C = 2 * abs(0.5 - self.success_rate_trackers['Charlie'][-1])
+                logging_data.summary_items[f'Shared-train/perf_overview'] = (2 * A * C) / (A+C)
+            # reset trackers if necessary
             if (self._current_step % self._cycle_length) == 0:
                 #print(f'{self._current_step} % {self._cycle_length} == 0, clearing trackers')
                 for agent in self.success_rate_trackers.keys():
+                    prop_batch_assigned = len(self.success_rate_trackers[agent]) / self._cycle_length
+                    logging_data.summary_items[f'Shared-train/{agent}_batch_prop'] = prop_batch_assigned
                     self.success_rate_trackers[agent] = deque(maxlen=self._cycle_length)
             self._current_step += 1
         return loss, logging_data
@@ -285,7 +292,7 @@ class AliceBobCharlie(AliceBob):
         for agents in self.agents:
             agents.eval()
         if(self.autologger.summary_writer is not None):
-            self.autologger.summary_writer.prefix = None
+            self.autologger.summary_writer.prefix = 'shared'
         if((epoch % 10 == 0) and (self.test_output_charlie_path is not  None)):
             if(self.autologger.display != 'minimal'): print('constructing sample for epoch', epoch)
             batch = data_iterator.get_batch(256, data_type='test', no_evaluation=False, sampling_strategies=['different'])
@@ -373,7 +380,7 @@ class AliceBobCharlie(AliceBob):
             success_prob = torch.stack(success_prob)
             scrambled_success_prob = torch.stack(scrambled_success_prob)
             scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
-            log('eval/scrambling-resistance', scrambling_resistance)
+            log('Shared-eval/scrambling-resistance', scrambling_resistance)
 
             # Here, we try to see how much the messages describe the categories and not the praticular images
             # To do so, we use the original image as target, and an image of the same category as distractor
@@ -397,7 +404,7 @@ class AliceBobCharlie(AliceBob):
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
-            log('eval/abstractness2', abstractness_rate)
+            log('Shared-eval/abstractness2', abstractness_rate)
 
             abstractness = []
             n = (32 * data_iterator.nb_categories)
@@ -420,20 +427,20 @@ class AliceBobCharlie(AliceBob):
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
-            log('eval/abstractness', abstractness_rate)
+            log('Shared-eval/abstractness', abstractness_rate)
 
             # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
             success = torch.stack(success)
             success_rate = success.mean().item()
-            log('eval/success_rate', success_rate)
+            log('Shared-eval/success_rate', success_rate)
 
             charlie_success = torch.stack(charlie_success)
             charlie_success_rate = charlie_success.mean().item()
-            log('eval/charlie_success_rate', charlie_success_rate)
+            log('Shared-eval/charlie_success_rate', charlie_success_rate)
 
             # Computes the accuracy when the images are selected from all categories
             accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
-            log('eval/accuracy', accuracy_all)
+            log('Shared-eval/accuracy', accuracy_all)
 
             train_categories = data_iterator.training_categories_idx
             eval_categories = data_iterator.evaluation_categories_idx
@@ -444,7 +451,7 @@ class AliceBobCharlie(AliceBob):
 
                 counts = counts_matrix_train_td.sum()
                 accuracy_train_td = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
-                log('eval/accuracy-train-td', accuracy_train_td)
+                log('Shared-eval/accuracy-train-td', accuracy_train_td)
 
                 # Computes the accuracy when the target is selected from an evaluation category (never seen during training)
                 failure_matrix_eval_t = failure_matrix[eval_categories, :]
@@ -452,7 +459,7 @@ class AliceBobCharlie(AliceBob):
 
                 counts = counts_matrix_eval_t.sum()
                 accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
-                log('eval/accuracy-eval-t', accuracy_eval_t)
+                log('Shared-eval/accuracy-eval-t', accuracy_eval_t)
 
                 # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training)
                 failure_matrix_eval_d = failure_matrix[:, eval_categories]
@@ -460,7 +467,7 @@ class AliceBobCharlie(AliceBob):
 
                 counts = counts_matrix_eval_d.sum()
                 accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
-                log('eval/accuracy-eval-d', accuracy_eval_d)
+                log('Shared-eval/accuracy-eval-d', accuracy_eval_d)
 
                 # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training)
                 failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
@@ -468,8 +475,11 @@ class AliceBobCharlie(AliceBob):
 
                 counts = counts_matrix_eval_td.sum()
                 accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
-                log('eval/accuracy-eval-td', accuracy_eval_td)
+                log('Shared-eval/accuracy-eval-td', accuracy_eval_td)
 
+        if(self.autologger.summary_writer is not None):
+            self.autologger.summary_writer.prefix = 'AliceBob'
+        super().evaluate(data_iterator, epoch)
         # for agents in self.agents:
         #     agents.train()
         #self.switch_charlie(training_state)
