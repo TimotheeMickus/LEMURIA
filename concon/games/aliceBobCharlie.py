@@ -142,8 +142,8 @@ class AliceBobCharlie(AliceBob):
             # if we have perfs stats for all agents, plug that to logger
             if all(map(len, self.success_rate_trackers.values())):
                 A = self.success_rate_trackers['Alice'][-1]
-                C = 2 * abs(0.5 - self.success_rate_trackers['Charlie'][-1])
-                logging_data.summary_items[f'Shared-train/perf_overview'] = (2 * A * C) / (A+C)
+                C = 1 - 2 * abs(0.5 - self.success_rate_trackers['Charlie'][-1])
+                logging_data.summary_items[f'Shared-train/perf_overview'] = (2 * A * C) / (A + C)
             # reset trackers if necessary
             if (self._current_step % self._cycle_length) == 0:
                 #print(f'{self._current_step} % {self._cycle_length} == 0, clearing trackers')
@@ -291,8 +291,8 @@ class AliceBobCharlie(AliceBob):
     def evaluate(self, data_iterator, epoch):
         for agents in self.agents:
             agents.eval()
-        if(self.autologger.summary_writer is not None):
-            self.autologger.summary_writer.prefix = 'shared'
+        # if(self.autologger.summary_writer is not None):
+        #     self.autologger.summary_writer.prefix = 'shared'
         if((epoch % 10 == 0) and (self.test_output_charlie_path is not  None)):
             if(self.autologger.display != 'minimal'): print('constructing sample for epoch', epoch)
             batch = data_iterator.get_batch(256, data_type='test', no_evaluation=False, sampling_strategies=['different'])
@@ -341,10 +341,13 @@ class AliceBobCharlie(AliceBob):
                 deterministic = sender_outcome.action[2]
                 assert deterministic
                 # receive
-                bob_input = self._charlied_bob_input(batch, drawer_outcome.image, deterministic)
-                receiver_outcome = receiver(bob_input, *sender_outcome.action)
+                bob_input_with_charlie = self._charlied_bob_input(batch, drawer_outcome.image, deterministic)
+                receiver_outcome = receiver(bob_input_with_charlie, *sender_outcome.action)
+                bob_input_without_charlie = self._bob_input(batch)
+                receiver_outcome_nocharlie = receiver(bob_input_without_charlie, *sender_outcome.action)
 
                 receiver_pointing = pointing(receiver_outcome.scores, argmax=True)
+                receiver_pointing_nocharlie = pointing(receiver_outcome_nocharlie.scores, argmax=True)
                 success.append((receiver_pointing['action'] == 0).float())
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
                 charlie_success.append((receiver_pointing['action'] == 2).float())
@@ -353,7 +356,7 @@ class AliceBobCharlie(AliceBob):
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
-                failure = receiver_pointing['dist'].probs[:, 1:].sum(1).cpu().numpy() # Probability of the distractor(s)
+                failure = receiver_pointing_nocharlie['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor(s)
                 data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
 
                 np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
@@ -373,7 +376,7 @@ class AliceBobCharlie(AliceBob):
                     l = msg_len.item()
                     scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
-                scrambled_receiver_outcome = self.get_receiver()(bob_input, message=scrambled_messages, length=sender_outcome.action[1], deterministic=True)
+                scrambled_receiver_outcome = self.get_receiver()(bob_input_with_charlie, message=scrambled_messages, length=sender_outcome.action[1], deterministic=True)
                 scrambled_receiver_pointing = pointing(scrambled_receiver_outcome.scores)
                 scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
@@ -477,9 +480,9 @@ class AliceBobCharlie(AliceBob):
                 accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
                 log('Shared-eval/accuracy-eval-td', accuracy_eval_td)
 
-        if(self.autologger.summary_writer is not None):
-            self.autologger.summary_writer.prefix = 'AliceBob'
-        super().evaluate(data_iterator, epoch)
+        #if(self.autologger.summary_writer is not None):
+        #    self.autologger.summary_writer.prefix = 'AliceBob'
+        #super().evaluate(data_iterator, epoch)
         # for agents in self.agents:
         #     agents.train()
         #self.switch_charlie(training_state)
