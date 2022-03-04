@@ -137,8 +137,14 @@ class AliceBobCharlie(AliceBob):
             )
         else:
             loss, logging_data = self.compute_interaction_charlie(batch)
+        # patch logging data
         if self.dynamic_batch_cycle and any(agent.training for agent in self.agents):
-            self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
+            if self.trained_agent == 'Alice':
+                self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
+            else:
+                for agent in self.success_rate_trackers.keys():
+                    self.success_rate_trackers[agent].append(logging_data.summary_items[f'{agent}-train/success'])
+
             # if we have perfs stats for all agents, plug that to logger
             if all(map(len, self.success_rate_trackers.values())):
                 A = self.success_rate_trackers['Alice'][-1]
@@ -267,15 +273,23 @@ class AliceBobCharlie(AliceBob):
             targets = torch.zeros(probs.size(0), dtype=torch.long).to(probs.device)
             loss = F.nll_loss(probs, targets)
             avg_msg_length = sender_outcome.action[1].float().mean().item()
-            successes = (probs.argmax(-1) == 0).float()
+            # successes = (probs.argmax(-1) == 0).float()
             short_label, prefix = self.get_label_and_prefix()
+            trgt_img, dstr_img, chrl_img = (0, 1, 2) if self.trained_agent == 'Bob' else (1, 2, 0)
+            alice_success = (probs[:,trgt_img] > probs[:,dstr_img] ).float().mean().item()
+            bob_success = (probs.argmax(-1) == trgt_img).float().mean().item()
+            charlie_success = (probs.argmax(-1) == chrl_img).float().mean().item()
+            self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
             logging_data = LoggingData(
                 number_ex_seen=batch.size,
                 pbar_items={short_label: successes.mean().item()},
                 summary_items={
                     prefix + 'train/loss': loss.mean().item(),
-                    prefix + 'train/success':  successes.mean().item(),
+                    # prefix + 'train/success':  successes.mean().item(),
                     prefix + 'train/msg_length': avg_msg_length,
+                    'Alice-train/success': alice_success,
+                    'Bob-train/success': bob_success,
+                    'Charlie-train/success': charlie_success,
                 }
             )
             return loss, logging_data
