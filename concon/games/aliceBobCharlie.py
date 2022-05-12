@@ -1,4 +1,4 @@
-from collections import deque
+from collections import defaultdict, deque
 import itertools as it
 import random
 
@@ -41,6 +41,7 @@ class AliceBobCharlie(AliceBob):
                 'Charlie': deque(maxlen=self._cycle_length), #deque(maxlen=args.n_discriminator_batches)),
             }
             self._current_step = 1
+            self.batch_prop_counts = defaultdict(int)
 
 
     def _mean_success_rate(self, agent):
@@ -59,7 +60,10 @@ class AliceBobCharlie(AliceBob):
 
     def switch_trained_agent(self):
         if self.dynamic_batch_cycle:
-            self.trained_agent = sorted(self.success_rate_trackers, key=self._mean_success_rate)[0]
+            agents = sorted(self.success_rate_trackers, key=self._mean_success_rate)
+            # print([[a,self._mean_success_rate(a)] for a in agents])
+            self.trained_agent = agents[0]
+            self.batch_prop_counts[self.trained_agent] += 1
         else:
             self.trained_agent = next(self._agent_cycle)
         alice, bob, charlie = self.agents
@@ -140,11 +144,11 @@ class AliceBobCharlie(AliceBob):
         # patch logging data
         if self.dynamic_batch_cycle and any(agent.training for agent in self.agents):
             if self.trained_agent == 'Alice':
-                self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
+                self.success_rate_trackers['Alice'].append(logging_data.summary_items[f'Alice-train/success'])
             else:
                 for agent in self.success_rate_trackers.keys():
                     self.success_rate_trackers[agent].append(logging_data.summary_items[f'{agent}-train/success'])
-
+                #print(self.success_rate_trackers)
             # if we have perfs stats for all agents, plug that to logger
             if all(map(len, self.success_rate_trackers.values())):
                 A = self.success_rate_trackers['Alice'][-1]
@@ -154,9 +158,15 @@ class AliceBobCharlie(AliceBob):
             if (self._current_step % self._cycle_length) == 0:
                 #print(f'{self._current_step} % {self._cycle_length} == 0, clearing trackers')
                 for agent in self.success_rate_trackers.keys():
-                    prop_batch_assigned = len(self.success_rate_trackers[agent]) / self._cycle_length
-                    logging_data.summary_items[f'Shared-train/{agent}_batch_prop'] = prop_batch_assigned
+                    prop_batch_assigned = self.batch_prop_counts[agent] / self._cycle_length
+                    self.autologger._write(
+                        f'Shared-train/{agent}_batch_prop',
+                        prop_batch_assigned,
+                        self._current_step,
+                        direct=True,
+                    )
                     self.success_rate_trackers[agent] = deque(maxlen=self._cycle_length)
+                self.batch_prop_counts = defaultdict(int)
             self._current_step += 1
         return loss, logging_data
 
@@ -273,13 +283,24 @@ class AliceBobCharlie(AliceBob):
             targets = torch.zeros(probs.size(0), dtype=torch.long).to(probs.device)
             loss = F.nll_loss(probs, targets)
             avg_msg_length = sender_outcome.action[1].float().mean().item()
-            # successes = (probs.argmax(-1) == 0).float()
+            successes = (probs.argmax(-1) == 0).float()
             short_label, prefix = self.get_label_and_prefix()
-            trgt_img, dstr_img, chrl_img = (0, 1, 2) if self.trained_agent == 'Bob' else (1, 2, 0)
-            alice_success = (probs[:,trgt_img] > probs[:,dstr_img] ).float().mean().item()
-            bob_success = (probs.argmax(-1) == trgt_img).float().mean().item()
-            charlie_success = (probs.argmax(-1) == chrl_img).float().mean().item()
-            self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
+            #import pdb; pdb.set_trace()
+            if self.trained_agent == "Bob":
+                trgt_img, dstr_img, chrl_img = 0, 1, 2
+            elif self.trained_agent == 'Charlie':
+                chrl_img, trgt_img, dstr_img = 0, 1, 2
+            #print(probs.shape, trgt_img, dstr_img, chrl_img)
+            alice_success = (probs[:,trgt_img] > probs[:,dstr_img] )
+            #print(alice_success.shape)
+            alice_success = alice_success.float().mean().item()
+            bob_success = (probs.argmax(-1) == trgt_img)
+            #print(bob_success.shape)
+            bob_success = bob_success.float().mean().item()
+            charlie_success = (probs.argmax(-1) == chrl_img)
+            #print(charlie_success.shape)
+            charlie_success = charlie_success.float().mean().item()
+            # self.success_rate_trackers[self.trained_agent].append(logging_data.summary_items[f'{self.trained_agent}-train/success'])
             logging_data = LoggingData(
                 number_ex_seen=batch.size,
                 pbar_items={short_label: successes.mean().item()},
@@ -342,6 +363,7 @@ class AliceBobCharlie(AliceBob):
         with torch.no_grad():
             success = [] # Binary
             success_prob = [] # Probabilities
+            all_probs = []
             scrambled_success_prob = [] # Probabilities
             charlie_success = [] # Binary
 
@@ -364,7 +386,9 @@ class AliceBobCharlie(AliceBob):
                 receiver_pointing_nocharlie = pointing(receiver_outcome_nocharlie.scores, argmax=True)
                 success.append((receiver_pointing['action'] == 0).float())
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
+                all_probs.append(receiver_pointing['dist'].probs)
                 charlie_success.append((receiver_pointing['action'] == 2).float())
+
 
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
@@ -398,6 +422,13 @@ class AliceBobCharlie(AliceBob):
             scrambled_success_prob = torch.stack(scrambled_success_prob)
             scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
             log('Shared-eval/scrambling-resistance', scrambling_resistance)
+
+            #import pdb;pdb.set_trace()
+            all_probs = torch.cat(all_probs, dim=0)
+            assert all_probs.size(-1) == 3
+            A = (all_probs[:,0] > all_probs[:,1]).float().mean().item()
+            C = (1 - 2 * abs(0.5 - (all_probs.argmax(-1) == 2).float().mean().item()))
+            log(f'Shared-eval/perf_overview', (2 * A * C) / (A + C))
 
             # Here, we try to see how much the messages describe the categories and not the praticular images
             # To do so, we use the original image as target, and an image of the same category as distractor
