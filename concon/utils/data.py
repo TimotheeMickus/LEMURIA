@@ -216,11 +216,12 @@ class Dataset():
         return ref_category
 
     def _distance_to_categories(self, category, distance, no_evaluation):
-        """Returns the list of all categories at distance `distance` from category `category`."""
+        """Returns the list of all categories at distance `distance` from category `category`.
+        If `no_evaluation` is True, evaluation categories are ignored."""
         categories = []
-        for changed_dim in itertools.combinations(range(self.nb_concepts), distance): # Iterates over all subsets of [|0, `self.nb_concepts`|[ of size `distance`
+        for changed_dim in itertools.combinations(range(self.nb_concepts), distance): # Iterates over all subsets of [|0, `self.nb_concepts`|[ of size `distance`.
             changed_dim = set(changed_dim)
-            new_category = tuple(e if(i not in changed_dim) else (not e) for i,e in enumerate(category))
+            new_category = tuple(e if(i not in changed_dim) else (not e) for i,e in enumerate(category)) # A category at distance `distance` from `category`.
 
             if(no_evaluation and (new_category in self.evaluation_categories)): continue
             categories.append(new_category)
@@ -228,8 +229,10 @@ class Dataset():
         return categories
 
     def _distance_to_category(self, category, distance, no_evaluation):
-        """Returns a category that is at distance `distance` from category `category`."""
+        """Returns a category that is at distance `distance` from category `category`.
+        If `no_evaluation` is True, evaluation categories are ignored."""
         categories = self._distance_to_categories(category, distance, no_evaluation)
+        assert (categories != []), f"There is no category at distance {distance} from category {category} (with{if(no_evaluation) 'out' else ''} considering evaluation categories)."
 
         return random.choice(categories)
 
@@ -240,10 +243,12 @@ class Dataset():
         #return new_category
 
     def _different_category(self, category, no_evaluation):
-        """Returns a category that is different from `category`."""
+        """Returns a category that is different from `category`.
+        If `no_evaluation` is True, evaluation categories are ignored."""
         categories = self.training_categories
         if(not no_evaluation): categories = categories.union(self.evaluation_categories)
         categories = categories.difference(set([category]))
+        assert (categories != []), f"There is no other category than category {category} (with{if(no_evaluation) 'out' else ''} considering evaluation categories)."
 
         return random.choice(list(categories))
 
