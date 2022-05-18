@@ -247,10 +247,10 @@ class Dataset():
         If `no_evaluation` is True, evaluation categories are ignored."""
         categories = self.training_categories
         if(not no_evaluation): categories = categories.union(self.evaluation_categories)
-        categories = categories.difference(set([category]))
+        categories = list(categories.difference(set([category])))
         assert (categories != []), f"There is no other category than category {category} (with{if(no_evaluation) 'out' else ''} considering evaluation categories)."
 
-        return random.choice(list(categories))
+        return random.choice(categories)
 
         # The following code was very efficient, but only works when there is no split between training and evaluation categories
         #distance = np.random.randint(self.nb_concepts) + 1
