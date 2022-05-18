@@ -232,7 +232,7 @@ class Dataset():
         """Returns a category that is at distance `distance` from category `category`.
         If `no_evaluation` is True, evaluation categories are ignored."""
         categories = self._distance_to_categories(category, distance, no_evaluation)
-        assert (categories != []), f"There is no category at distance {distance} from category {category} (with{if(no_evaluation) 'out' else ''} considering evaluation categories)."
+        assert (categories != []), f"There is no category at distance {distance} from category {category} (with{'out considering' if(no_evaluation) else ''} evaluation categories)."
 
         return random.choice(categories)
 
@@ -248,7 +248,7 @@ class Dataset():
         categories = self.training_categories
         if(not no_evaluation): categories = categories.union(self.evaluation_categories)
         categories = list(categories.difference(set([category])))
-        assert (categories != []), f"There is no other category than category {category} (with{if(no_evaluation) 'out' else ''} considering evaluation categories)."
+        assert (categories != []), f"There is no other category than category {category} (with{'out considering' if(no_evaluation) else ''} evaluation categories)."
 
         return random.choice(categories)
 
