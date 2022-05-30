@@ -12,7 +12,7 @@ class MultiHeadsClassifier:
         self.get_head_targets = get_head_targets
         self.device = device
 
-    def train(self, batch): # Only the target images will be used
+    def run_batch(self, batch): # Only the target images will be used
         self.optimizer.zero_grad()
 
         hits, losses = self.forward(batch)

@@ -95,7 +95,7 @@ class Game(metaclass=ABCMeta):
         pass
 
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
-    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000):
+    def train_epoch(self, data_iterator, epoch=1, steps_per_epoch=1000, event_writer=None):
         """
         Model training function
         Input:
@@ -106,7 +106,7 @@ class Game(metaclass=ABCMeta):
             `event_writer`: tensorboard writer to log evolution of values
         """
 
-        self.start_epoch(data_iterator)
+        self.start_epoch(data_iterator, event_writer)
         with self.autologger:
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
@@ -187,6 +187,7 @@ class Game(metaclass=ABCMeta):
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
 
+        raise RuntimeError
         return pretrained_model
 
     # Pretrains the CNN of an agent in category- or feature-wise mode
@@ -230,7 +231,7 @@ class Game(metaclass=ABCMeta):
                 for step_i in range(steps_per_epoch):
                     batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
 
-                    hits, loss = model.train(batch)
+                    hits, loss = model.run_batch(batch)
 
                     for x in hits: epoch_hits += x.sum().item()
                     epoch_items += batch.size
@@ -238,6 +239,20 @@ class Game(metaclass=ABCMeta):
 
                     if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
                     pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
+            with torch.no_grad():
+                agent.image_encoder.eval()
+                heads.eval()
+                test_loss, test_epoch_hits, test_epoch_items =  0., 0, 0
+                for step_i in range(steps_per_epoch // 10):
+                    batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be use
+                    hits, losses = model.forward(batch)
+                    for x in losses: test_loss += x.sum().item()
+                    for x in hits: test_epoch_hits += x.sum().item()
+                    test_epoch_items += batch.size
+                if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar('eval-' + loss_tag, (test_loss / (test_epoch_items * n_heads)), epoch)
+                print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_loss / test_epoch_items}, acc={test_epoch_hits / (test_epoch_items * n_heads)}")
+                agent.image_encoder.train()
+                heads.train()
 
                 # Here there could be an evaluation phase
 
