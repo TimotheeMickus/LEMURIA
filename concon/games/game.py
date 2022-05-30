@@ -193,6 +193,7 @@ class Game(metaclass=ABCMeta):
     # Pretrains the CNN of an agent in category- or feature-wise mode
     def _pretrain_classif(self, agent, data_iterator, pretrain_CNN_mode='category-wise', learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
+        acc_tag = 'pretrain/acc_%s_%s' % (agent_name, pretrain_CNN_mode)
 
         concept_sizes = [len(concept) for concept in data_iterator.concepts]
         xcoder = agent.message_decoder if hasattr(agent, 'message_decoder') else agent.message_encoder
@@ -237,7 +238,9 @@ class Game(metaclass=ABCMeta):
                     epoch_items += batch.size
                     total_items += batch.size
 
-                    if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
+                    if(self.autologger.summary_writer is not None):
+                        self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
+                        self.autologger.summary_writer.add_scalar(acc_tag, (epoch_hits / (epoch_items * n_heads)), total_items)
                     pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
             with torch.no_grad():
                 agent.image_encoder.eval()
@@ -249,8 +252,12 @@ class Game(metaclass=ABCMeta):
                     for x in losses: test_loss += x.sum().item()
                     for x in hits: test_epoch_hits += x.sum().item()
                     test_epoch_items += batch.size
-                if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar('eval-' + loss_tag, (test_loss / (test_epoch_items * n_heads)), epoch)
-                print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_loss / test_epoch_items}, acc={test_epoch_hits / (test_epoch_items * n_heads)}")
+                test_loss = test_loss / (test_epoch_items * n_heads)
+                test_acc = test_epoch_hits / (test_epoch_items * n_heads)
+                if(self.autologger.summary_writer is not None):
+                    self.autologger.summary_writer.writer.add_scalar('eval-' + loss_tag, test_loss, epoch)
+                    self.autologger.summary_writer.writer.add_scalar('eval-' + acc_tag, test_acc, epoch)
+                print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_loss}, acc={test_acc}")
                 agent.image_encoder.train()
                 heads.train()
 
@@ -318,8 +325,10 @@ class Game(metaclass=ABCMeta):
                     loss = F.mse_loss(output, batch_img, reduction="sum")
                     test_epoch_loss += loss.item()
                     test_epoch_items += batch_img.size(0)
-                if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar('eval-' + loss_tag, test_epoch_loss / test_epoch_items , epoch)
-                print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_epoch_loss / test_epoch_items}, acc={test_epoch_hits / test_epoch_items}")
+                test_epoch_loss = test_epoch_loss / test_epoch_items
+                if(self.autologger.summary_writer is not None):
+                    self.autologger.summary_writer.writer.add_scalar('eval-' + loss_tag, test_epoch_loss, epoch)
+                print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_epoch_loss}")
                 model.train()
 
                 # Here there could an evaluation phase
