@@ -308,6 +308,19 @@ class Game(metaclass=ABCMeta):
 
                     loss.backward()
                     optimizer.step()
+            with torch.no_grad():
+                model.eval()
+                test_epoch_loss, test_epoch_items = 0., 0.
+                for _ in range(steps_per_epoch // 10):
+                    batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch_img = batch.target_img(stack=True)
+                    output = model(batch_img)
+                    loss = F.mse_loss(output, batch_img, reduction="sum")
+                    test_epoch_loss += loss.item()
+                    test_epoch_items += batch_img.size(0)
+                if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar('eval-' + loss_tag, test_epoch_loss / test_epoch_items , epoch)
+                print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_epoch_loss / test_epoch_items}, acc={test_epoch_hits / test_epoch_items}")
+                model.train()
 
                 # Here there could an evaluation phase
         return {'model': model}
