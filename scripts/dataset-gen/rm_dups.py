@@ -1,8 +1,9 @@
 import filecmp
 import itertools as it
 import os
+import pathlib
 
-def rm_dups(sequential_only=True, dataset_path='/home/airc/Downloads/rgb_dataset'):
+def rm_dups(sequential_only=True, dataset_path=str(pathlib.Path(__file__).absolute().parent.parent.parent / 'data/concon/rgb_dataset/')):
     CWD = os.getcwd()
     os.chdir(dataset_path)
     files = set(filter(os.path.isfile, os.listdir('.')))

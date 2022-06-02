@@ -187,7 +187,6 @@ class Game(metaclass=ABCMeta):
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
 
-        raise RuntimeError
         return pretrained_model
 
     # Pretrains the CNN of an agent in category- or feature-wise mode
@@ -261,7 +260,6 @@ class Game(metaclass=ABCMeta):
                 agent.image_encoder.train()
                 heads.train()
 
-                # Here there could be an evaluation phase
 
         return model
 
@@ -331,7 +329,6 @@ class Game(metaclass=ABCMeta):
                 print(f"[eval-pretrain {agent_name} epoch {epoch}] L={test_epoch_loss}")
                 model.train()
 
-                # Here there could an evaluation phase
         return {'model': model}
 
     def evaluate(self, data_iterator, epoch):

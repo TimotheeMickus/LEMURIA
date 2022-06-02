@@ -9,7 +9,7 @@ from random import uniform
 
 scene = vp.canvas(width=128, height=128)
 
-NUMBER_IMGS = (3 ** 5) * 300
+NUMBER_IMGS = ((3 ** 5) * 1000)
 
 SPHERE = vp.sphere(visible=False)
 CUBE = vp.box(visible=False)
@@ -120,7 +120,7 @@ _big = {
     "small":0,
 }
 
-def screenshot(fname, buffertime=.05):
+def screenshot(fname, buffertime=.125):
     sleep(buffertime)
     scene.capture("%s.png" % fname)
     sleep(buffertime)
@@ -130,8 +130,10 @@ scene.center = vp.vector(0,0,0)
 scene.autoscale=False
 
 import os
+import pathlib
 # change path below as appropriate
-PATH = '/home/airc/Downloads/rgb_dataset'
+root_dir = pathlib.Path(__file__).absolute().parent.parent.parent
+PATH = str(root_dir / 'data/concon/rgb_dataset')
 DATASET = {
     os.path.splitext(f)[0]
     for f in os.listdir(PATH)
@@ -162,8 +164,8 @@ while True:
                                     if os.path.isfile(os.path.join(PATH, f))
                                 }
                                 i = 0
-                            else:
-                                exit(0)
+                                print('please relaunch!')
+                            exit(0)
                         vp_obj = random_obj(_objs[obj], _up[upness], _right[rightness], _big[bigness], _colors[color])
                         scene.background = vp.color.gray(uniform(0.3, 1.))
                         for l in scene.lights:
