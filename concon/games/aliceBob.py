@@ -378,7 +378,7 @@ class AliceBob(Game):
             abstractness_rate = abstractness.mean().item()
             log('eval/abstractness', abstractness_rate)
 
-        # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
+        # Here, we compute the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after (for accuracies).
         success = torch.stack(success)
         success_rate = success.mean().item()
         log('eval/success_rate', success_rate)
