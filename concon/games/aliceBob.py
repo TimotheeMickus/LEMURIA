@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import scipy
 import itertools as it
 import tqdm
 from datetime import datetime
@@ -421,6 +422,31 @@ class AliceBob(Game):
             counts = counts_matrix_eval_td.sum()
             accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
             log('eval/accuracy-eval-td', accuracy_eval_td)
+
+        # Computes values related to symbol-order
+        # First tries to rank each symbol according to its average relative position in messages
+        rel_positions = {} # From symbol to list of relative positions
+        for message in messages:
+            for pos, sym in enumerate(message[:-1]): # For each symbol except the EOS
+                if(sym not in rel_positions): rel_positions[sym] = []
+                rel_positions[sym].append(pos / len(message)) # Relative position of the symbol in the message
+
+        avg_positions = [(np.mean(l), sym) for (sym, l) in rel_positions.items()]
+        avg_positions.sort()
+        mapping = {sym: i for (i, (_, sym)) in enumerate(avg_positions)} # From symbol to rank
+
+        # Then builds the two lists that we want to test the correlation of
+        value_list = []
+        position_list = []
+        for message in messages:
+            for pos, sym in enumerate(message[:-1]): # For each symbol except the EOS
+                value_list.append(mapping[sym])
+                position_list.append(pos / len(message)) # Relative position of the symbol in the message
+
+        res_spearman = scipy.stats.spearmanr(value_list, position_list)
+        log('eval/sym-order-corr', res_spearman.correlation)
+        log('eval/sym-order-pval', res_spearman.pvalue) # Should be compared to the factorial of the size of the vocabulary (the number of possible ordering of the symbols)
+
 
         # Computes compositionality measures
         # First selects a sample of (message, category) pairs
