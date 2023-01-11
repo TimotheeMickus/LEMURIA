@@ -364,7 +364,7 @@ class AliceBob(Game):
             n = (32 * data_iterator.nb_categories)
             n = min(max_datapoints, n)
             nb_batch = int(np.ceil(n / batch_size))
-            for _ in range(nb_batch):
+            for _ in batch_numbers:
                 self.start_episode(train_episode=False) # Selects agents at random if necessary
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
