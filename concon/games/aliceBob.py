@@ -336,7 +336,7 @@ class AliceBob(Game):
                 np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
                 scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
-                for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepare for scrambling
+                for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepares for scrambling
                     msg = sender_outcome.action[0][i]
                     msg_len = sender_outcome.action[1][i]
                     cat = datapoint.category
