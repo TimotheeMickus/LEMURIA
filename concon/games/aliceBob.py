@@ -358,7 +358,7 @@ class AliceBob(Game):
             scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
             log('eval/scrambling-resistance', scrambling_resistance)
 
-            # Here, we try to see how much the messages describe the categories and not the praticular images
+            # Here, we try to see how much the messages describe the categories and not the particular images
             # To do so, we use the original image as target, and an image of the same category as distractor
             abstractness = []
             n = (32 * data_iterator.nb_categories)
