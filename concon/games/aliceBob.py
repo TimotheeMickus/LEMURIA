@@ -345,7 +345,7 @@ class AliceBob(Game):
                         messages.append(msg.tolist()[:msg_len])
                         categories.append(cat)
 
-                    # Here, I am scrambling the whole message, including the EOS (but not the padding symbols, of course)
+                    # Scrambles the whole message, including the EOS (but not the padding symbols, of course)
                     l = msg_len.item()
                     scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
