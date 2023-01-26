@@ -187,8 +187,9 @@ class Dataset():
 
         print('Size (total): %i' % self.size(data_type='any', no_evaluation=False))
 
-    # If `d` is -1, all categories are used during training
-    # Otherwise, a random category `ref_category` and all categories with a distance from it that is a multiple of `d` are reserved for evaluation
+    # If `d` is -1, all categories are used during training.
+    # Otherwise, a reference category and all categories with a distance from it that is a multiple of `d` are reserved for evaluation.
+    # The reference category is picked randomly except if given as `ref_category`.
     def set_evaluation_categories(self, concepts, d, ref_category=None, random_ref=False):
         training_categories = set()
         evaluation_categories = set()
@@ -196,7 +197,7 @@ class Dataset():
         if(ref_category is not None): assert (not random_ref), "One cannot both specify a reference category and ask for a random one at the same time."
         else: ref_category = np.array([np.random.randint(len(concept)) for concept in concepts]) if(random_ref) else np.full(len(concepts), 0)
 
-        category = np.full(len(concepts), 0)
+        category = np.full(len(concepts), 0) # Encodes the current category.
         while(True): # Iterates over all categories to categorise them. Alternatively, we could use the number of categories
             dist = (category != ref_category).sum()
             if((d >= 0) and ((dist % d) == 0)):
