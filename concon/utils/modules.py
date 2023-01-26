@@ -28,7 +28,7 @@ class MultiHeadsClassifier:
     def forward(self, batch): # Only the target images will be used
         batch_img = batch.target_img(stack=True)
         activation = self.image_encoder(batch_img)
-        targets = batch.category(stack=True, f=self.get_head_targets).to(self.device)
+        targets = batch.target_category(stack=True, f=self.get_head_targets).to(self.device)
 
         losses = []
         hits = []

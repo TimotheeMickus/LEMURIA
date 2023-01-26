@@ -40,8 +40,10 @@ class Batch():
         if(stack): return torch.stack(tmp)
         else: return tmp
 
-    # TODO The name is not the most appropriate. But in fact, maybe one could do without this method
-    def category(self, stack=False, f=None):
+    # Returns a list or a tensor of the original/target categories of the batch, possibly transformed by a function first.
+    # stack: whether to return a tensor (True) or a list (False)
+    # f: the function (if any) to apply to each category
+    def target_category(self, stack=False, f=None):
         if(f is None): f = (lambda x: x)
 
         tmp = [f(x.category) for x in self.target]
