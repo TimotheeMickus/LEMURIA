@@ -128,6 +128,7 @@ class FailureBasedDistribution():
 
         return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
 
+    # Returns a distractor category based on an original/target category.
     def sample(self, category_idx, allowed_categories_idx=None):
         dist = self.distribution(category_idx, allowed_categories_idx)
 
