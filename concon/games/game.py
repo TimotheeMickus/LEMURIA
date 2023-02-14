@@ -38,6 +38,11 @@ class Game(metaclass=ABCMeta):
         """
         pass
 
+    def to(self, *vargs, **kwargs):
+        for agent in self.all_agents: agent.to(*args, **kwargs)
+
+        return self
+
     @property
     @abstractmethod
     def optim(self):
@@ -158,12 +163,16 @@ class Game(metaclass=ABCMeta):
         torch.save(state, path)
 
     @classmethod
-    @abstractmethod
     def load(cls, path, args):
-        """
-        Load model from file `path`.
-        """
-        pass
+        instance = cls(args)
+        
+        checkpoint = torch.load(path, map_location=args.device)
+        for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
+            agent.load_state_dict(state_dict)
+            
+        instance._optim = checkpoint['optims'][0]
+        
+        return instance
 
     def agents_for_CNN_pretraining(self):
         return NotImplementedError

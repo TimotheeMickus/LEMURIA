@@ -68,16 +68,6 @@ class AliceBobPopulation(AliceBob):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
 
-    def to(self, *vargs, **kwargs):
-        #self = super().to(*vargs, **kwargs)
-
-        #for agent in self._agents: agent.to(*args, **kwargs) # Would that be enough? I'm not sure how `.to` works
-
-        self.senders = self.senders.to(*vargs, **kwargs)
-        self.receivers = self.receivers.to(*vargs, **kwargs)
-
-        return self
-
     def get_sender(self):
         return self._sender
 
@@ -130,18 +120,6 @@ class AliceBobPopulation(AliceBob):
     @property
     def current_agents(self):
         return (self._sender, self._receiver)
-
-    @classmethod
-    def load(cls, path, args):
-        instance = cls(args)
-        
-        checkpoint = torch.load(path, map_location=args.device)
-        for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
-            agent.load_state_dict(state_dict)
-        
-        instance._optim = checkpoint['optims'][0]
-        
-        return instance
 
     def agents_for_CNN_pretraining(self):
         if(self.shared): raise NotImplementedError

@@ -58,6 +58,12 @@ class AliceBob(Game):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
+    def get_sender(self):
+        return self.sender
+
+    def get_receiver(self):
+        return self.receiver
+
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
 
@@ -79,16 +85,6 @@ class AliceBob(Game):
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
         return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
-
-    def to(self, *vargs, **kwargs):
-        self.sender, self.receiver = self.sender.to(*vargs, **kwargs), self.receiver.to(*vargs, **kwargs)
-        return self
-
-    def get_sender(self):
-        return self.sender
-
-    def get_receiver(self):
-        return self.receiver
 
     def __call__(self, batch):
         """
@@ -551,18 +547,6 @@ class AliceBob(Game):
     @property
     def autologger(self):
         return self._logger
-
-    @classmethod
-    def load(cls, path, args):
-        instance = cls(args)
-        
-        checkpoint = torch.load(path, map_location=args.device)
-        for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
-            agent.load_state_dict(state_dict)
-            
-            instance._optim = checkpoint['optims'][0]
-        
-        return instance
 
     def agents_for_CNN_pretraining(self):
         if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
