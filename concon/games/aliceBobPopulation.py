@@ -74,6 +74,19 @@ class AliceBobPopulation(AliceBob):
     def get_receiver(self):
         return self._receiver
 
+    @property
+    def all_agents(self):
+        """Defines the property self.agents"""
+        return self._agents
+
+    @property
+    def current_agents(self):
+        return (self._sender, self._receiver)
+
+    def agents_for_CNN_pretraining(self):
+        if(self.shared): raise NotImplementedError
+        return self.all_agents
+
     # Overrides Game.start_episode.
     def start_episode(self, train_episode=True):
         self._sender = random.choice(self.senders)
@@ -111,16 +124,3 @@ class AliceBobPopulation(AliceBob):
                 pass
 
         agent.apply(weight_init) # torch.nn.Module.apply: "Applies [the argument] recursively to every submodule (as returned by .children()) as well as self."
-
-    @property
-    def all_agents(self):
-        """Defines the property self.agents"""
-        return self._agents
-
-    @property
-    def current_agents(self):
-        return (self._sender, self._receiver)
-
-    def agents_for_CNN_pretraining(self):
-        if(self.shared): raise NotImplementedError
-        return self.all_agents

@@ -64,27 +64,31 @@ class AliceBob(Game):
     def get_receiver(self):
         return self.receiver
 
+    @property
+    def all_agents(self):
+        return (self.sender, self.receiver)
+    
+    @property
+    def current_agents(self):
+        return self.all_agents
+
+    @property
+    def optim(self):
+        return self._optim
+
+    @property
+    def autologger(self):
+        return self._logger
+
+    def agents_for_CNN_pretraining(self):
+        if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
+        return [self.sender, self.receiver]
+
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
 
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
-
-    def compute_interaction(self, batch):
-        sender_outcome, receiver_outcome = self(batch)
-
-        # Alice's part
-        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
-
-        # Bob's part
-        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
-
-        loss = sender_loss + receiver_loss
-
-        rewards, successes = sender_rewards, sender_successes
-        avg_msg_length = sender_outcome.action[1].float().mean().item()
-
-        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
     def __call__(self, batch):
         """
@@ -102,122 +106,21 @@ class AliceBob(Game):
 
         return sender_outcome, receiver_outcome
 
-    def test_visualize(self, data_iterator, learning_rate):
-        self.start_episode(train_episode=False)
-
-        batch_size = 4
-        batch = data_iterator.get_batch(batch_size, data_type='any') # Standard training batch
-
-        batch.require_grad()
-
+    def compute_interaction(self, batch):
         sender_outcome, receiver_outcome = self(batch)
 
-        # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
-        pseudo_optimizer = torch.optim.Optimizer(batch.get_images(), {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
-        pseudo_optimizer.zero_grad()
-
-        _COLOR, _INTENSITY = range(2)
-        def process(t, dim, mode):
-            if(mode == _COLOR):
-                t = max_normalize(t, dim=dim, abs_val=True) # Normalises each image
-                t *= 0.5
-                t += 0.5
-
-                return t
-            elif(mode == _INTENSITY):
-                t = t.abs()
-                t = t.max(dim).values # Max over the colour channel
-
-                max_normalize_(t, dim=dim, abs_val=False) # Normalises each image
-
-                return to_color(t, dim)
-
-        mode = _INTENSITY
-
         # Alice's part
-        sender_outcome.log_prob.sum().backward()
-
-        sender_part = batch.original_img(stack=True, f=(lambda img: img.grad.detach()))
-        sender_part = process(sender_part, 1, mode)
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
 
         # Bob's part
-        receiver_outcome.scores.sum().backward()
+        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
-        receiver_part_target_img = batch.target_img(stack=True, f=(lambda img: img.grad.detach()))
-        receiver_part_target_img = process(receiver_part_target_img.unsqueeze(axis=1), 2, mode).squeeze(axis=1)
+        loss = sender_loss + receiver_loss
 
-        receiver_part_base_distractors = batch.base_distractors_img(stack=True, f=(lambda img: img.grad.detach()))
-        receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
+        rewards, successes = sender_rewards, sender_successes
+        avg_msg_length = sender_outcome.action[1].float().mean().item()
 
-        # Message Bob-model visualisation (inspired by Simonyan et al. 2013)
-        #receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
-        receiver_dream = torch.stack([data_iterator.average_image() for _ in range(batch_size)]) # Starts with the average of the dataset
-        #show_imgs([data_iterator.average_image()], 1)
-        receiver_dream = receiver_dream.unsqueeze(axis=1) # Because the receiver expect a 1D array of images per batch instance; shape: [batch_size, 1, 3, height, width]
-        receiver_dream = receiver_dream.clone().detach() # Creates a leaf that is a copy of `receiver_dream`
-        receiver_dream.requires_grad = True
-
-        encoded_message = self.get_receiver().encode_message(*sender_outcome.action).detach()
-
-        # Defines a filter for checking smoothness
-        channels = 3
-        filter_weight = torch.tensor([[1.2, 2, 1.2], [2, -12.8, 2], [1.2, 2, 1.2]]) # -12.8 (at the center) is equal to the opposite of the sum of the other coefficients
-        filter_weight = filter_weight.view(1, 1, 3, 3)
-        filter_weight = filter_weight.repeat(channels, 1, 1, 1) # Shape: [channel, 1, 3, 3]
-        filter_layer = torch.nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, groups=channels, bias=False)
-        filter_layer.weight.data = filter_weight
-        filter_layer.weight.requires_grad = False
-
-        #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*args.learning_rate)
-        optimizer = torch.optim.SGD([receiver_dream], lr=2*learning_rate, momentum=0.9)
-        #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*args.learning_rate)
-        nb_iter = 1000
-        j = 0
-        for i in range(nb_iter):
-            if(i >= (j + (nb_iter / 10))):
-                print(i)
-                j = i
-
-            optimizer.zero_grad()
-
-            tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message)
-            loss = -tmp_outcome.scores[:, 0].sum()
-
-            regularisation_loss = 0.0
-            #regularisation_loss += 0.05 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
-            regularisation_loss += 0.01 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
-            #regularisation_loss += -0.1 * torch.log(1.0 - (2 * torch.abs(receiver_dream - 0.5))).sum() # "Wall" at 0 and 1
-            loss += regularisation_loss
-
-            #smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).sum()
-            smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).norm(1)
-            loss += smoothness_loss
-
-            loss.backward()
-
-            # TODO In Deep Dream, they blur the gradient before applying it. (https://hackernoon.com/deep-dream-with-tensorflow-a-practical-guide-to-build-your-first-deep-dream-experience-f91df601f479)
-            # This can probably be done by modifying receiver_dream.grad.
-
-            optimizer.step()
-        receiver_dream = receiver_dream.squeeze(axis=1)
-        receiver_dream = torch.clamp(receiver_dream, 0, 1)
-
-        # Displays the visualisations
-        imgs = []
-        for i in range(batch_size):
-            imgs.append(batch.original[i].img)
-            imgs.append(sender_part[i])
-
-            imgs.append(batch.target[i].img)
-            imgs.append(receiver_part_target_img[i])
-
-            for j in range(len(batch.base_distractors[i])):
-                imgs.append(batch.base_distractors[i][j].img)
-                imgs.append(receiver_part_base_distractors[i][j])
-
-            imgs.append(receiver_dream[i])
-        #for img in imgs: print(img.shape)
-        show_imgs([img.detach() for img in imgs], nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
+        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
     def compute_sender_rewards(self, sender_action, receiver_scores):
         """
@@ -532,22 +435,119 @@ class AliceBob(Game):
             tree_depth_ratio = (full_tree.get_depth() / sum_conceptual_depth)
             log('decision_tree/depth_ratio', tree_depth_ratio)
 
-    @property
-    def all_agents(self):
-        return (self.sender, self.receiver)
-    
-    @property
-    def current_agents(self):
-        return self.all_agents
+    def test_visualize(self, data_iterator, learning_rate):
+        self.start_episode(train_episode=False)
 
-    @property
-    def optim(self):
-        return self._optim
+        batch_size = 4
+        batch = data_iterator.get_batch(batch_size, data_type='any') # Standard training batch
 
-    @property
-    def autologger(self):
-        return self._logger
+        batch.require_grad()
 
-    def agents_for_CNN_pretraining(self):
-        if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
-        return [self.sender, self.receiver]
+        sender_outcome, receiver_outcome = self(batch)
+
+        # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
+        pseudo_optimizer = torch.optim.Optimizer(batch.get_images(), {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
+        pseudo_optimizer.zero_grad()
+
+        _COLOR, _INTENSITY = range(2)
+        def process(t, dim, mode):
+            if(mode == _COLOR):
+                t = max_normalize(t, dim=dim, abs_val=True) # Normalises each image
+                t *= 0.5
+                t += 0.5
+
+                return t
+            elif(mode == _INTENSITY):
+                t = t.abs()
+                t = t.max(dim).values # Max over the colour channel
+
+                max_normalize_(t, dim=dim, abs_val=False) # Normalises each image
+
+                return to_color(t, dim)
+
+        mode = _INTENSITY
+
+        # Alice's part
+        sender_outcome.log_prob.sum().backward()
+
+        sender_part = batch.original_img(stack=True, f=(lambda img: img.grad.detach()))
+        sender_part = process(sender_part, 1, mode)
+
+        # Bob's part
+        receiver_outcome.scores.sum().backward()
+
+        receiver_part_target_img = batch.target_img(stack=True, f=(lambda img: img.grad.detach()))
+        receiver_part_target_img = process(receiver_part_target_img.unsqueeze(axis=1), 2, mode).squeeze(axis=1)
+
+        receiver_part_base_distractors = batch.base_distractors_img(stack=True, f=(lambda img: img.grad.detach()))
+        receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
+
+        # Message Bob-model visualisation (inspired by Simonyan et al. 2013)
+        #receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
+        receiver_dream = torch.stack([data_iterator.average_image() for _ in range(batch_size)]) # Starts with the average of the dataset
+        #show_imgs([data_iterator.average_image()], 1)
+        receiver_dream = receiver_dream.unsqueeze(axis=1) # Because the receiver expect a 1D array of images per batch instance; shape: [batch_size, 1, 3, height, width]
+        receiver_dream = receiver_dream.clone().detach() # Creates a leaf that is a copy of `receiver_dream`
+        receiver_dream.requires_grad = True
+
+        encoded_message = self.get_receiver().encode_message(*sender_outcome.action).detach()
+
+        # Defines a filter for checking smoothness
+        channels = 3
+        filter_weight = torch.tensor([[1.2, 2, 1.2], [2, -12.8, 2], [1.2, 2, 1.2]]) # -12.8 (at the center) is equal to the opposite of the sum of the other coefficients
+        filter_weight = filter_weight.view(1, 1, 3, 3)
+        filter_weight = filter_weight.repeat(channels, 1, 1, 1) # Shape: [channel, 1, 3, 3]
+        filter_layer = torch.nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, groups=channels, bias=False)
+        filter_layer.weight.data = filter_weight
+        filter_layer.weight.requires_grad = False
+
+        #optimizer = torch.optim.RMSprop([receiver_dream], lr=10.0*args.learning_rate)
+        optimizer = torch.optim.SGD([receiver_dream], lr=2*learning_rate, momentum=0.9)
+        #optimizer = torch.optim.Adam([receiver_dream], lr=10.0*args.learning_rate)
+        nb_iter = 1000
+        j = 0
+        for i in range(nb_iter):
+            if(i >= (j + (nb_iter / 10))):
+                print(i)
+                j = i
+
+            optimizer.zero_grad()
+
+            tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message)
+            loss = -tmp_outcome.scores[:, 0].sum()
+
+            regularisation_loss = 0.0
+            #regularisation_loss += 0.05 * (receiver_dream - 0.5).norm(2) # Similar to L2 regularisation but centered around 0.5
+            regularisation_loss += 0.01 * (receiver_dream - 0.5).norm(1) # Similar to L1 regularisation but centered around 0.5
+            #regularisation_loss += -0.1 * torch.log(1.0 - (2 * torch.abs(receiver_dream - 0.5))).sum() # "Wall" at 0 and 1
+            loss += regularisation_loss
+
+            #smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).sum()
+            smoothness_loss = 20 * torch.abs(filter_layer(receiver_dream.squeeze(axis=1))).norm(1)
+            loss += smoothness_loss
+
+            loss.backward()
+
+            # TODO In Deep Dream, they blur the gradient before applying it. (https://hackernoon.com/deep-dream-with-tensorflow-a-practical-guide-to-build-your-first-deep-dream-experience-f91df601f479)
+            # This can probably be done by modifying receiver_dream.grad.
+
+            optimizer.step()
+        receiver_dream = receiver_dream.squeeze(axis=1)
+        receiver_dream = torch.clamp(receiver_dream, 0, 1)
+
+        # Displays the visualisations
+        imgs = []
+        for i in range(batch_size):
+            imgs.append(batch.original[i].img)
+            imgs.append(sender_part[i])
+
+            imgs.append(batch.target[i].img)
+            imgs.append(receiver_part_target_img[i])
+
+            for j in range(len(batch.base_distractors[i])):
+                imgs.append(batch.base_distractors[i][j].img)
+                imgs.append(receiver_part_base_distractors[i][j])
+
+            imgs.append(receiver_dream[i])
+        #for img in imgs: print(img.shape)
+        show_imgs([img.detach() for img in imgs], nrow=(len(imgs) // batch_size)) #show_imgs(imgs, nrow=(2 * (2 + batch.base_distractors.size(1))))
