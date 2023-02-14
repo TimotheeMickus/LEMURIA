@@ -19,11 +19,20 @@ from ..eval import decision_tree
 
 from .game import Game
 
+# In this game, there is one sender (Alice) and one receiver (Bob).
+# They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
 class AliceBob(Game):
     def __init__(self, args, logger):
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
+
+        self.use_expectation = args.use_expectation
+        self.grad_scaling = args.grad_scaling or 0
+        self.grad_clipping = args.grad_clipping or 0
+        self.beta_sender = args.beta_sender
+        self.beta_receiver = args.beta_receiver
+        self.penalty = args.penalty
 
         if(args.shared):
             print('You currently cannot use AliceBob with shared CNNs. Please use AliceBobPopulation with a population of size 1 instead.')
@@ -38,16 +47,9 @@ class AliceBob(Game):
             self.receiver = Receiver.from_args(args)
             parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
 
-        self.use_expectation = args.use_expectation
-        self.grad_scaling = args.grad_scaling or 0
-        self.grad_clipping = args.grad_clipping or 0
-        self.beta_sender = args.beta_sender
-        self.beta_receiver = args.beta_receiver
-        self.penalty = args.penalty
-
         self._optim = build_optimizer(parameters, args.learning_rate)
 
-        # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different
+        # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
         self.use_baseline = args.use_baseline
         if(self.use_baseline):
             self._sender_avg_reward = misc.Averager(size=12800)

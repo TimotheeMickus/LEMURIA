@@ -11,13 +11,22 @@ from ..utils.misc import build_optimizer, get_default_fn
 from ..utils import misc
 from ..utils.modules import build_cnn_decoder_from_args
 
+# In this game, there is a population of senders (Alice·s) and of receivers (Bob·s).
+# For each training batch, a pair of (Alice, Bob) is randomly selected and trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
 class AliceBobPopulation(AliceBob):
     def __init__(self, args, logger): # TODO We could consider calling super().__init__(args)
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
 
-        size = args.population
+        self.use_expectation = args.use_expectation
+        self.grad_scaling = args.grad_scaling or 0
+        self.grad_clipping = args.grad_clipping or 0
+        self.beta_sender = args.beta_sender
+        self.beta_receiver = args.beta_receiver
+        self.penalty = args.penalty
+
+        size = args.population # There are `size` senders and `size` receivers.
 
         # In both cases, there are `size` senders and `size` receivers, but if `shared` is True, senders are paired with receivers so as to share their CNN and symbol embeddings
         if(args.shared):
@@ -28,14 +37,6 @@ class AliceBobPopulation(AliceBob):
             receivers = [Receiver.from_args(args) for _ in range(size)]
             agents = (senders + receivers)
         self.senders, self.receivers, self._agents =  nn.ModuleList(senders), nn.ModuleList(receivers),  nn.ModuleList(agents)
-
-        self.use_expectation = args.use_expectation
-        self.grad_scaling = args.grad_scaling or 0
-        self.grad_clipping = args.grad_clipping or 0
-        self.beta_sender = args.beta_sender
-        self.beta_receiver = args.beta_receiver
-        self.penalty = args.penalty
-        self.adaptative_penalty = args.adaptative_penalty
 
         self._sender, self._receiver = None, None # Set before each episode by `start_episode`
 
@@ -65,7 +66,7 @@ class AliceBobPopulation(AliceBob):
 
         self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
 
-        # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different
+        # Currently, the senders and receivers' rewards are the same, but we could imagine a setting in which they are different.
         self.use_baseline = args.use_baseline
         if(self.use_baseline):
             self._sender_avg_reward = misc.Averager(size=12800)
