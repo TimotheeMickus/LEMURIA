@@ -416,6 +416,7 @@ class AliceBob(Game):
 
             # Here, we try to see how much the messages describe the categories and not the particular images
             # To do so, we use the original image as target, and an image of the same category as distractor
+            # Abstractness is here defined as twice the probability assigned by the receiver to the same category distractor.
             abstractness = []
             n = (32 * data_iterator.nb_categories)
             n = min(max_datapoints, n)
