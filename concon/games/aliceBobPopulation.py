@@ -138,11 +138,9 @@ class AliceBobPopulation(AliceBob):
         instance._optim = checkpoint['optims'][0]
         return instance
 
-    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False, pretrain_charlie=False):
+    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False,):
         agents = self._agents if not shared else [a.sender for a in self._agents]
 
-        if(pretrain_CNN_mode != 'auto-encoder' or not pretrain_charlie):
-            agents = [a for a in agents if hasattr(a, 'image_encoder')]
         trained_models = {}
         for i, agent in enumerate(agents):
             agent_name = ("agent %i" % i)

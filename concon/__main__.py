@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from .games import AliceBob, AliceBobCharlie, AliceBobPopulation, AliceBobCharliePopulation
+from .games import AliceBob, AliceBobPopulation
 from .utils.data import get_data_loader
 from .utils.opts import get_args
 from .utils.misc import build_optimizer, get_default_fn, path_replace
@@ -31,14 +31,11 @@ def train(args):
         run_models_dir = models_dir / str(run)
 
         data_loader = get_data_loader(args)
-        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)# log_charlie_acc=args.charlie)
+        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)
 
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
-
-        if((args.population is not None) and (args.charlie)): model = AliceBobCharliePopulation(args, autologger)
         elif(args.population is not None): model = AliceBobPopulation(args, autologger)
-        elif(args.charlie): model = AliceBobCharlie(args, autologger)
         else: model = AliceBob(args, autologger)
         model = model.to(args.device)
 
@@ -62,8 +59,7 @@ def train(args):
                 pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval,
                 deconvolution_factory=dcnn_factory_fn,
                 convolution_factory=cnn_factory_fn,
-                shared=args.shared,
-                pretrain_charlie=args.pretrain_charlie)
+                shared=args.shared,)
 
             if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
                 (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())

@@ -67,9 +67,7 @@ def get_args():
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
     group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
-    group.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
     group.add_argument('--adv_pointer_training', help='non-standard pointer-based adversary_training', action='store_true')
-    group.add_argument('--ignore_charlie', help='do not train bob on charlie output', action='store_true')
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
@@ -96,7 +94,6 @@ def get_args():
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
     group.add_argument('--freeze_pretrained_CNNs', help='do not backpropagate gradient on pretrained CNNs', action='store_true')
-    group.add_argument('--pretrain_charlie', help="pretrain adversarial agent's deconvolution as well", action='store_true')
     group.add_argument('--detect_outliers', help='if pretraining, then after, the trained model analyses the dataset in order to detect problems', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')

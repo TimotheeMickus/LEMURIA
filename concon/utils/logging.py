@@ -128,7 +128,6 @@ class AutoLogger(object):
     def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, debug=False,
         log_lang_progress=False, log_entropy=False,
         device='cpu', no_summary=False, summary_dir=None, default_period=10,):
-        #log_charlie_acc=False):
 
         self.base_alphabet_size = base_alphabet_size
         self.data_loader = data_loader
@@ -145,8 +144,6 @@ class AutoLogger(object):
         self.log_entropy = log_entropy
 
         self.device = device
-
-        #self.log_charlie_acc = log_charlie_acc # Commented out: use self.tag_header to highlight when results pertain to Charlie
 
         if no_summary:
             self.summary_writer = None
@@ -234,10 +231,6 @@ class AutoLogger(object):
 
             self._write('llp/msg_length', avg_msg_length, number_ex_seen)
             self._write('llp/length_ratio', length_ratio, number_ex_seen)
-
-            # if self.log_charlie_acc:
-            #     charlie_acc = charlie_acc.mean().item()
-            #     self.summary_writer.add_scalar('train-%s/charlie_acc' % tag, charlie_acc, number_ex_seen)
 
             if self.log_lang_progress:
                 for batch in supplementary_info['batches']:
