@@ -13,6 +13,7 @@ import torchvision
 from .game import Game
 from ..agents import Sender, Receiver, Drawer
 from ..utils.misc import max_normalize_, to_color, build_optimizer, pointing, compute_entropy_stats, pointing
+from ..utils import misc
 from ..utils.logging import LoggingData
 from ..eval import compute_correlation
 
@@ -430,52 +431,34 @@ class AliceBobCharlie(AliceBob):
             C = (1 - 2 * abs(0.5 - (all_probs.argmax(-1) == 2).float().mean().item()))
             log(f'Shared-eval/perf_overview', (2 * A * C) / (A + C))
 
-            # Here, we try to see how much the messages describe the categories and not the praticular images
-            # To do so, we use the original image as target, and an image of the same category as distractor
+            # Here, we try to see how much the messages describe the categories and not the praticular images.
+            # To do so, we use the original image as target, and an image of the same category as distractor.
+            # Abstractness is here defined as twice the probability assigned by the receiver to the same category distractor. TODO Taking the min with 1 would result in something comparable to what is done with the scrambling resistance.
+            # A variant is also defined as 1 minus the absolute value of the difference between the probability assigned by the receiver to the original image and the same category distractor.
             abstractness = []
+            abstractness2 = []
             n = (32 * data_iterator.nb_categories)
             n = min(max_datapoints, n)
             nb_batch = int(np.ceil(n / batch_size))
             for _ in range(nb_batch):
+                self.start_episode(train_episode=False) # Selects agents at random if necessary.
+                
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
-                # send
-                sender_outcome = sender(self._alice_input(batch))
-                # adversarial step
-                drawer_outcome = drawer(*sender_outcome.action)
-                deterministic = sender_outcome.action[2]
-                assert deterministic
-                # receive
-                bob_input = self._charlied_bob_input(batch, drawer_outcome.image, deterministic)
-                receiver_outcome = receiver(bob_input, *sender_outcome.action)
-                receiver_pointing = pointing(receiver_outcome.scores)
-                abstractness.append(1 - (receiver_pointing['dist'].probs[:, 1] - receiver_pointing['dist'].probs[:, 0]).abs())
+                
+                sender_outcome, receiver_outcome = self(batch)
+                
+                assert sender_outcome.action[2] # Checks that we are in "deterministic mode", i.e. that each of the sender's actions is the selection of a symbol (instead of the production of a probability distribution over the vocabulary, as when the Gumbel-Softmax technique is used).
 
-            abstractness = torch.stack(abstractness)
-            abstractness_rate = abstractness.mean().item()
-            log('Shared-eval/abstractness2', abstractness_rate)
-
-            abstractness = []
-            n = (32 * data_iterator.nb_categories)
-            n = min(max_datapoints, n)
-            nb_batch = int(np.ceil(n / batch_size))
-            for _ in range(nb_batch):
-                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
-                # send
-                sender_outcome = sender(self._alice_input(batch))
-                # adversarial step
-                drawer_outcome = drawer(*sender_outcome.action)
-                deterministic = sender_outcome.action[2]
-                assert deterministic
-                # receive
-                bob_input = self._charlied_bob_input(batch, drawer_outcome.image, deterministic)
-                receiver_outcome = receiver(bob_input, *sender_outcome.action)
-
-                receiver_pointing = pointing(receiver_outcome.scores)
+                receiver_pointing = misc.pointing(receiver_outcome.scores)
                 abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
+                abstractness2.append(1 - (receiver_pointing['dist'].probs[:, 1] - receiver_pointing['dist'].probs[:, 0]).abs())
 
             abstractness = torch.stack(abstractness)
             abstractness_rate = abstractness.mean().item()
             log('Shared-eval/abstractness', abstractness_rate)
+            abstractness2 = torch.stack(abstractness2)
+            abstractness2_rate = abstractness2.mean().item()
+            log('Shared-eval/abstractness2', abstractness2_rate)
 
             # Here we computing the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after
             success = torch.stack(success)
