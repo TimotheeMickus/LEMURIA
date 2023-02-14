@@ -198,7 +198,7 @@ class Randomizer(nn.Module):
     def from_args(cls, args):
         return cls(input_dim=args.hidden_size, random_dim=args.hidden_size)
 
-
+# output: torch.nn.Module
 def _dcgan_tuto_cnn(hidden_size):
     # params of convs:
     # input chans, output chans, kernel, stride, padding
@@ -229,7 +229,7 @@ def _dcgan_tuto_cnn(hidden_size):
             nn.Flatten(),
         )
 
-
+# output: torch.nn.Module
 def _dcgan_tuto_decnn(hidden_size):
     # params of convs:
     # input chans, output chans, kernel, stride, padding
@@ -261,6 +261,7 @@ def _dcgan_tuto_decnn(hidden_size):
             # state size. (3) x 128 x 128
         )
 
+# output: torch.nn.Module
 def _dcgan_decnn(hidden_size):
     """A more viable CNN/DCNN architecture"""
     # params of convs:
@@ -306,6 +307,7 @@ def _dcgan_decnn(hidden_size):
             # state size. (nc) x 128 x 128
         )
 
+# output: torch.nn.Module
 def _dcgan_cnn(hidden_size):
     """A more viable CNN/DCNN architecture"""
     # params of convs:
@@ -430,17 +432,20 @@ def _dcgan_cnn(hidden_size):
 #     cnn = nn.Sequential(*layers)
 #     return cnn
 
+# output: torch.nn.Module
 def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
     """
     features = args.cnn_channel_size or args.hidden_size
-    if args.use_legacy_cnn or args.use_legacy_convolutions:
-        if not args.quiet: print("Using legacy convolution architecture")
+    
+    if(args.use_legacy_cnn or args.use_legacy_convolutions):
+        if(not args.quiet): print("Using legacy convolution architecture")
         short_cut = _dcgan_tuto_cnn(features)
     else:
-        if not args.quiet: print("Using modern convolution architecture")
+        if(not args.quiet): print("Using modern convolution architecture")
         short_cut = _dcgan_cnn(features)
+    
     return short_cut
     #
     # # for legacy or now
@@ -455,17 +460,19 @@ def build_cnn_encoder_from_args(args):
     #     kernel_size=args.kernel_size,
     #     paddings=None,)
 
+# output: torch.nn.Module
 def build_cnn_decoder_from_args(args):
     """
     Factory for deconvolutionnal networks
     """
     features = args.decnn_channel_size or args.hidden_size
-    if args.use_legacy_decnn or args.use_legacy_convolutions:
-        if not args.quiet: print("Using legacy deconvolution architecture")
+    if(args.use_legacy_decnn or args.use_legacy_convolutions):
+        if(not args.quiet): print("Using legacy deconvolution architecture")
         short_cut = _dcgan_tuto_decnn(features)
     else:
-        if not args.quiet: print("Using modern deconvolution architecture")
+        if(not args.quiet): print("Using modern deconvolution architecture")
         short_cut = _dcgan_decnn(features)
+    
     return short_cut
 
     # #for legacy for now
@@ -484,6 +491,7 @@ def build_cnn_decoder_from_args(args):
     #     flatten_last=False,
     #     sigmoid_after=True,)
 
+# output: torch.nn.Embedding
 def build_embeddings(base_alphabet_size, dim, use_bos=False):
     vocab_size = (base_alphabet_size + 3) if use_bos else (base_alphabet_size + 2) # +3: EOS symbol, padding symbol, BOS symbol; +2: EOS symbol, padding symbol
     return nn.Embedding(vocab_size, dim, padding_idx=base_alphabet_size + 1)

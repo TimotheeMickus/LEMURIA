@@ -35,9 +35,9 @@ class AliceBob(Game):
         self.penalty = args.penalty
 
         if(args.shared):
-            print('You currently cannot use AliceBob with shared CNNs. Please use AliceBobPopulation with a population of size 1 instead.')
-            raise ValueError
-
+            raise NotImplementedError
+            
+            # TODO(2023-02-14) What is the problem with the following?
             senderReceiver = SenderReceiver.from_args(args)
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
@@ -55,7 +55,7 @@ class AliceBob(Game):
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
 
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
     def _alice_input(self, batch):
         return batch.original_img(stack=True)

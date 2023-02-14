@@ -17,11 +17,14 @@ class Receiver(Agent):
     Defines a receiver policy.
     Based on K presented images and a given message, chooses which image the message refers to.
     """
-    def __init__(self, image_encoder, message_encoder):
+    def __init__(self, image_encoder, message_encoder, args, has_shared_param):
         super(Agent, self).__init__()
 
         self.image_encoder = image_encoder
         self.message_encoder = message_encoder
+        
+        self.args = args
+        self.has_shared_param = has_shared_param
 
     def encode_message(self, message, length):
         return self.message_encoder(message, length).unsqueeze(-1)
@@ -50,9 +53,26 @@ class Receiver(Agent):
 
         outcome = Outcome(scores=scores)
         return outcome
+    
+    # Randomly reinitializes the parameters of the agent.
+    def reinitialize(self):
+        if(self.has_shared_param):
+            raise ValueError("Modules with shared parameters cannot be reinitialized.")
+        
+        other_receiver = Receiver.from_args(self.args)
+        other_parameters = dict(other_receiver.named_parameters())
+        
+        for name, parameters in dict(self.named_parameters()).items():
+            parameters.data = other_parameters[name].data
 
+    # The two optional arguments are specified when creating a SenderReceiver.
+    # image_encoder: torch.nn.Module
+    # symbol_embeddings: torch.nn.Embedding
     @classmethod
     def from_args(cls, args, image_encoder=None, symbol_embeddings=None):
+        has_shared_param = (image_encoder is not None) or (symbol_embeddings is not None)
+        
         if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)
         message_encoder = MessageEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
-        return cls(image_encoder, message_encoder)
+        
+        return cls(image_encoder, message_encoder, args, has_shared_param)

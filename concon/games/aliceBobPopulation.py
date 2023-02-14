@@ -13,6 +13,7 @@ from ..utils.modules import build_cnn_decoder_from_args
 
 # In this game, there is a population of senders (Alice·s) and of receivers (Bob·s).
 # For each training batch, a pair of (Alice, Bob) is randomly selected and trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
+# If required, the agents are regularly reinitialized.
 class AliceBobPopulation(AliceBob):
     def __init__(self, args, logger): # TODO We could consider calling super().__init__(args)
         self._logger = logger
@@ -30,16 +31,14 @@ class AliceBobPopulation(AliceBob):
 
         # In both cases, there are `size` senders and `size` receivers, but if `shared` is True, senders are paired with receivers so as to share their CNN and symbol embeddings
         if(args.shared):
-            agents = [SenderReceiver.from_args(args) for _ in range(size)]
-            senders, receivers = zip(*[(agent.sender, agent.receiver) for agent in self._agents])
+            NotImplementedError
         else:
             senders = [Sender.from_args(args) for _ in range(size)]
             receivers = [Receiver.from_args(args) for _ in range(size)]
             agents = (senders + receivers)
-        self.senders, self.receivers, self._agents =  nn.ModuleList(senders), nn.ModuleList(receivers),  nn.ModuleList(agents)
+        self.senders, self.receivers, self._agents = nn.ModuleList(senders), nn.ModuleList(receivers), nn.ModuleList(agents)
 
-        self._sender, self._receiver = None, None # Set before each episode by `start_episode`
-
+        self._sender, self._receiver = None, None # These properties will be set before each episode by `start_episode`.
 
         # Mathusalemian dynamics
         self._reaper_step = args.reaper_step
@@ -59,10 +58,6 @@ class AliceBobPopulation(AliceBob):
             self._pretrain_shared = args.shared
         else:
             self._pretrain_args = {"pretrain_CNN_mode":args.pretrain_CNNs,}
-
-        # self.start_episode() # TODO Really useful?
-        self._sender = random.choice(self.senders)
-        self._receiver = random.choice(self.receivers)
 
         self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
 
@@ -90,28 +85,49 @@ class AliceBobPopulation(AliceBob):
     def get_receiver(self):
         return self._receiver
 
+    # Overrides Game.start_episode.
     def start_episode(self, train_episode=True):
         self._sender = random.choice(self.senders)
         self._receiver = random.choice(self.receivers)
 
         super().start_episode(train_episode=train_episode)
 
-    def start_epoch(self, data_iterator):
+    # Overrides Game.start_epoch.
+    def start_epoch(self, data_iterator, summary_writer):
         if self._reaper_step is not None:
             if (self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0):
                 reborn_agent = next(self._death_row)
-                self.kill(reborn_agent)
+                reborn_agent.reinitialize()
+                #self.kill(reborn_agent)
 
                 if self._pretrain_args['pretrain_CNN_mode'] is not None:
                     if self._pretrain_shared:
                         reborn_agent = reborn_agent.sender
+                    
                     if self._pretrain_args['freeze_pretrained_CNN']:
                         for p in reborn_agent.image_encoder.parameters():
                             p.requires_grad = True
+                    
                     agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)
                     self.pretrain_agent_CNN(reborn_agent, data_iterator, **self._pretrain_args, agent_name=agent_name)
                     print("[%s] %s reinitialized." %(datetime.now(), agent_name))
+            
             self._current_epoch += 1
+
+    # 2023-02-14: The method is made obsolete, replaced with {Sender,Receiver}.reinitialize.
+    # Resets (randomly) the parameters of the Module given as argument.
+    # Warning: This might not always work as expected, as not all modules have a `reset_parameters` method.
+    # agent: torch.nn.Module
+    def kill(self, agent):
+        # Resets the parameters of the Module given as argument.
+        # submodule: torch.nn.Module
+        def weight_init(submodule):
+            try:
+                submodule.reset_parameters()
+            except:
+                pass
+
+        agent.apply(weight_init) # torch.nn.Module.apply: "Applies [the argument] recursively to every submodule (as returned by .children()) as well as self."
 
     @property
     def agents(self):

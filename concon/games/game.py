@@ -358,15 +358,3 @@ class Game(metaclass=ABCMeta):
             if((save_every > 0) and (((epoch + 1) % save_every) == 0)):
                 model_name = "model_e%i.pt" % epoch
                 self.save(run_models_dir / model_name)
-
-    def kill(self, agent):
-        '''
-        To die, to sleep... to sleep, perchance to dream!
-        '''
-        def weight_init(submodule):
-            try:
-                submodule.reset_parameters()
-            except:
-                pass
-
-        agent.apply(weight_init)
