@@ -39,7 +39,7 @@ class Game(metaclass=ABCMeta):
         pass
 
     def to(self, *vargs, **kwargs):
-        for agent in self.all_agents: agent.to(*args, **kwargs)
+        for agent in self.all_agents: agent.to(*vargs, **kwargs)
 
         return self
 
