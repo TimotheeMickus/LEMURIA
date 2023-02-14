@@ -570,4 +570,4 @@ class AliceBob(Game):
 
     def agents_for_CNN_pretraining(self):
         if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
-        return [self.agents, self.receiver]
+        return [self.sender, self.receiver]
