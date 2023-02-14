@@ -34,24 +34,25 @@ class AliceBob(Game):
         self.beta_receiver = args.beta_receiver
         self.penalty = args.penalty
 
-        if(args.shared):
-            raise NotImplementedError
-            
-            # TODO(2023-02-14) What is the problem with the following?
+        self.shared = args.shared
+        if(self.shared):
             senderReceiver = SenderReceiver.from_args(args)
+            
             self.sender = senderReceiver.sender
             self.receiver = senderReceiver.receiver
+            
             parameters = senderReceiver.parameters()
         else:
             self.sender = Sender.from_args(args)
             self.receiver = Receiver.from_args(args)
+            
             parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
 
         self._optim = build_optimizer(parameters, args.learning_rate)
-
-        # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
+        
         self.use_baseline = args.use_baseline
-        if(self.use_baseline):
+        if(self.use_baseline): # In that case, the loss will take into account the "baseline term", into the average recent reward.
+            # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
 
@@ -567,12 +568,6 @@ class AliceBob(Game):
             instance._optim = checkpoint['optims'][0]
         return instance
 
-    """def pretrain_CNNs(self, data_iterator, summary_writer, args):
-        if args.shared:
-            named_agents = [['sender-receiver', self.sender],]
-        else:
-            named_agents = [['sender', self.sender], ['receiver', self.receiver]]
-
-        for name, agent in named_agents:
-            print(("[%s] pretraining %s…" % (datetime.now(), name)), flush=True)
-            self.pretrain_agent_CNN(agent, data_iterator, summary_writer, args, agent_name=name)"""
+    def agents_for_CNN_pretraining(self):
+        if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
+        return [self.agents, self.receiver]

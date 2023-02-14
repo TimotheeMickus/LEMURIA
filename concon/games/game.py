@@ -157,17 +157,16 @@ class Game(metaclass=ABCMeta):
         """
         pass
 
-    # Caution: as this function pretrains all agents, be careful with shared parameters
-    # It is likely that this method should be overriden
-    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False):
-        """
-        Pretrain (de)convolution of all agents.
-        """
+    def agents_for_CNN_pretraining(self):
+        return NotImplementedError
+
+    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None):
         pretrained_models = {}
-        agents = (a for a in self.agents if hasattr(a, 'image_encoder'))
+        agents = self.agents_for_CNN_pretraining()
         for i, agent in enumerate(agents):
-            agent_name = ("agent %i" % i)
+            agent_name = f"agent {i}"
             pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
+        
         return pretrained_models
 
     def pretrain_agent_CNN(self, agent, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, agent_name="agent"):
@@ -175,13 +174,14 @@ class Game(metaclass=ABCMeta):
         Pretrain (de)convolution of agent.
         """
         print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
-
-        if pretrain_CNN_mode != 'auto-encoder':
+        
+        if(pretrain_CNN_mode != 'auto-encoder'):
             pretrained_model = self._pretrain_classif(agent, data_iterator, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
             pretrained_model = self._pretrain_ae(agent, data_iterator, pretrain_CNN_mode, deconvolution_factory, convolution_factory, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
 
-        if freeze_pretrained_CNN and hasattr(agent, 'image_encoder') :
+        # If necessary, deactivate training in the image encoder.
+        if(freeze_pretrained_CNN):
             for p in agent.image_encoder.parameters():
                 p.requires_grad = False
 

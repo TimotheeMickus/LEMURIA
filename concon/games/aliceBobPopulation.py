@@ -29,8 +29,8 @@ class AliceBobPopulation(AliceBob):
 
         size = args.population # There are `size` senders and `size` receivers.
 
-        # In both cases, there are `size` senders and `size` receivers, but if `shared` is True, senders are paired with receivers so as to share their CNN and symbol embeddings
-        if(args.shared):
+        self.shared = args.shared
+        if(self.shared):
             NotImplementedError
         else:
             senders = [Sender.from_args(args) for _ in range(size)]
@@ -40,30 +40,29 @@ class AliceBobPopulation(AliceBob):
 
         self._sender, self._receiver = None, None # These properties will be set before each episode by `start_episode`.
 
-        # Mathusalemian dynamics
+        # Mathusalemian dynamics:
+        # If `_reaper_step` is an integer, at the beginning of each `_reaper_step` training epoch, one agent is reinitialized.
+        # The agents are reinitialized in turn.
         self._reaper_step = args.reaper_step
-        if self._reaper_step is not None:
-            self._current_epoch =  0
+        if(self._reaper_step is not None):
+            self._current_epoch = 0
             self._death_row = itertools.cycle(self._agents)
             self._pretrain_args = {
-                "pretrain_CNN_mode":args.pretrain_CNNs,
-                "freeze_pretrained_CNN":args.freeze_pretrained_CNNs,
-                "learning_rate":args.pretrain_learning_rate or args.learning_rate,
-                "nb_epochs":args.pretrain_epochs,
-                "steps_per_epoch":args.steps_per_epoch,
-                "display_mode":args.display,
-                "pretrain_CNNs_on_eval":args.pretrain_CNNs_on_eval,
-                "deconvolution_factory":get_default_fn(build_cnn_decoder_from_args, args),
+                "pretrain_CNN_mode": args.pretrain_CNNs,
+                "freeze_pretrained_CNN": args.freeze_pretrained_CNNs,
+                "learning_rate": args.pretrain_learning_rate or args.learning_rate,
+                "nb_epochs": args.pretrain_epochs,
+                "steps_per_epoch": args.steps_per_epoch,
+                "display_mode": args.display,
+                "pretrain_CNNs_on_eval": args.pretrain_CNNs_on_eval,
+                "deconvolution_factory": get_default_fn(build_cnn_decoder_from_args, args),
             }
-            self._pretrain_shared = args.shared
-        else:
-            self._pretrain_args = {"pretrain_CNN_mode":args.pretrain_CNNs,}
 
         self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
 
-        # Currently, the senders and receivers' rewards are the same, but we could imagine a setting in which they are different.
         self.use_baseline = args.use_baseline
-        if(self.use_baseline):
+        if(self.use_baseline): # In that case, the loss will take into account the "baseline term", into the average recent reward.
+            # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
 
@@ -94,23 +93,16 @@ class AliceBobPopulation(AliceBob):
 
     # Overrides Game.start_epoch.
     def start_epoch(self, data_iterator, summary_writer):
-        if self._reaper_step is not None:
-            if (self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0):
+        if(self._reaper_step is not None):
+            if((self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0)):
                 reborn_agent = next(self._death_row)
                 reborn_agent.reinitialize()
                 #self.kill(reborn_agent)
 
-                if self._pretrain_args['pretrain_CNN_mode'] is not None:
-                    if self._pretrain_shared:
-                        reborn_agent = reborn_agent.sender
-                    
-                    if self._pretrain_args['freeze_pretrained_CNN']:
-                        for p in reborn_agent.image_encoder.parameters():
-                            p.requires_grad = True
-                    
+                if(self._pretrain_args['pretrain_CNN_mode'] is not None):
                     agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)
                     self.pretrain_agent_CNN(reborn_agent, data_iterator, **self._pretrain_args, agent_name=agent_name)
-                    print("[%s] %s reinitialized." %(datetime.now(), agent_name))
+                    print(f"[{datetime.now()}] {agent_name} reinitialized.")
             
             self._current_epoch += 1
 
@@ -124,6 +116,7 @@ class AliceBobPopulation(AliceBob):
         def weight_init(submodule):
             try:
                 submodule.reset_parameters()
+                # TODO Also reset the requires_grad properties.
             except:
                 pass
 
@@ -155,11 +148,6 @@ class AliceBobPopulation(AliceBob):
         instance._optim = checkpoint['optims'][0]
         return instance
 
-    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, shared=False,):
-        agents = self._agents if not shared else [a.sender for a in self._agents]
-
-        trained_models = {}
-        for i, agent in enumerate(agents):
-            agent_name = ("agent %i" % i)
-            trained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
-        return trained_models
+    def agents_for_CNN_pretraining(self):
+        if(self.shared): raise NotImplementedError
+        return self._agents

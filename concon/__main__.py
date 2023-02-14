@@ -18,14 +18,14 @@ from .utils.data import Batch
 
 def train(args):
     if(not args.data_set.is_dir()):
-        print(("Directory '%s' not found." % args.data_set), flush=True)
+        print((f"Directory '{args.data_set}' not found."), flush=True)
         sys.exit()
 
     summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     models_dir = path_replace(args.models, '[summary]', summary_dir)
 
     for run in range(args.runs):
-        print(('Run %i' % run), flush=True)
+        print(f'Run {run}', flush=True)
 
         run_summary_dir = summary_dir / str(run)
         run_models_dir = models_dir / str(run)
@@ -35,6 +35,7 @@ def train(args):
 
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
+        
         elif(args.population is not None): model = AliceBobPopulation(args, autologger)
         else: model = AliceBob(args, autologger)
         model = model.to(args.device)
@@ -58,8 +59,8 @@ def train(args):
                 display_mode=args.display,
                 pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval,
                 deconvolution_factory=dcnn_factory_fn,
-                convolution_factory=cnn_factory_fn,
-                shared=args.shared,)
+                convolution_factory=cnn_factory_fn
+            )
 
             if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
                 (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())

@@ -35,7 +35,7 @@ class Sender(Agent):
             action=(outputs["message"], outputs["message_len"]))
         return outcome
     
-    # Randomly reinitializes the parameters of the agent.
+    # Randomly reinitializes the parameters of the agent. (and also the requires_grad properties)
     def reinitialize(self):
         if(self.has_shared_param):
             raise ValueError("Modules with shared parameters cannot be reinitialized.")
@@ -45,6 +45,7 @@ class Sender(Agent):
         
         for name, parameters in dict(self.named_parameters()).items():
             parameters.data = other_parameters[name].data
+            parameters.requires_grad = other_parameters[name].requires_grad
 
     # The two optional arguments are specified when creating a SenderReceiver.
     # image_encoder: torch.nn.Module
