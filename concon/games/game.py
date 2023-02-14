@@ -24,9 +24,17 @@ class Game(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def agents(self):
+    def current_agents(self):
         """
-        List agents involved in the current round of the game
+        Lists agents involved in the current round of the game.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def all_agents(self):
+        """
+        Lists all agents.
         """
         pass
 
@@ -58,30 +66,30 @@ class Game(metaclass=ABCMeta):
 
     def train(self):
         """
-        Set all agents to train mode.
+        Sets the agents involved in the current round of the game to train mode.
         """
-        for agent in self.agents:  # Sets the agents in training mode
+        for agent in self.current_agents:
             agent.train()
 
     def eval(self):
         """
-        Set all agents to eval mode.
+        Sets the agents involved in the current round of the game to eval mode.
         """
-        for agent in self.agents:  # Sets the agents in evaluation mode
+        for agent in self.current_agents:
             agent.eval()
 
     def start_episode(self, train_episode=True):
         """
         Called before starting a new round of the game. Override for setup behavior.
         """
-        if train_episode: self.train() # Sets the current agents in training mode
+        if train_episode: self.train()
         else: self.eval()
 
     def start_epoch(self, data_iterator, summary_writer):
         """
         Called before starting a new epoch of the game. Override for setup/pretrain behavior.
         """
-        self.train() # Sets the current agents in training mode
+        self.train()
 
     def end_episode(self, **kwargs):
         """
@@ -110,48 +118,48 @@ class Game(metaclass=ABCMeta):
         with self.autologger:
             start_i = (epoch * steps_per_epoch)
             end_i = (start_i + steps_per_epoch)
-            running_avg_success = 0.
-            for index in range(start_i, end_i):
-                batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress)
+            for iter_index in range(start_i, end_i):
                 self.start_episode()
-
                 self.optim.zero_grad()
 
+                batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
+                
                 loss, *external_output = self.compute_interaction(batch)
 
                 loss.backward() # Backpropagation
 
                 # Gradient clipping and scaling
-                if self.grad_clipping > 0:
-                    for agent in self.agents:
+                if(self.grad_clipping > 0):
+                    for agent in self.current_agents:
                         torch.nn.utils.clip_grad_value_(agent.parameters(), self.grad_clipping)
-                if self.grad_scaling > 0:
-                    for agent in self.agents:
+                if(self.grad_scaling > 0):
+                    for agent in self.current_agents:
                         torch.nn.utils.clip_grad_norm_(agent.parameters(), self.grad_scaling)
 
                 self.optim.step()
 
                 udpated_state = self.autologger.update(
                     loss, *external_output,
-                    parameters=(p for a in self.agents for p in a.parameters()),
+                    parameters=(p for a in self.all_agents for p in a.parameters()), # TODO `self.all_agents` or `self.current_agents`?
                     batch=batch,
-                    index=index,
+                    index=iter_index,
                 )
+                
                 self.end_episode(**udpated_state)
 
     def save(self, path):
         """
-        Save model to file `path`
+        Saves the model to the file `path`.
         """
         state = {
-            'agents_state_dicts': [agent.state_dict() for agent in self.agents],
+            'agents_state_dicts': [agent.state_dict() for agent in self.all_agents],
             'optims': [self.optim],
         }
         torch.save(state, path)
 
     @classmethod
     @abstractmethod
-    def load(cls, path, args, _old_model=False):
+    def load(cls, path, args):
         """
         Load model from file `path`.
         """
@@ -356,5 +364,5 @@ class Game(metaclass=ABCMeta):
             timepoint_0 = timepoint_1
 
             if((save_every > 0) and (((epoch + 1) % save_every) == 0)):
-                model_name = "model_e%i.pt" % epoch
+                model_name = "model_e{epoch}.pt"
                 self.save(run_models_dir / model_name)

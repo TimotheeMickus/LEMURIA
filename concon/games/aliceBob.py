@@ -321,7 +321,7 @@ class AliceBob(Game):
             scrambled_success_prob = [] # Probabilities
 
             for _ in batch_numbers:
-                self.start_episode(train_episode=False) # Select agents at random if necessary
+                self.start_episode(train_episode=False)
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome, receiver_outcome = self(batch)
@@ -369,7 +369,7 @@ class AliceBob(Game):
             n = min(max_datapoints, n)
             nb_batch = int(np.ceil(n / batch_size))
             for _ in range(nb_batch):
-                self.start_episode(train_episode=False) # Selects agents at random if necessary
+                self.start_episode(train_episode=False)
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
 
@@ -536,10 +536,13 @@ class AliceBob(Game):
             tree_depth_ratio = (full_tree.get_depth() / sum_conceptual_depth)
             log('decision_tree/depth_ratio', tree_depth_ratio)
 
-    # TODO À quoi sert cette méthode ? (Ici, ça me semble assez naturel, mais l'équivalent dans AliceBobPopulation pourrait porter à confusion.)
     @property
-    def agents(self):
-        return self.sender, self.receiver
+    def all_agents(self):
+        return (self.sender, self.receiver)
+    
+    @property
+    def current_agents(self):
+        return self.all_agents
 
     @property
     def optim(self):
@@ -550,22 +553,15 @@ class AliceBob(Game):
         return self._logger
 
     @classmethod
-    def load(cls, path, args, _old_model=False):
-        checkpoint = torch.load(path, map_location=args.device)
+    def load(cls, path, args):
         instance = cls(args)
-        if _old_model:
-            sender_state_dict = {
-                k[len('sender.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('sender.')
-            }
-            instance.sender.load_state_dict(sender_state_dict)
-            receiver_state_dict = {
-                k[len('receiver.'):]:checkpoint[k] for k in checkpoint.keys() if k.startswith('receiver.')
-            }
-            instance.receiver.load_state_dict(receiver_state_dict)
-        else:
-            for agent, state_dict in zip(instance.agents, checkpoint['agents_state_dicts']):
-                agent.load_state_dict(state_dict)
+        
+        checkpoint = torch.load(path, map_location=args.device)
+        for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
+            agent.load_state_dict(state_dict)
+            
             instance._optim = checkpoint['optims'][0]
+        
         return instance
 
     def agents_for_CNN_pretraining(self):
