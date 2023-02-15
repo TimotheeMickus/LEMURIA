@@ -11,7 +11,7 @@ import random
 import time
 
 from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.misc import show_imgs, max_normalize_, to_color, pointing, add_normal_noise, build_optimizer, compute_entropy_stats
+from ..utils.misc import show_imgs, max_normalize_, to_color, add_normal_noise, build_optimizer, compute_entropy_stats
 from ..utils import misc
 
 from ..eval import compute_correlation
@@ -108,6 +108,7 @@ class AliceBob(Game):
 
         return sender_outcome, receiver_outcome
 
+    # batch: Batch
     def compute_interaction(self, batch):
         sender_outcome, receiver_outcome = self(batch)
 
@@ -118,22 +119,28 @@ class AliceBob(Game):
         receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
         loss = sender_loss + receiver_loss
+        losses = [(self.optim, loss)]
 
         rewards, successes = sender_rewards, sender_successes
         avg_msg_length = sender_outcome.action[1].float().mean().item()
 
-        return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+        return losses, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
-    def compute_sender_rewards(self, sender_action, receiver_scores):
+    # sender_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
+    # receiver_scores: tensor of shape (batch size, nb img)
+    # contenders: None or a list[int] containing the indices of the contending images
+    def compute_sender_rewards(self, sender_action, receiver_scores, target_idx=0, contenders=None):
         """
             returns the reward as well as the success for each element of a batch
         """
-        # Generates a probability distribution from the scores and sample an action
-        receiver_pointing = pointing(receiver_scores)
+        if(contenders is None): img_scores = receiver_scores
+        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
 
-        # By design, the target is the first image
-        if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
-        else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
+        # Generates a probability distribution from the scores and point at an image.
+        receiver_pointing = misc.pointing(img_scores)
+
+        if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, target_idx].detach()
+        else: successes = (receiver_pointing['action'] == target_idx).float()
 
         rewards = successes.clone()
 
@@ -148,6 +155,7 @@ class AliceBob(Game):
 
         return (rewards, successes)
 
+    # receiver_scores: tensor of shape (batch size, nb img)
     def compute_sender_loss(self, sender_outcome, receiver_scores):
         (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores)
         log_prob = sender_outcome.log_prob.sum(dim=1)
@@ -162,20 +170,25 @@ class AliceBob(Game):
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
         loss += reinforce_loss
 
-        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Entropy loss; could be normalised (divided) by (base_alphabet_size + 1)
+        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Entropy penalty; could be normalised (divided) by (base_alphabet_size + 1)
         loss += entropy_loss
 
         return (loss, successes, rewards)
 
-    def compute_receiver_loss(self, receiver_scores, return_entropy=False):
-        receiver_pointing = pointing(receiver_scores) # The sampled action is not the same as the one in `sender_rewards` but it probably does not matter
+    # receiver_scores: tensor of shape (batch size, nb img)
+    # contenders: None or a list[int] containing the indices of the contending images
+    def compute_receiver_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
+        if(contenders is None): img_scores = receiver_scores
+        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
+        
+        # Generates a probability distribution from the scores and point at an image.
+        receiver_pointing = misc.pointing(img_scores)
 
-        # By design, the target is the first image
         if(self.use_expectation):
-            successes = receiver_pointing['dist'].probs[:, 0].detach()
-            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(0).to(receiver_scores.device))
-        else: # Plays dice
-            successes = (receiver_pointing['action'] == 0).float()
+            successes = receiver_pointing['dist'].probs[:, target_idx].detach()
+            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(target_idx).to(img_scores.device))
+        else:
+            successes = (receiver_pointing['action'] == target_idx).float()
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action'])
 
         rewards = successes.clone()
@@ -187,7 +200,7 @@ class AliceBob(Game):
             self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
         else: r_baseline = 0.0
 
-        reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
+        reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
         loss += reinforce_loss
 
         entropy_loss = -(self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
@@ -204,7 +217,7 @@ class AliceBob(Game):
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
-        # We try to visit each pair of categories on average 8 times
+        # We try to visit each pair of categories on average 8 times.
         batch_size = 256
         max_datapoints = 32768 # (2^15)
         n = (8 * (data_iterator.nb_categories**2))
@@ -227,7 +240,7 @@ class AliceBob(Game):
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
                 sender_outcome, receiver_outcome = self(batch)
 
-                receiver_pointing = pointing(receiver_outcome.scores, argmax=True)
+                receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
                 success.append((receiver_pointing['action'] == 0).float())
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
 

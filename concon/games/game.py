@@ -43,6 +43,7 @@ class Game(metaclass=ABCMeta):
 
         return self
 
+    # TODO remplacer ça par une liste d'optimiseurs
     @property
     @abstractmethod
     def optim(self):
@@ -125,23 +126,25 @@ class Game(metaclass=ABCMeta):
             end_i = (start_i + steps_per_epoch)
             for iter_index in range(start_i, end_i):
                 self.start_episode()
-                self.optim.zero_grad()
 
                 batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
                 
-                loss, *external_output = self.compute_interaction(batch)
+                losses, *external_output = self.compute_interaction(batch)
 
-                loss.backward() # Backpropagation
+                for optim, loss in losses:
+                    optim.zero_grad()
 
-                # Gradient clipping and scaling
-                if(self.grad_clipping > 0):
-                    for agent in self.current_agents:
-                        torch.nn.utils.clip_grad_value_(agent.parameters(), self.grad_clipping)
-                if(self.grad_scaling > 0):
-                    for agent in self.current_agents:
-                        torch.nn.utils.clip_grad_norm_(agent.parameters(), self.grad_scaling)
+                    loss.backward() # Backpropagation
 
-                self.optim.step()
+                    # Gradient clipping and scaling
+                    if(self.grad_clipping > 0):
+                        for group in optim.param_groups: torch.nn.utils.clip_grad_value_(group["params"], self.grad_clipping)
+                        #for agent in self.current_agents: torch.nn.utils.clip_grad_value_(agent.parameters(), self.grad_clipping)
+                    if(self.grad_scaling > 0):
+                        for group in optim.param_groups: torch.nn.utils.clip_grad_norm_(group["params"], self.grad_scaling)
+                        #for agent in self.current_agents: torch.nn.utils.clip_grad_norm_(agent.parameters(), self.grad_scaling)
+
+                    optim.step()
 
                 udpated_state = self.autologger.update(
                     loss, *external_output,

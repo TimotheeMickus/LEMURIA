@@ -32,24 +32,23 @@ class Receiver(Agent):
     def forward(self, images, message, length):
         return self.aux_forward(images, self.encode_message(message, length))
 
+    # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
+    # encoded_messages: tensor of shape (batch size, hidden size)
     def aux_forward(self, images, encoded_message):
         """
             Forward propagation.
             Input:
                 `images`, of shape [args.batch_size x K x *IMG_SHAPE], where the first of each K image is the target
-                `message`, of shape [args.batch_size x (<=MSG_LEN)], message produced by sender
-                `length`, of shape [args.batch_size x 1], length of message produced by sender
             Output:
                 `Outcome` containing action taken, entropy, log prob, dist and scores.
         """
 
         # Encodes the images.
-        original_size = images.size()[:2] #dim 1 & 2 give batch size & K (TODO Je ne comprends pas ce commentaire.)
-        encoded_images = self.image_encoder(images.view(-1, *images.size()[2:])) # Shape: (TODO)
-        encoded_images = encoded_images.view(*original_size, -1) # Shape: (TODO)
+        encoded_images = self.image_encoder(images.view(-1, *images.shape[2:])) # Shape: ((batch size * nb img), hidden size)
+        encoded_images = encoded_images.view(images.shape[0], images.shape[1], -1) # Shape: (batch size, nb image, hidden size)
 
         # Scores the targets.
-        scores = torch.bmm(encoded_images, encoded_message).squeeze(-1) # Shape: (TODO)
+        scores = torch.bmm(encoded_images, encoded_message).squeeze(-1) # Shape: (batch size, nb img)
 
         outcome = Outcome(scores=scores)
 
