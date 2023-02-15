@@ -120,8 +120,8 @@ class AliceBob(Game):
             pbar_items={'S': successes.mean().item()},
             summary_items={
                 'train/loss': loss.mean().item(),
-                'train/sender_loss': sender_loss.mean.item(),
-                'train/receiver_loss': receiver_loss.mean.item(),
+                'train/sender_loss': sender_loss.mean().item(),
+                'train/receiver_loss': receiver_loss.mean().item(),
                 'train/rewards': rewards,
                 'train/success':  successes.mean().item(),
                 'train/msg_length': avg_msg_length,
