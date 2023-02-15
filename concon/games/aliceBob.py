@@ -286,7 +286,7 @@ class AliceBob(Game):
         if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
         else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
 
-        # The base reward is the success (0 or 1).
+        # The base reward is the success (between 0 and 1).
         rewards = successes.clone()
 
         msg_lengths = sender_action[1].view(-1).float()
