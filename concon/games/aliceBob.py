@@ -85,7 +85,7 @@ class AliceBob(Game):
         successes = successes.detach()
         # compute suclengthcess, weighted by the likelihood of stopping at step t
         lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
-        avg_msg_length = lengths.sum(1).mean().item()
+        msg_length = lengths.sum(1)
 
         logging_data = LoggingData(
             number_ex_seen=batch.size,
@@ -93,7 +93,7 @@ class AliceBob(Game):
             summary_items={
                 'train/loss': loss.mean().item(),
                 'train/success':  successes.mean().item(),
-                'train/msg_length': avg_msg_length,
+                'train/msg_length': msg_length.mean().item(),
             }
         )
         return loss, logging_data
@@ -113,7 +113,7 @@ class AliceBob(Game):
         loss = sender_loss + receiver_loss
 
         rewards, successes = sender_rewards, sender_successes
-        avg_msg_length = sender_outcome.action[1].float().mean().item()
+        msg_length = sender_outcome.action[1].float()
 
         logging_data = LoggingData(
             number_ex_seen=batch.size,
@@ -122,9 +122,9 @@ class AliceBob(Game):
                 'train/loss': loss.mean().item(),
                 'train/sender_loss': sender_loss.mean().item(),
                 'train/receiver_loss': receiver_loss.mean().item(),
-                'train/rewards': rewards,
+                'train/rewards': rewards.mean().item(),
                 'train/success':  successes.mean().item(),
-                'train/msg_length': avg_msg_length,
+                'train/msg_length': msg_length.mean().item(),
                 'train/sender_entropy': sender_outcome.entropy.mean().item(),
                 'train/receiver_entropy': receiver_entropy.item(),
             }
