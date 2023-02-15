@@ -226,7 +226,7 @@ class AliceBobCharlie(AliceBob):
         successes = successes.detach()
         # compute suclengthcess, weighted by the likelihood of stopping at step t
         lengths = (torch.arange(1, prob_continues.size(1)+1).to(prob_last_step.device) * prob_last_step)
-        avg_msg_length = lengths.sum(1).mean().item()
+        msg_length = lengths.sum(1)
 
         short_label, prefix = self.get_label_and_prefix()
         logging_data = LoggingData(
@@ -235,32 +235,35 @@ class AliceBobCharlie(AliceBob):
             summary_items={
                 prefix + 'train/loss': loss.mean().item(),
                 prefix + 'train/success':  successes.mean().item(),
-                prefix + 'train/msg_length': avg_msg_length,
+                prefix + 'train/msg_length': msg_length.mean().item(),
             }
         )
         return loss, logging_data
 
     def compute_interaction_charlie(self, batch):
-        if self.is_gumbel and self.trained_agent == 'Alice':
+        if(self.is_gumbel and (self.trained_agent == 'Alice')):
             return self._compute_interaction_charlie_gumbel(batch)
+
         sender, receiver, drawer = self.agents
+        
         # send
         sender_outcome = sender(self._alice_input(batch))
 
         # adversarial step
         drawer_outcome = drawer(*sender_outcome.action)
         deterministic = sender_outcome.action[2]
+        
         # receive
         receiver_outcome = receiver(self._charlied_bob_input(batch, drawer_outcome.image, deterministic), *sender_outcome.action)
 
-        if not self.is_gumbel:
-            receiver_loss = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+        if(not self.is_gumbel):
+            receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
             # training only Charlie for now
             loss = receiver_loss
             (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
             rewards, successes = sender_rewards, sender_successes
-            avg_msg_length = sender_outcome.action[1].float().mean().item()
+            msg_length = sender_outcome.action[1].float()
 
             short_label, prefix = self.get_label_and_prefix()
             logging_data = LoggingData(
@@ -268,17 +271,17 @@ class AliceBobCharlie(AliceBob):
                 pbar_items={short_label: successes.mean().item()},
                 summary_items={
                     prefix + 'train/loss': loss.mean().item(),
-                    prefix + 'train/sender_loss': sender_loss.mean.item(),
-                    prefix + 'train/receiver_loss': receiver_loss.mean.item(),
-                    prefix + 'train/rewards': rewards,
+                    prefix + 'train/sender_loss': sender_loss.mean().item(),
+                    prefix + 'train/receiver_loss': receiver_loss.mean().item(),
+                    prefix + 'train/rewards': rewards, # TODO Not rewards.mean().item()?
                     prefix + 'train/success':  successes.mean().item(),
-                    prefix + 'train/msg_length': avg_msg_length,
+                    prefix + 'train/msg_length': msg_length.mean().item(),
                     prefix + 'train/sender_entropy': sender_outcome.entropy.mean().item(),
                     prefix + 'train/receiver_entropy': receiver_entropy.item(),
                 }
             )
-            return loss, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
 
+            return loss, logging_data
         else:
             probs = F.log_softmax(receiver_outcome.scores, dim=-1)
             targets = torch.zeros(probs.size(0), dtype=torch.long).to(probs.device)
@@ -314,6 +317,7 @@ class AliceBobCharlie(AliceBob):
                     'Charlie-train/success': charlie_success,
                 }
             )
+
             return loss, logging_data
 
     def get_images(self, batch):
@@ -389,8 +393,6 @@ class AliceBobCharlie(AliceBob):
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
                 all_probs.append(receiver_pointing['dist'].probs)
                 charlie_success.append((receiver_pointing['action'] == 2).float())
-
-
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
