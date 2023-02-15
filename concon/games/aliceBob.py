@@ -129,6 +129,7 @@ class AliceBob(Game):
                 'train/receiver_entropy': receiver_entropy.item(),
             }
         )
+
         return loss, logging_data
 
     def to(self, *vargs, **kwargs):
