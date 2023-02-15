@@ -1,3 +1,4 @@
+import numpy as np
 
 from .game import Game
 
@@ -28,10 +29,11 @@ class AliceBobCharlie(Game):
             self.sender = Sender.from_args(args)
             self.receiver = Receiver.from_args(args)
             self.drawer = Drawer.from_args(args)
-            
-            parameters = it.chain(self.sender.parameters(), self.receiver.parameters(), self.drawer.parameters())
 
-        self._optim = build_optimizer(parameters, args.learning_rate)
+        # TODO Using different learning rates would probably prove beneficial.
+        self._optim_sender = build_optimizer(self.sender.parameters(), args.learning_rate)
+        self._optim_receiver = build_optimizer(self.receiver.parameters(), args.learning_rate)
+        self._optim_drawer = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
         self.success_rate_trackers = {
             'sender': misc.Averager(12800),
@@ -42,8 +44,6 @@ class AliceBobCharlie(Game):
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the loss will take into account the "baseline term", into the average recent reward.
             self._sender_avg_reward = misc.Averager(size=12800)
-            self._receiver_avg_reward = misc.Averager(size=12800)
-            self._drawer_avg_reward = misc.Averager(size=12800)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
@@ -93,3 +93,47 @@ class AliceBobCharlie(Game):
 
         return sender_outcome, drawer_outcome, receiver_outcome
 
+    # Overrides AliceBob.compute_interaction.
+    def compute_interaction(self, batch):
+        (sender_outcome, drawer_outcome receiver_outcome) = self(batch)
+
+        # Alice's part.
+        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contenders=[0, 1])
+
+        # Bob's part.
+        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+
+        # Charlie's part.
+        drawer_loss = self.compute_drawer_loss(receiver_outcome.scores, contenders=[2, 0])
+
+        optimizers = [self._optim_sender, self._optim_receiver, self._optim_drawer]
+        losses = [sender_loss, receiver_loss, drawer_loss]
+        scores = np.array([self.success_rate_trackers[role] for role in ["sender", "receiver", "drawer"]])
+        temperature = 1.0
+        if(temperature != 0.0):
+            weights = scipy.special.softmax(scores / temperature) # Shape: (3)
+
+            losses = [(o, (w * l)) for (o, w, l) in zip(optimizers, weights, losses)]
+        else:
+            i = np.argmax(weights)
+            losses = [(optimizers[i], losses[i])]
+        
+        # TODO
+
+        rewards, successes = sender_rewards, sender_successes
+        avg_msg_length = sender_outcome.action[1].float().mean().item()
+
+        return losses, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+    
+    # receiver_scores: tensor of shape (batch size, nb img)
+    # contenders: None or a list[int] containing the indices of the contending images
+    def compute_drawer_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
+        if(contenders is None): img_scores = receiver_scores
+        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
+        
+        # Generates a probability distribution from the scores and point at an image.
+        receiver_pointing = misc.pointing(img_scores)
+        
+        loss = -receiver_pointing['dist'].log_prob(torch.tensor(target_idx).to(img_scores.device))
+
+        return loss
