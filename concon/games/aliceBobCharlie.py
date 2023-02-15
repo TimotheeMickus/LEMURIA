@@ -104,7 +104,8 @@ class AliceBobCharlie(AliceBob):
 
     def start_episode(self, train_episode=True):
         super().start_episode(train_episode=train_episode)
-        self.switch_trained_agent()
+
+        if(train_episode): self.switch_trained_agent()
         #
         # if train_episode:
         #     if((self._n_batches_seen % self._n_batches_cycle) == 0):
