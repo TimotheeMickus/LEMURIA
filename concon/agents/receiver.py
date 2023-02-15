@@ -11,7 +11,7 @@ from ..utils.modules import MessageEncoder, build_cnn_encoder_from_args
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["scores"])
 
-# Scores images according to a message
+# Scores images according to a message.
 class Receiver(Agent):
     """
     Defines a receiver policy.
@@ -43,15 +43,16 @@ class Receiver(Agent):
                 `Outcome` containing action taken, entropy, log prob, dist and scores.
         """
 
-        # Encodes the images
+        # Encodes the images.
         original_size = images.size()[:2] #dim 1 & 2 give batch size & K (TODO Je ne comprends pas ce commentaire.)
-        encoded_images = self.image_encoder(images.view(-1, *images.size()[2:]))
-        encoded_images = encoded_images.view(*original_size, -1)
+        encoded_images = self.image_encoder(images.view(-1, *images.size()[2:])) # Shape: (TODO)
+        encoded_images = encoded_images.view(*original_size, -1) # Shape: (TODO)
 
-        # Scores the targets
-        scores = torch.bmm(encoded_images, encoded_message).squeeze(-1)
+        # Scores the targets.
+        scores = torch.bmm(encoded_images, encoded_message).squeeze(-1) # Shape: (TODO)
 
         outcome = Outcome(scores=scores)
+
         return outcome
     
     # Randomly reinitializes the parameters of the agent. (and also the requires_grad properties)

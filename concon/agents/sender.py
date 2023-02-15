@@ -1,6 +1,7 @@
+from collections import namedtuple
+
 import torch
 import torch.nn as nn
-from collections import namedtuple
 
 from .agent import Agent
 from ..utils.modules import MessageDecoder, build_cnn_encoder_from_args
@@ -8,7 +9,7 @@ from ..utils.modules import MessageDecoder, build_cnn_encoder_from_args
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 
-# Image -(vector)-> message
+# Produces a message based on an image.
 class Sender(Agent):
     def __init__(self, image_encoder, message_decoder, args, has_shared_param):
         super(Agent, self).__init__()
@@ -29,10 +30,13 @@ class Sender(Agent):
         """
         encoded_image = self.image_encoder(image)
         outputs = self.message_decoder(encoded_image)
+
         outcome = Outcome(
             entropy=outputs["entropy"],
             log_prob=outputs["log_probs"],
-            action=(outputs["message"], outputs["message_len"]))
+            action=(outputs["message"], outputs["message_len"])
+        )
+
         return outcome
     
     # Randomly reinitializes the parameters of the agent. (and also the requires_grad properties)

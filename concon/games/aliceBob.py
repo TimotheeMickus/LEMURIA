@@ -84,19 +84,21 @@ class AliceBob(Game):
         if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
         return [self.sender, self.receiver]
 
+    # batch: Batch
     def _alice_input(self, batch):
         return batch.original_img(stack=True)
 
+    # batch: Batch
     def _bob_input(self, batch):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
 
     def __call__(self, batch):
         """
         Input:
-            `batch` is a Batch (a kind of named tuple); 'original_img' and 'target_img' are tensors of shape [args.batch_size, *IMG_SHAPE] and 'base_distractors' is a tensor of shape [args.batch_size, 2, *IMG_SHAPE]
+            batch: Batch
         Output:
-            `sender_outcome`, sender.Outcome
-            `receiver_outcome`, receiver.Outcome
+            sender_outcome: sender.Outcome
+            receiver_outcome: receiver.Outcome
         """
         sender = self.get_sender()
         receiver = self.get_receiver()

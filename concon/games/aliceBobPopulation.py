@@ -76,7 +76,6 @@ class AliceBobPopulation(AliceBob):
 
     @property
     def all_agents(self):
-        """Defines the property self.agents"""
         return self._agents
 
     @property

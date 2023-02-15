@@ -19,32 +19,36 @@ class Averager:
         assert (buffer_size > size)
         self._buffer = np.empty(buffer_size, dtype=dtype)
 
-        self._i = 0
+        self._i = 0 # Position in the buffer where the next value should be added.
 
+    # Adds a batch of values.
+    # xs: Numpy array
     def update_batch(self, xs):
-        if(xs.size < self.size): # Usual case: `xs` of size lower than `size`
-           if((self._i + xs.size) < self._buffer.size): # Most of the time case: adding `xs` would not fill the buffer entirely
+        if(xs.size < self.size): # Usual case: `xs` of size strictly lower than `size`.
+           if((self._i + xs.size) < self._buffer.size): # Most of the time case: adding `xs` would not fill the buffer entirely.
                 self._buffer[self._i:(self._i + xs.size)] = xs
                 self._i += xs.size
-           else: # Sometime case: adding `xs` would fill the buffer entirely
-                j = (self.size - xs.size)
+           else: # Sometime case: adding `xs` would fill the buffer entirely.
+                j = (self.size - xs.size) # The number of values already in the buffer that should be kept.
                 self._buffer[:j] = self._buffer[(self._i - j):self._i]
                 self._buffer[j:self.size] = xs
                 self._i = self.size
-        else: # Unusual case: `xs` of size higher than `size`
+        else: # Unusual case: `xs` of size higher than `size`.
             self._buffer[:self.size] = xs[-self.size:]
             self._i = self.size
 
+    # Adds a single value.
+    # x: numeral
     def update(self, x):
         self._buffer[self._i] = x
         self._i += 1
 
-        if(self._i == self._buffer.size): # The buffer is full
+        if(self._i == self._buffer.size): # If the buffer is full.
             self._buffer[:self.size] = self._buffer[-self.size:]
             self._i = self.size
 
     def get(self, default=None):
-        l = min(self._i, self.size) # The number of values to consider might be smaller than `size` at the beginning
+        l = min(self._i, self.size) # The number of values to consider. This might be smaller than `size` at first.
         if(l == 0): return default
 
         return self._buffer[(self._i-l):self._i].mean()

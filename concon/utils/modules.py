@@ -53,7 +53,6 @@ class MessageEncoder(nn.Module):
         super(MessageEncoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
-
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
 
     def forward(self, message, length):
@@ -176,23 +175,17 @@ class MessageDecoder(nn.Module):
             max_msg_len=args.max_len,
             symbol_embeddings=symbol_embeddings,)
 
-# vector -> vector + random noise
-class Randomizer(nn.Module):
+# Adds noise to vectors.
+class NoiseAdder(nn.Module):
     def __init__(self, input_dim, random_dim):
-        super(Randomizer, self).__init__()
-        self.merging_projection = nn.Linear(input_dim + random_dim, input_dim)
-        self.random_dim = random_dim
-        self.input_dim = input_dim
+        super(NoiseAdder, self).__init__()
 
-    def forward(self, input_vector):
-        """
-        Input:
-            `input_vector` of dimension [BATCH x self.input_dim]
-        """
-        noise = torch.randn(input_vector.size(0), self.random_dim, device=input_vector.device)
-        input_with_noise = torch.cat([input_vector, noise], dim=1)
-        merged_input = self.merging_projection(input_with_noise)
-        return merged_input
+    # input: tensor of any shape
+    # output: tensor of the same shape
+    def forward(self, input):
+        noise = torch.randn_like(input, device=input.device)
+
+        return (input + noise)
 
     @classmethod
     def from_args(cls, args):
