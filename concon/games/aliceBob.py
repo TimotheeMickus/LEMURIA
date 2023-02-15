@@ -286,11 +286,13 @@ class AliceBob(Game):
         if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, 0].detach()
         else: successes = (receiver_pointing['action'] == 0).float() # Plays dice
 
+        # The base reward is the success (0 or 1).
         rewards = successes.clone()
 
         msg_lengths = sender_action[1].view(-1).float()
-
-        rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
+        
+        # -1 reward anytime we reach the message length limit.
+        rewards += -1 * (msg_lengths >= self.max_len_msg) 
 
         if(self.penalty > 0.0):
             length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
