@@ -130,7 +130,7 @@ def pointing(scores, argmax=False):
     return {'dist': dist, 'action': action}
 
 def add_normal_noise(t, std_dev, clamp_values=None):
-    tmp = (t + (std_dev * torch.randn(size=t.shape)))
+    tmp = (t + (std_dev * torch.randn_like(t)))
 
     if(clamp_values is not None):
         clamp_min, clamp_max = clamp_values
