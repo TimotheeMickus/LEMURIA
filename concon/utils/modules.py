@@ -177,7 +177,7 @@ class MessageDecoder(nn.Module):
 
 # Adds noise to vectors.
 class NoiseAdder(nn.Module):
-    def __init__(self, input_dim, random_dim):
+    def __init__(self):
         super(NoiseAdder, self).__init__()
 
     # input: tensor of any shape
@@ -189,7 +189,7 @@ class NoiseAdder(nn.Module):
 
     @classmethod
     def from_args(cls, args):
-        return cls(input_dim=args.hidden_size, random_dim=args.hidden_size)
+        return cls()
 
 # output: torch.nn.Module
 def _dcgan_tuto_cnn(hidden_size):

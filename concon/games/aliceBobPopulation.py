@@ -82,6 +82,7 @@ class AliceBobPopulation(AliceBob):
     def current_agents(self):
         return (self._sender, self._receiver)
 
+    # Overrides AliceBob.agents_for_CNN_pretraining.
     def agents_for_CNN_pretraining(self):
         if(self.shared): raise NotImplementedError
         return self.all_agents

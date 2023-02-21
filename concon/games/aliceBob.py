@@ -3,9 +3,8 @@ import torch.nn as nn
 import numpy as np
 import scipy
 import itertools as it
-import tqdm
-from datetime import datetime
 
+import tqdm
 from collections import defaultdict
 import random
 import time
@@ -21,6 +20,7 @@ from .game import Game
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
+# They are currently both trained with REINFORCE.
 class AliceBob(Game):
     def __init__(self, args, logger):
         self._logger = logger
@@ -51,7 +51,7 @@ class AliceBob(Game):
         self._optim = build_optimizer(parameters, args.learning_rate)
         
         self.use_baseline = args.use_baseline
-        if(self.use_baseline): # In that case, the loss will take into account the "baseline term", into the average recent reward.
+        if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
             # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
@@ -157,8 +157,8 @@ class AliceBob(Game):
     # receiver_scores: tensor of shape (batch size, nb img)
     # contenders: None or a list[int] containing the indices of the contending images
     def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contenders=None):
-        if(contenders is None): img_scores = receiver_scores
-        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
+        if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
+        else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders], dim=1) # Shape: (batch size, len(contenders))
 
         (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensor of shape (batch size).
 
@@ -183,8 +183,8 @@ class AliceBob(Game):
     # receiver_scores: tensor of shape (batch size, nb img)
     # contenders: None or a list[int] containing the indices of the contending images
     def compute_receiver_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
-        if(contenders is None): img_scores = receiver_scores
-        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
+        if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
+        else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders], dim=1) # Shape: (batch size, len(contenders))
         
         # Generates a probability distribution from the scores and point at an image.
         receiver_pointing = misc.pointing(img_scores)

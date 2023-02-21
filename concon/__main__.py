@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from .games import AliceBob, AliceBobPopulation
+from .games import AliceBob, AliceBobPopulation, AliceBobCharlie
 from .utils.data import get_data_loader
 from .utils.opts import get_args
 from .utils.misc import build_optimizer, get_default_fn, path_replace
@@ -36,14 +36,17 @@ def train(args):
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
         
-        if(args.population is not None): model = AliceBobPopulation(args, autologger)
+        if(args.charlie):
+            assert (args.population is None) # NotImplementedFeature
+            model = AliceBobCharlie(args, autologger)
+        elif(args.population is not None): model = AliceBobPopulation(args, autologger)
         else: model = AliceBob(args, autologger)
         model = model.to(args.device)
 
-        if args.detect_anomaly:
+        if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)
 
-        if args.pretrain_CNNs:
+        if(args.pretrain_CNNs):
             print(("[%s] pretraining start…" % datetime.now()), flush=True)
 
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)

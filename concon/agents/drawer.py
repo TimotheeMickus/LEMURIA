@@ -47,10 +47,10 @@ class Drawer(Agent):
     # The optional argument is specified when TODO
     @classmethod
     def from_args(cls, args, message_encoder=None):
-        has_shared_param = (messages_encoder is not None)
+        has_shared_param = (message_encoder is not None)
         
         if message_encoder is None: message_encoder = MessageEncoder.from_args(args)
-        middle_nn = torch.Sequential(NoiseAdder, nn.Linear(args.hidden_size, args.hidden_size))
+        middle_nn = nn.Sequential(NoiseAdder.from_args(args), nn.Linear(args.hidden_size, args.hidden_size))
         image_decoder = build_cnn_decoder_from_args(args)
         
         return cls(message_encoder, middle_nn, image_decoder, args, has_shared_param)
