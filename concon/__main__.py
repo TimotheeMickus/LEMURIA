@@ -36,10 +36,9 @@ def train(args):
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
         
-        elif(args.population is not None): model = AliceBobPopulation(args, autologger)
+        if(args.population is not None): model = AliceBobPopulation(args, autologger)
         else: model = AliceBob(args, autologger)
         model = model.to(args.device)
-
 
         if args.detect_anomaly:
             torch.autograd.set_detect_anomaly(True)
