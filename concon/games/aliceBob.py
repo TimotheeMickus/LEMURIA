@@ -114,6 +114,7 @@ class AliceBob(Game):
 
         # Alice's part
         (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
+        sender_entropy = sender_outcome.entropy.mean()
 
         # Bob's part
         receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
@@ -122,42 +123,45 @@ class AliceBob(Game):
         losses = [(self.optim, loss)]
 
         rewards, successes = sender_rewards, sender_successes
-        avg_msg_length = sender_outcome.action[1].float().mean().item()
+        msg_length = sender_outcome.action[1].float().mean()
 
-        return losses, rewards, successes, avg_msg_length, sender_outcome.entropy.mean(), receiver_entropy
+        return losses, rewards, successes, msg_length, sender_entropy, receiver_entropy
 
+    # Returns two tensors of shape (batch size).
     # sender_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
-    # receiver_scores: tensor of shape (batch size, nb img)
-    # contenders: None or a list[int] containing the indices of the contending images
-    def compute_sender_rewards(self, sender_action, receiver_scores, target_idx=0, contenders=None):
+    # img_scores: tensor of shape (batch size, nb img)
+    def compute_sender_rewards(self, sender_action, img_scores, target_idx):
         """
             returns the reward as well as the success for each element of a batch
         """
-        if(contenders is None): img_scores = receiver_scores
-        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
-
         # Generates a probability distribution from the scores and point at an image.
         receiver_pointing = misc.pointing(img_scores)
 
-        if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, target_idx].detach()
-        else: successes = (receiver_pointing['action'] == target_idx).float()
+        if(self.use_expectation): successes = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
+        else: successes = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
 
-        rewards = successes.clone()
+        rewards = successes.clone() # Shape: (batch size)
 
-        msg_lengths = sender_action[1].view(-1).float()
+        msg_lengths = sender_action[1].view(-1).float() # Shape: (batch size)
 
         rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
 
         if(self.penalty > 0.0):
             length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
 
-            rewards = (rewards - length_penalties)
+            rewards = (rewards - length_penalties) # Shape: (batch size)
 
         return (rewards, successes)
 
+    # Returns a scalar tensor and two tensors of shape (batch size).
     # receiver_scores: tensor of shape (batch size, nb img)
-    def compute_sender_loss(self, sender_outcome, receiver_scores):
-        (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, receiver_scores)
+    # contenders: None or a list[int] containing the indices of the contending images
+    def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contenders=None):
+        if(contenders is None): img_scores = receiver_scores
+        else: img_scores = torch.tensor([receiver_scores[i] for i in contenders], device=receiver_scores.device)
+
+        (rewards, successes) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensor of shape (batch size).
+
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
         loss = torch.tensor(0.0).to(log_prob.device)
@@ -175,6 +179,7 @@ class AliceBob(Game):
 
         return (loss, successes, rewards)
 
+    # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
     # receiver_scores: tensor of shape (batch size, nb img)
     # contenders: None or a list[int] containing the indices of the contending images
     def compute_receiver_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
@@ -203,10 +208,12 @@ class AliceBob(Game):
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
         loss += reinforce_loss
 
-        entropy_loss = -(self.beta_receiver * receiver_pointing['dist'].entropy().mean()) # Entropy penalty
+        entropy = receiver_pointing['dist'].entropy().mean() # Shape: ()
+
+        entropy_loss = -(self.beta_receiver * entropy) # Entropy penalty
         loss += entropy_loss
 
-        if return_entropy: return (loss, receiver_pointing['dist'].entropy().mean())
+        if return_entropy: return (loss, entropy)
         return loss
 
     def evaluate(self, data_iterator, epoch):

@@ -204,11 +204,11 @@ class AutoLogger(object):
 
 
     def update(self, loss, *external_output, **supplementary_info):
-        rewards, successes, avg_msg_length, sender_entropy, receiver_entropy, *external_output = external_output
+        rewards, successes, msg_length, sender_entropy, receiver_entropy, *external_output = external_output
 
         # Computes the minimum length the messages can have in order to get perfect accuracy (approximation when the size of the alphabet >> 1)
         minimal_compression_len = np.log(self.data_loader.nb_categories) / np.log(self.base_alphabet_size + 1) # + 1 because EoM is taken into account
-        length_ratio = (avg_msg_length / minimal_compression_len)
+        length_ratio = (msg_length / minimal_compression_len).item()
 
         # updates running average reward
         self._state['total_reward'] += rewards.sum().item()
@@ -229,7 +229,7 @@ class AutoLogger(object):
             self._write('train/sender_entropy', sender_entropy.item(), number_ex_seen)
             self._write('train/receiver_entropy', receiver_entropy.item(), number_ex_seen)
 
-            self._write('llp/msg_length', avg_msg_length, number_ex_seen)
+            self._write('llp/msg_length', msg_length.item(), number_ex_seen)
             self._write('llp/length_ratio', length_ratio, number_ex_seen)
 
             if self.log_lang_progress:

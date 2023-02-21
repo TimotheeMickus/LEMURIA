@@ -32,9 +32,9 @@ class Sender(Agent):
         outputs = self.message_decoder(encoded_image)
 
         outcome = Outcome(
-            entropy=outputs["entropy"],
-            log_prob=outputs["log_probs"],
-            action=(outputs["message"], outputs["message_len"])
+            entropy=outputs["entropy"], # Shape: (batch size, 1)
+            log_prob=outputs["log_probs"], # Shape: (batch, max msg length)
+            action=(outputs["message"], outputs["message_len"]) # A list[list[Int]] and a tensor of shape (batch size, 1)
         )
 
         return outcome
