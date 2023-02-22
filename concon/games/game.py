@@ -122,20 +122,21 @@ class Game(metaclass=ABCMeta):
 
         self.start_epoch(data_iterator, event_writer)
         with self.autologger:
-            start_i = (epoch * steps_per_epoch)
-            end_i = (start_i + steps_per_epoch)
-            for iter_index in range(start_i, end_i):
+            start_index = (epoch * steps_per_epoch)
+            end_index = (start_index + steps_per_epoch)
+            for iter_index in range(start_index, end_index):
                 self.start_episode()
 
                 batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
                 
                 losses, *external_output = self.compute_interaction(batch)
 
-                for optim, loss in losses:
-                    optim.zero_grad()
+                for i, (optim, loss) in enumerate(losses):
+                    parameters = []
+                    for group in optim.param_groups: parameters.extend(group["params"])
+                    loss.backward(retain_graph=(i != len(losses)), inputs=parameters) # Backpropagation
 
-                    loss.backward() # Backpropagation
-
+                for (optim, _) in losses:
                     # Gradient clipping and scaling
                     if(self.grad_clipping > 0):
                         for group in optim.param_groups: torch.nn.utils.clip_grad_value_(group["params"], self.grad_clipping)
@@ -143,9 +144,11 @@ class Game(metaclass=ABCMeta):
                     if(self.grad_scaling > 0):
                         for group in optim.param_groups: torch.nn.utils.clip_grad_norm_(group["params"], self.grad_scaling)
                         #for agent in self.current_agents: torch.nn.utils.clip_grad_norm_(agent.parameters(), self.grad_scaling)
+                    
+                    optim.step() # Parameters update. Should not be performed until all gradients have been computed.
+                    optim.zero_grad() # Reinitialization of the gradient buffers.
 
-                    optim.step()
-
+                # TODO This needs an update.
                 udpated_state = self.autologger.update(
                     loss, *external_output,
                     parameters=(p for a in self.all_agents for p in a.parameters()), # TODO `self.all_agents` or `self.current_agents`?
