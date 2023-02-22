@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import scipy
 
 from .game import Game
 from .aliceBob import AliceBob
@@ -40,7 +41,7 @@ class AliceBobCharlie(AliceBob):
         self._optim_receiver = build_optimizer(self.receiver.parameters(), args.learning_rate)
         self._optim_drawer = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
-        self.success_rate_trackers = {
+        self.score_trackers = {
             'sender': misc.Averager(12800),
             'receiver': misc.Averager(12800),
             'drawer': misc.Averager(12800),
@@ -74,7 +75,8 @@ class AliceBobCharlie(AliceBob):
     # batch: Batch
     # forged_img: tensor of shape [args.batch_size, *IMG_SHAPE]
     # Overrides AliceBob._bob_input.
-    def _bob_input(self, batch, forged_img):
+    def _bob_input(self, batch, forged_img=None):
+        if(forged_img is None): return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), forged_img.unsqueeze(1)], dim=1)
 
     # Overrides AliceBob.__call__.
@@ -101,46 +103,55 @@ class AliceBobCharlie(AliceBob):
         (sender_outcome, drawer_outcome, receiver_outcome) = self(batch)
 
         # Alice's part.
-        (sender_loss, sender_successes, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contenders=[0, 1])
+        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contenders=[0, 1])
         sender_entropy = sender_outcome.entropy.mean()
 
         # Bob's part.
-        receiver_loss, receiver_entropy = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+        (receiver_loss, receiver_perf, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
         # Charlie's part.
-        drawer_loss = self.compute_drawer_loss(receiver_outcome.scores, contenders=[2, 0])
+        (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contenders=[2, 0])
 
         optimizers = [self._optim_sender, self._optim_receiver, self._optim_drawer]
         losses = [sender_loss, receiver_loss, drawer_loss]
-        scores = np.array([self.success_rate_trackers[role] for role in ["sender", "receiver", "drawer"]])
+        scores = np.array([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]])
         temperature = 1.0
         if(temperature != 0.0):
             weights = scipy.special.softmax(scores / temperature) # Shape: (3)
 
             losses = [(o, (w * l)) for (o, w, l) in zip(optimizers, weights, losses)]
         else:
-            i = np.argmax(weights)
+            i = np.argmax(scores)
             losses = [(optimizers[i], losses[i])]
 
-        # TODO HERE Update success_rate_trackers
+        # Updates each agent's success rate tracker.
+        sender_score = ((2 * sender_perf) - 1) # Values normally in [0, 1]. Shape: (batch size)
+        self.score_trackers["sender"].update_batch(sender_score.numpy())
+
+        receiver_score = ((3 * receiver_perf) - 1) # Values normally in [0, 2]. Shape: (batch size)
+        self.score_trackers["receiver"].update_batch(receiver_score.numpy())
         
-        rewards, successes = sender_rewards, sender_successes
+        drawer_score = (2 * drawer_perf) # Values normally in [0, 1]. Shape: (batch size)
+        self.score_trackers["drawer"].update_batch(drawer_score.numpy())
+        
         msg_length = sender_outcome.action[1].float().mean()
 
-        return losses, rewards, successes, msg_length, sender_entropy, receiver_entropy
+        return losses, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
     
     # receiver_scores: tensor of shape (batch size, nb img)
     # contenders: None or a list[int] containing the indices of the contending images
-    def compute_drawer_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
+    def compute_drawer_loss(self, receiver_scores, target_idx=0, contenders=None):
         if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders]) # Shape: (batch size, len(contenders))
         
-        # Generates a probability distribution from the scores and point at an image.
+        # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)
         
-        loss = -receiver_pointing['dist'].log_prob(torch.tensor(target_idx).to(img_scores.device))
+        perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
+        
+        loss = -receiver_pointing['dist'].log_prob(torch.tensor(target_idx).to(img_scores.device)).mean() # Shape: ()
 
-        return loss
+        return (loss, perf)
     
     def test_visualize(self, data_iterator, learning_rate):
         raise NotImplementedError

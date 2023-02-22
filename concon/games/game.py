@@ -352,11 +352,11 @@ class Game(metaclass=ABCMeta):
 
         return {'model': model}
 
+    @abstractmethod
     def evaluate(self, data_iterator, epoch):
         """
-        Called after each epoch. Override to add an evaluation after each epoch.
+        Evaluates agents. (called at the end of each training epoch)
         """
-        print("No evaluation performed.")
         pass
 
     def train_agents(self, epochs, steps_per_epoch, data_loader, run_models_dir=None, save_every=0):

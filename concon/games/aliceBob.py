@@ -100,6 +100,9 @@ class AliceBob(Game):
             sender_outcome: sender.Outcome
             receiver_outcome: receiver.Outcome
         """
+        return self.alice_to_bob(batch)
+    
+    def alice_to_bob(self, batch):
         sender = self.get_sender()
         receiver = self.get_receiver()
 
@@ -213,10 +216,11 @@ class AliceBob(Game):
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
 
+    # Called at the end of each training epoch.
     def evaluate(self, data_iterator, epoch):
         def log(name, value):
             self.autologger._write(name, value, epoch, direct=True)
-            if(self.autologger.display != 'minimal'): print('%s\t%s' % (name, value))
+            if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
@@ -242,7 +246,7 @@ class AliceBob(Game):
                 self.start_episode(train_episode=False)
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
-                sender_outcome, receiver_outcome = self(batch)
+                sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
                 receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
                 success.append((receiver_pointing['action'] == 0).float())
@@ -291,7 +295,7 @@ class AliceBob(Game):
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True)
 
-                sender_outcome, receiver_outcome = self(batch)
+                sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
                 receiver_pointing = misc.pointing(receiver_outcome.scores)
                 abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
@@ -462,12 +466,9 @@ class AliceBob(Game):
 
         batch.require_grad()
 
-        sender_outcome, receiver_outcome = self(batch)
+        sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
         # Image-specific saliency visualisation (inspired by Simonyan et al. 2013)
-        pseudo_optimizer = torch.optim.Optimizer(batch.get_images(), {}) # I'm defining this only for its `zero_grad` method (but maybe we won't need it)
-        pseudo_optimizer.zero_grad()
-
         _COLOR, _INTENSITY = range(2)
         def process(t, dim, mode):
             if(mode == _COLOR):
@@ -530,8 +531,6 @@ class AliceBob(Game):
                 print(i)
                 j = i
 
-            optimizer.zero_grad()
-
             tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message)
             loss = -tmp_outcome.scores[:, 0].sum()
 
@@ -551,6 +550,8 @@ class AliceBob(Game):
             # This can probably be done by modifying receiver_dream.grad.
 
             optimizer.step()
+            optimizer.zero_grad()
+
         receiver_dream = receiver_dream.squeeze(axis=1)
         receiver_dream = torch.clamp(receiver_dream, 0, 1)
 

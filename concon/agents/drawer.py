@@ -49,7 +49,7 @@ class Drawer(Agent):
     def from_args(cls, args, message_encoder=None):
         has_shared_param = (message_encoder is not None)
         
-        if message_encoder is None: message_encoder = MessageEncoder.from_args(args)
+        if(message_encoder is None): message_encoder = MessageEncoder.from_args(args)
         middle_nn = nn.Sequential(NoiseAdder.from_args(args), nn.Linear(args.hidden_size, args.hidden_size))
         image_decoder = build_cnn_decoder_from_args(args)
         
