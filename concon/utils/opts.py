@@ -11,6 +11,7 @@ import torch # for device
 from datetime import datetime
 
 def get_args():
+    # TODO: given the number of args, i'd be in favor of a config file (e.g., configargparse)
     arg_parser = argparse.ArgumentParser()
 
     default_data_set = pathlib.Path('data') / 'concon'
@@ -34,13 +35,16 @@ def get_args():
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
+    # TODO: refactor logging: --display tqdm should be inferred from the env
     group.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
     group.add_argument('--debug', '-d', help='log more stuf', action='store_true')
     group.add_argument('--detect_anomaly', help='autodetect grad anomalies', action='store_true')
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
     group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
+    # TODO: refactor logging: --logging_period should control the frequency of step reports when --display minimal
     group.add_argument('--logging_period', help='how often counts of logged variables are accumulated', type=int, default=10)
+    # TODO: refactor logging: --quiet vs. --display quiet?
     group.add_argument('--quiet', help='display less information', action='store_true')
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
@@ -97,14 +101,17 @@ def get_args():
     group.add_argument('--detect_outliers', help='if pretraining, then after, the trained model analyses the dataset in order to detect problems', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
+    # TODO: --evaluate_language should be a separate subcommand entirely
     group.add_argument('--evaluate_language', help='evaluate language instead of training', action='store_true')
     group.add_argument('--analysis_gram_size', help='size of the n-grams considered during language analysis', type=int, default=1)
     group.add_argument('--analysis_disj_size', help='size of the disjunctions considered during language analysis', type=int, default=1)
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
+    # TODO: --visualize should be a separate subcommand entirely
     group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
     group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')
     group.add_argument('--threeway_correlation', help='compute three-way correlation between image vectors, meaning distance and message distance instead of training', action='store_true')
 
+    # TODO: assuming subcommands, these should end up in relevant subparsers
     # For visualize.py / evaluate_language.py
     group.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path)
     # For evaluate_language.py
