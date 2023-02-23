@@ -128,7 +128,7 @@ class Game(metaclass=ABCMeta):
                 self.start_episode()
 
                 batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
-                
+
                 losses, *external_output = self.compute_interaction(batch)
 
                 for i, (optim, loss) in enumerate(losses):
@@ -144,7 +144,7 @@ class Game(metaclass=ABCMeta):
                     if(self.grad_scaling > 0):
                         for group in optim.param_groups: torch.nn.utils.clip_grad_norm_(group["params"], self.grad_scaling)
                         #for agent in self.current_agents: torch.nn.utils.clip_grad_norm_(agent.parameters(), self.grad_scaling)
-                    
+
                     optim.step() # Parameters update. Should not be performed until all gradients have been computed.
                     optim.zero_grad() # Reinitialization of the gradient buffers.
 
@@ -155,7 +155,7 @@ class Game(metaclass=ABCMeta):
                     batch=batch,
                     index=iter_index,
                 )
-                
+
                 self.end_episode(**udpated_state)
 
     def save(self, path):
@@ -171,25 +171,26 @@ class Game(metaclass=ABCMeta):
     @classmethod
     def load(cls, path, args):
         instance = cls(args)
-        
+
         checkpoint = torch.load(path, map_location=args.device)
         for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
             agent.load_state_dict(state_dict)
-            
+
         instance._optim = checkpoint['optims'][0]
-        
+
         return instance
 
     def agents_for_CNN_pretraining(self):
         return NotImplementedError
 
+    # TODO: pretraining should be handled by a separate, dedicated object
     def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None):
         pretrained_models = {}
         agents = self.agents_for_CNN_pretraining()
         for i, agent in enumerate(agents):
             agent_name = f"agent {i}"
             pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
-        
+
         return pretrained_models
 
     def pretrain_agent_CNN(self, agent, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, nb_epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, agent_name="agent"):
@@ -197,7 +198,7 @@ class Game(metaclass=ABCMeta):
         Pretrain (de)convolution of agent.
         """
         print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
-        
+
         if(pretrain_CNN_mode != 'auto-encoder'):
             pretrained_model = self._pretrain_classif(agent, data_iterator, pretrain_CNN_mode, learning_rate, nb_epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
         else:
