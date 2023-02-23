@@ -11,6 +11,25 @@ from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import torchvision
 
+# Produces a detached version of the input tensor and provides methods used to backpropagate the gradient.
+class GradSpigot:
+    # t: tensor
+    def __init__(self, input):
+        assert input.requires_grad
+
+        self._input = input
+
+        self.tensor = self._input.detach()
+        self.tensor.requires_grad = self._input.requires_grad
+
+    # RMK: Practical when there are multiple GradSpigot·s in the graph.
+    def backward_scalar(self):
+        return (self._input * self.tensor.grad).sum() # Shape: ()
+
+    # RMK: Practical when there is only one GradSpigot in the graph.
+    def backward(self, retain_graph=False):
+        self._input.backward(grad=self.tensor.grad, retain_graph=retain_graph)
+
 class Averager:
     def __init__(self, size, mem_factor=2, dtype=None):
         self.size = size
