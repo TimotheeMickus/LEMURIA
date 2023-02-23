@@ -112,6 +112,7 @@ class AliceBobCharlie(AliceBob):
         # Charlie's part.
         (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contenders=[2, 0])
 
+        # TODO It might be possible to save a lot of computation in the computation of the gradients (for example, when differentiating Bob's loss, no need to propagate the gradient through Charlie). Changing the `requires_grad` property of non-leaf nodes is not allowed though. I see a solution involving `detach` and a bit of plumbing.
         optimizers = [self._optim_sender, self._optim_receiver, self._optim_drawer]
         losses = [sender_loss, receiver_loss, drawer_loss]
         scores = np.array([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]])

@@ -184,6 +184,7 @@ class AliceBob(Game):
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
     # receiver_scores: tensor of shape (batch size, nb img)
     # contenders: None or a list[int] containing the indices of the contending images
+    # TODO Currently, this computes the REINFORCE Loss. Add a flag to use a log-likelihood loss instead.
     def compute_receiver_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
         if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders], dim=1) # Shape: (batch size, len(contenders))
