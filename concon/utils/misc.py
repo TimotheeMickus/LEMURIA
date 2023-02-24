@@ -31,24 +31,26 @@ class GradSpigot:
         self._input.backward(grad=self.tensor.grad, retain_graph=retain_graph)
 
 class Averager:
-    def __init__(self, size, mem_factor=2, dtype=None):
-        self.size = size
+    def __init__(self, size, mem_factor=2, dtype=None, buffer_f=None):
+        self.size = size # Number of values used to compute the mean.
 
         buffer_size = int(mem_factor * size)
         assert (buffer_size > size)
-        self._buffer = np.empty(buffer_size, dtype=dtype)
+        if(buffer_f is None): self._buffer = np.empty(buffer_size, dtype=dtype)
+        else: self._buffer = buffer_f(buffer_size, dtype)
 
         self._i = 0 # Position in the buffer where the next value should be added.
 
     # Adds a batch of values.
-    # xs: Numpy array
+    # xs: a sequence of values
+    @torch.no_grad()
     def update_batch(self, xs):
-        if(xs.size < self.size): # Usual case: `xs` of size strictly lower than `size`.
-           if((self._i + xs.size) < self._buffer.size): # Most of the time case: adding `xs` would not fill the buffer entirely.
-                self._buffer[self._i:(self._i + xs.size)] = xs
-                self._i += xs.size
+        if(len(xs) < self.size): # Usual case: `xs` of size strictly lower than `size`.
+           if((self._i + len(xs)) < len(self._buffer)): # Most of the time case: adding `xs` would not fill the buffer entirely.
+                self._buffer[self._i:(self._i + len(xs))] = xs
+                self._i += len(xs)
            else: # Sometime case: adding `xs` would fill the buffer entirely.
-                j = (self.size - xs.size) # The number of values already in the buffer that should be kept.
+                j = (self.size - len(xs)) # The number of values already in the buffer that should be kept.
                 self._buffer[:j] = self._buffer[(self._i - j):self._i]
                 self._buffer[j:self.size] = xs
                 self._i = self.size
@@ -58,14 +60,16 @@ class Averager:
 
     # Adds a single value.
     # x: numeral
+    @torch.no_grad()
     def update(self, x):
         self._buffer[self._i] = x
         self._i += 1
 
-        if(self._i == self._buffer.size): # If the buffer is full.
+        if(self._i == len(self._buffer)): # If the buffer is full.
             self._buffer[:self.size] = self._buffer[-self.size:]
             self._i = self.size
 
+    @torch.no_grad()
     def get(self, default=None):
         l = min(self._i, self.size) # The number of values to consider. This might be smaller than `size` at first.
         if(l == 0): return default

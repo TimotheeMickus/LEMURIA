@@ -157,10 +157,10 @@ class AliceBob(Game):
 
     # Returns a scalar tensor and two tensors of shape (batch size).
     # receiver_scores: tensor of shape (batch size, nb img)
-    # contenders: None or a list[int] containing the indices of the contending images
-    def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contenders=None):
-        if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
-        else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders], dim=1) # Shape: (batch size, len(contenders))
+    # contending_imgs: None or a list[int] containing the indices of the contending images
+    def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contending_imgs=None):
+        if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
+        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
 
         (rewards, perf) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensor of shape (batch size).
 
@@ -183,11 +183,11 @@ class AliceBob(Game):
 
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
     # receiver_scores: tensor of shape (batch size, nb img)
-    # contenders: None or a list[int] containing the indices of the contending images
+    # contending_imgs: None or a list[int] containing the indices of the contending images
     # TODO Currently, this computes the REINFORCE Loss. Add a flag to use a log-likelihood loss instead.
-    def compute_receiver_loss(self, receiver_scores, target_idx=0, contenders=None, return_entropy=False):
-        if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
-        else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders], dim=1) # Shape: (batch size, len(contenders))
+    def compute_receiver_loss(self, receiver_scores, target_idx=0, contending_imgs=None, return_entropy=False):
+        if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
+        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
         
         # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)

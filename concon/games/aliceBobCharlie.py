@@ -42,9 +42,9 @@ class AliceBobCharlie(AliceBob):
         self._optim_drawer = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
         self.score_trackers = {
-            'sender': misc.Averager(12800),
-            'receiver': misc.Averager(12800),
-            'drawer': misc.Averager(12800),
+            'sender': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype))),
+            'receiver': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype))),
+            'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype))),
         }
 
         self.use_baseline = args.use_baseline
@@ -103,23 +103,20 @@ class AliceBobCharlie(AliceBob):
         (sender_outcome, drawer_outcome, receiver_outcome) = self(batch)
 
         # Alice's part.
-        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contenders=[0, 1])
+        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contending_imgs=[0, 1])
         sender_entropy = sender_outcome.entropy.mean()
 
         # Bob's part.
         (receiver_loss, receiver_perf, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
         # Charlie's part.
-        (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contenders=[2, 0])
+        (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contending_imgs=[2, 0])
 
         # TODO It might be possible to save a lot of computation in the computation
         # of the gradients (for example, when differentiating Bob's loss, no need
-        # to propagate the gradient through Charlie). Changing the `requires_grad` 
-        # property of non-leaf nodes is not allowed though. I see a solution involving
-        # `detach` and a bit of plumbing.
+        # to propagate the gradient through Charlie). See misc.GradSpigot. 
         optimizers = [self._optim_sender, self._optim_receiver, self._optim_drawer]
         losses = [sender_loss, receiver_loss, drawer_loss]
-        # TODO: move averager to torch + detach, try to perform computations on GPU to avoid copies and GPU idleness
         scores = np.array([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]])
         temperature = 1.0
         if(temperature != 0.0):
@@ -131,25 +128,25 @@ class AliceBobCharlie(AliceBob):
             losses = [(optimizers[i], losses[i])]
 
         # Updates each agent's success rate tracker.
-        sender_score = ((2 * sender_perf) - 1) # Values ought to be in [0, 1]. Shape: (batch size)
-        self.score_trackers["sender"].update_batch(sender_score.numpy())
+        sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
+        self.score_trackers["sender"].update_batch(sender_score.detach())
 
-        receiver_score = ((3 * receiver_perf) - 1) # Values ought to be in [0, 2]. Shape: (batch size)
-        self.score_trackers["receiver"].update_batch(receiver_score.numpy())
-
-        drawer_score = (2 * drawer_perf) # Values ought to be in [0, 1]. Shape: (batch size)
-        self.score_trackers["drawer"].update_batch(drawer_score.numpy())
-
+        receiver_score = ((3 * receiver_perf) - 1) # Values usually in [0, 2] (otherwise, there might be a problem). Shape: (batch size)
+        self.score_trackers["receiver"].update_batch(receiver_score.detach())
+        
+        drawer_score = (2 * drawer_perf) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
+        self.score_trackers["drawer"].update_batch(drawer_score.detach())
+        
         msg_length = sender_outcome.action[1].float().mean()
 
         return losses, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
 
     # receiver_scores: tensor of shape (batch size, nb img)
-    # contenders: None or a list[int] containing the indices of the contending images
-    def compute_drawer_loss(self, receiver_scores, target_idx=0, contenders=None):
-        if(contenders is None): img_scores = receiver_scores # Shape: (batch size, nb img)
-        else: img_scores = torch.stack([receiver_scores[:,i] for i in contenders]) # Shape: (batch size, len(contenders))
-
+    # contending_imgs: None or a list[int] containing the indices of the contending images
+    def compute_drawer_loss(self, receiver_scores, target_idx=0, contending_imgs=None):
+        if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
+        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs]) # Shape: (batch size, len(contending_imgs))
+        
         # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)
 
