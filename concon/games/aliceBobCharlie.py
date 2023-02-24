@@ -117,10 +117,10 @@ class AliceBobCharlie(AliceBob):
         # to propagate the gradient through Charlie). See misc.GradSpigot. 
         optimizers = [self._optim_sender, self._optim_receiver, self._optim_drawer]
         losses = [sender_loss, receiver_loss, drawer_loss]
-        scores = np.array([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]])
+        scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]])
         temperature = 1.0
         if(temperature != 0.0):
-            weights = scipy.special.softmax(scores / temperature) # Shape: (3)
+            weights = torch.softmax((scores / temperature), dim=0) # Shape: (3)
 
             losses = [(o, (w * l)) for (o, w, l) in zip(optimizers, weights, losses)]
         else:
