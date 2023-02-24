@@ -26,9 +26,7 @@ class Drawer(Agent):
         encoded_message = self.message_encoder(message, length) # Shape: (batch size, hidden size)
         encoding = self.middle_nn(encoded_message) # Shape: (batch size, hidden size)
         encoding = encoding[:,:,None,None].view(-1, encoding.size(-1), 1, 1) # Because the deconvolution expects a 1 by 1 image with D channels. Shape: (batch size, hidden size, 1, 1) TODO useful?
-        input(encoding.shape)
         image = self.image_decoder(encoding) # Shape: (batch size, *IMG_SHAPE)
-        input(image.shape)
 
         outcome = Outcome(image=image)
 
