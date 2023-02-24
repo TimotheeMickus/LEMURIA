@@ -20,7 +20,7 @@ from .game import Game
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
-# They are currently both trained with REINFORCE.
+# Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
 class AliceBob(Game):
     def __init__(self, args, logger):
         self._logger = logger
@@ -166,26 +166,28 @@ class AliceBob(Game):
 
         log_prob = sender_outcome.log_prob.sum(dim=1)
 
-        loss = torch.tensor(0.0).to(log_prob.device)
+        loss = 0.0
 
+        # REINFORCE loss
         if(self.use_baseline):
             r_baseline = self._sender_avg_reward.get(default=0.0)
             self._sender_avg_reward.update_batch(rewards.cpu().numpy())
         else: r_baseline = 0.0
 
-        reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
+        reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
         loss += reinforce_loss
 
-        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Entropy penalty; could be normalised (divided) by (base_alphabet_size + 1)
+        # Entropy penalty
+        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Could be normalised (divided) by (base_alphabet_size + 1).
         loss += entropy_loss
 
         return (loss, perf, rewards)
 
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
     # receiver_scores: tensor of shape (batch size, nb img)
+    # use_REINFORCE: if true, the REINFORCE loss is used, otherwise, the cross-entropy loss is used
     # contending_imgs: None or a list[int] containing the indices of the contending images
-    # TODO Currently, this computes the REINFORCE Loss. Add a flag to use a log-likelihood loss instead.
-    def compute_receiver_loss(self, receiver_scores, target_idx=0, contending_imgs=None, return_entropy=False):
+    def compute_receiver_loss(self, receiver_scores, use_REINFORCE=False, target_idx=0, contending_imgs=None, return_entropy=False):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
         
@@ -194,23 +196,30 @@ class AliceBob(Game):
 
         perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
 
-        if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
-        else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
-
-        log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected actions. Shape: (batch size)
-
-        loss = torch.tensor(0.0).to(log_prob.device)
-
-        if(self.use_baseline):
-            r_baseline = self._receiver_avg_reward.get(default=0.0)
-            self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
-        else: r_baseline = 0.0
-
-        reinforce_loss = -((rewards - r_baseline) * log_prob).mean() # REINFORCE loss
-        loss += reinforce_loss
-
         entropy = receiver_pointing['dist'].entropy().mean() # Shape: ()
 
+        loss = 0.0
+
+        if(use_REINFORCE): # REINFORCE
+            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected actions. Shape: (batch size)
+            
+            if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
+            else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
+
+            if(self.use_baseline):
+                r_baseline = self._receiver_avg_reward.get(default=0.0)
+                self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
+            else: r_baseline = 0.0
+
+            reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
+            loss += reinforce_loss
+        else: # Cross-entropy maximization
+            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected actions. Shape: (batch size)
+            
+            cross_entropy_loss = -log_prob.mean()
+            loss += cross_entropy_loss
+        
+        # Entropy penalty
         entropy_loss = -(self.beta_receiver * entropy) # Entropy penalty
         loss += entropy_loss
 
