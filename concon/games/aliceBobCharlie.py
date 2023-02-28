@@ -16,7 +16,7 @@ from ..utils.misc import build_optimizer
 # Charlie is trained to maximize the probability that Bob assigns to the fake image when comparing the target image and the fake image.
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization; Charlie is trained by log-likelihood maximization.
 class AliceBobCharlie(AliceBob):
-    def __init__(self, args, logger): # TODO Currently, the default auto-logger does not log enough information.
+    def __init__(self, args, logger):
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
