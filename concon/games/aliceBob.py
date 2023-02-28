@@ -38,13 +38,13 @@ class AliceBob(Game):
         if(self.shared):
             senderReceiver = SenderReceiver.from_args(args)
             
-            self.sender = senderReceiver.sender
-            self.receiver = senderReceiver.receiver
+            self._sender = senderReceiver.sender
+            self._receiver = senderReceiver.receiver
             
             parameters = senderReceiver.parameters()
         else:
-            self.sender = Sender.from_args(args)
-            self.receiver = Receiver.from_args(args)
+            self._sender = Sender.from_args(args)
+            self._receiver = Receiver.from_args(args)
             
             parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
 
@@ -58,11 +58,13 @@ class AliceBob(Game):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
-    def get_sender(self):
-        return self.sender
+    @property
+    def sender(self):
+        return self._sender
 
-    def get_receiver(self):
-        return self.receiver
+    @property
+    def receiver(self):
+        return self._receiver
 
     @property
     def all_agents(self):
@@ -103,8 +105,8 @@ class AliceBob(Game):
         return self.alice_to_bob(batch)
     
     def alice_to_bob(self, batch):
-        sender = self.get_sender()
-        receiver = self.get_receiver()
+        sender = self.sender
+        receiver = self.receiver
 
         sender_outcome = sender(self._alice_input(batch))
         receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
@@ -285,7 +287,7 @@ class AliceBob(Game):
                     l = msg_len.item()
                     scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
-                scrambled_receiver_outcome = self.get_receiver()(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+                scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
                 scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
                 scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
@@ -520,7 +522,7 @@ class AliceBob(Game):
         receiver_dream = receiver_dream.clone().detach() # Creates a leaf that is a copy of `receiver_dream`
         receiver_dream.requires_grad = True
 
-        encoded_message = self.get_receiver().encode_message(*sender_outcome.action).detach()
+        encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
 
         # Defines a filter for checking smoothness
         channels = 3
@@ -541,7 +543,7 @@ class AliceBob(Game):
                 print(i)
                 j = i
 
-            tmp_outcome = self.get_receiver().aux_forward(receiver_dream, encoded_message)
+            tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_message)
             loss = -tmp_outcome.scores[:, 0].sum()
 
             regularisation_loss = 0.0

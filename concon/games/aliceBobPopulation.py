@@ -68,10 +68,12 @@ class AliceBobPopulation(AliceBob):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
 
-    def get_sender(self):
+    @property
+    def sender(self):
         return self._sender
 
-    def get_receiver(self):
+    @property
+    def receiver(self):
         return self._receiver
 
     @property

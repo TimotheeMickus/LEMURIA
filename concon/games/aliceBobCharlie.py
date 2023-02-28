@@ -32,9 +32,9 @@ class AliceBobCharlie(AliceBob):
         if(self.shared):
             raise NotImplementedError
         else:
-            self.sender = Sender.from_args(args)
-            self.receiver = Receiver.from_args(args)
-            self.drawer = Drawer.from_args(args)
+            self._sender = Sender.from_args(args)
+            self._receiver = Receiver.from_args(args)
+            self._drawer = Drawer.from_args(args)
 
         # TODO Using different learning rates would probably prove beneficial.
         self._optim_sender = build_optimizer(self.sender.parameters(), args.learning_rate)
@@ -53,8 +53,9 @@ class AliceBobCharlie(AliceBob):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
-    def get_drawer(self):
-        return self.drawer
+    @property
+    def drawer(self):
+        return self._drawer
 
     # Overrides AliceBob.all_agents.
     @property
@@ -89,9 +90,9 @@ class AliceBobCharlie(AliceBob):
             sender_outcome: sender.Outcome
             receiver_outcome: receiver.Outcome
         """
-        sender = self.get_sender()
-        receiver = self.get_receiver()
-        drawer = self.get_drawer()
+        sender = self.sender
+        receiver = self.receiver
+        drawer = self.drawer
 
         sender_outcome = sender(self._alice_input(batch))
         drawer_outcome = drawer(*sender_outcome.action, spigot=spigot)
