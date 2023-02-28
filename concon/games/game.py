@@ -26,7 +26,7 @@ class Game(metaclass=ABCMeta):
     @abstractmethod
     def current_agents(self):
         """
-        Lists agents involved in the current round of the game.
+        Lists the agents involved in the current round of the game.
         """
         pass
 
@@ -43,12 +43,11 @@ class Game(metaclass=ABCMeta):
 
         return self
 
-    # TODO remplacer ça par une liste d'optimiseurs
     @property
     @abstractmethod
-    def optim(self):
+    def optims(self):
         """
-        Optimizer involved in the current round of the game
+        Lists all optimizers.
         """
         pass
 
@@ -164,7 +163,7 @@ class Game(metaclass=ABCMeta):
         """
         state = {
             'agents_state_dicts': [agent.state_dict() for agent in self.all_agents],
-            'optims': [self.optim],
+            'optims': self.optims,
         }
         torch.save(state, path)
 

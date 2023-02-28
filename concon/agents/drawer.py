@@ -52,7 +52,7 @@ class Drawer(Agent):
             parameters.data = other_parameters[name].data
             parameters.requires_grad = other_parameters[name].requires_grad
 
-    # The optional argument is specified when TODO
+    # Currently (2023-02-28), the optional argument is never specified.
     @classmethod
     def from_args(cls, args, message_encoder=None):
         has_shared_param = (message_encoder is not None)

@@ -75,8 +75,8 @@ class AliceBob(Game):
         return self.all_agents
 
     @property
-    def optim(self):
-        return self._optim
+    def optims(self):
+        return [self._optim]
 
     @property
     def autologger(self):
@@ -125,7 +125,7 @@ class AliceBob(Game):
         (receiver_loss, _, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
         loss = sender_loss + receiver_loss
-        optimization = [(self.optim, loss.detach(), misc.get_backward_f(loss))]
+        optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
         msg_length = sender_outcome.action[1].float().mean()
 

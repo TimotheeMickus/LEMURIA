@@ -62,10 +62,10 @@ class AliceBobCharlie(AliceBob):
     def all_agents(self):
         return (self.sender, self.receiver, self.drawer)
 
-    # Overrides AliceBob.optim.
+    # Overrides AliceBob.optims.
     @property
-    def optim(self):
-        pass # TODO
+    def optims(self):
+        return [self._optim_sender, self._optim_receiver, self._optim_drawer]
 
     # TODO Check what happens to Charlie in terms of pre-training.
     # Overrides AliceBob.agents_for_CNN_pretraining.
