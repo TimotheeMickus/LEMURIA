@@ -67,7 +67,6 @@ class AliceBobCharlie(AliceBob):
     def optims(self):
         return [self._optim_sender, self._optim_receiver, self._optim_drawer]
 
-    # TODO Check what happens to Charlie in terms of pre-training.
     # Overrides AliceBob.agents_for_CNN_pretraining.
     def agents_for_CNN_pretraining(self):
         if(self.shared): raise NotImplementedError
