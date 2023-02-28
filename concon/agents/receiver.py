@@ -45,7 +45,7 @@ class Receiver(Agent):
 
         # Encodes the images.
         encoded_images = self.image_encoder(images.view(-1, *images.shape[2:])) # Shape: ((batch size * nb img), hidden size)
-        encoded_images = encoded_images.view(images.shape[0], images.shape[1], -1) # Shape: (batch size, nb image, hidden size)
+        encoded_images = encoded_images.view(images.shape[0], images.shape[1], -1) # Shape: (batch size, nb img, hidden size)
 
         # Scores the targets.
         scores = torch.bmm(encoded_images, encoded_message).squeeze(-1) # Shape: (batch size, nb img)
