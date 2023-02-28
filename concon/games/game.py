@@ -245,7 +245,7 @@ class Game(metaclass=ABCMeta):
 
         total_items = 0
         for epoch in range(nb_epochs):
-
+            # Optimization
             pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch, logged_items={'L', 'acc'})
             epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
             with pbar:
@@ -262,11 +262,13 @@ class Game(metaclass=ABCMeta):
                         self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
                         self.autologger.summary_writer.add_scalar(acc_tag, (epoch_hits / (epoch_items * n_heads)), total_items)
                     pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
+            
+            # Evaluation
             with torch.no_grad():
                 agent.image_encoder.eval()
                 heads.eval()
                 test_loss, test_epoch_hits, test_epoch_items =  0., 0, 0
-                for step_i in range(steps_per_epoch // 10):
+                for step_i in range(1 + (steps_per_epoch // 10)):
                     batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be use
                     hits, losses = model.forward(batch)
                     for x in losses: test_loss += x.sum().item()
@@ -314,7 +316,8 @@ class Game(metaclass=ABCMeta):
         total_items = 0
 
         for epoch in range(nb_epochs):
-            epoch_loss, epoch_items = 0., 0.
+            # Optimization
+            epoch_loss, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
             pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch, logged_items={'L'})
             with pbar:
                 for _ in range(steps_per_epoch):
@@ -334,10 +337,12 @@ class Game(metaclass=ABCMeta):
 
                     loss.backward()
                     optimizer.step()
+
+            # Evaluation
             with torch.no_grad():
                 model.eval()
                 test_epoch_loss, test_epoch_items = 0., 0.
-                for _ in range(steps_per_epoch // 10):
+                for _ in range(1 + (steps_per_epoch // 10)):
                     batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
                     output = model(batch_img)
