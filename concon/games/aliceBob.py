@@ -123,11 +123,11 @@ class AliceBob(Game):
         (receiver_loss, _, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
         loss = sender_loss + receiver_loss
-        losses = [(self.optim, loss)]
+        optimization = [(self.optim, loss.detach(), misc.get_backward_f(loss))]
 
         msg_length = sender_outcome.action[1].float().mean()
 
-        return losses, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
+        return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
 
     # Returns two tensors of shape (batch size).
     # sender_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)

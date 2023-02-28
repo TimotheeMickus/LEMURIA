@@ -80,7 +80,8 @@ class AliceBobCharlie(AliceBob):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), forged_img.unsqueeze(1)], dim=1)
 
     # Overrides AliceBob.__call__.
-    def __call__(self, batch):
+    # spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message)
+    def __call__(self, batch, spigot=False):
         """
         Input:
             batch: Batch
@@ -93,39 +94,60 @@ class AliceBobCharlie(AliceBob):
         drawer = self.get_drawer()
 
         sender_outcome = sender(self._alice_input(batch))
-        drawer_outcome = drawer(*sender_outcome.action)
-        receiver_outcome = receiver(self._bob_input(batch, drawer_outcome.image), *sender_outcome.action)
+        drawer_outcome = drawer(*sender_outcome.action, spigot=spigot)
+        receiver_outcome = receiver(self._bob_input(batch, drawer_outcome.image), *sender_outcome.action, spigot=spigot)
 
-        return sender_outcome, drawer_outcome, receiver_outcome
+        return (sender_outcome, drawer_outcome, receiver_outcome)
 
     # Overrides AliceBob.compute_interaction.
-    def compute_interaction(self, batch):
-        (sender_outcome, drawer_outcome, receiver_outcome) = self(batch)
+    def compute_interaction(self, batch, temperature=1.0):
+        # Predictions.
+        (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, spigot=True)
 
-        # Alice's part.
+        # Alice's loss.
         (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contending_imgs=[0, 1])
         sender_entropy = sender_outcome.entropy.mean()
 
-        # Bob's part.
+        # Bob's loss.
         (receiver_loss, receiver_perf, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
 
-        # Charlie's part.
+        # Charlie's loss.
         (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contending_imgs=[2, 0])
 
-        # TODO It might be possible to save a lot of computation in the computation
-        # of the gradients (for example, when differentiating Bob's loss, no need
-        # to propagate the gradient through Charlie). See misc.GradSpigot. 
-        optimizers = [self._optim_sender, self._optim_receiver, self._optim_drawer]
-        losses = [sender_loss, receiver_loss, drawer_loss]
-        scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]])
-        temperature = 1.0
-        if(temperature != 0.0):
-            weights = torch.softmax((scores / temperature), dim=0) # Shape: (3)
+        scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]]) # Shape: (3)
+        if(temperature != 0.0): weights = torch.softmax((scores / temperature), dim=0) # Shape: (3)
+        else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
+        #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
+        
+        losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
+        weighted_losses = weights * losses # Shape: (3)
 
-            losses = [(o, (w * l)) for (o, w, l) in zip(optimizers, weights, losses)]
-        else:
-            i = np.argmax(scores)
-            losses = [(optimizers[i], losses[i])]
+        optimization = []
+
+        # Alice backward.
+        optim = self._optim_sender
+        loss = weighted_losses[0]
+        agent = self.sender
+
+        optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent)))
+
+        # Bob backward.
+        optim = self._optim_receiver
+        loss = weighted_losses[1]
+        agent = self.receiver
+        spigot = receiver_outcome.msg_spigot
+
+        optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
+
+        # Charlie backward.
+        optim = self._optim_drawer
+        loss = weighted_losses[2]
+        agent = self.drawer
+        spigot = drawer_outcome.img_spigot
+
+        optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
+
+        if(temperature == 0.0): optimization = [optimization[np.argmax(scores)]]
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
@@ -139,7 +161,7 @@ class AliceBobCharlie(AliceBob):
         
         msg_length = sender_outcome.action[1].float().mean()
 
-        return losses, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
+        return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
 
     # receiver_scores: tensor of shape (batch size, nb img)
     # contending_imgs: None or a list[int] containing the indices of the contending images

@@ -5,8 +5,9 @@ import torch.nn as nn
 
 from .agent import Agent
 from ..utils.modules import MessageEncoder, NoiseAdder, build_cnn_decoder_from_args
+from ..utils import misc
 
-Outcome = namedtuple("Outcome", ["image"])
+Outcome = namedtuple("Outcome", ["image", "img_spigot"])
 
 # Produces an image based on a message.
 class Drawer(Agent):
@@ -22,13 +23,20 @@ class Drawer(Agent):
 
     # message: tensor of shape (batch size, max message length)
     # length: tensor of shape (batch size)
-    def forward(self, message, length):
+    # spigot: boolean that indicates whether to use a GradSpigot (after the image)
+    def forward(self, message, length, spigot=False):
         encoded_message = self.message_encoder(message, length) # Shape: (batch size, hidden size)
         encoding = self.middle_nn(encoded_message) # Shape: (batch size, hidden size)
         encoding = encoding[:,:,None,None] # Because the deconvolution expects a 1 by 1 image with D channels. Shape: (batch size, hidden size, 1, 1)
         image = self.image_decoder(encoding) # Shape: (batch size, *IMG_SHAPE)
 
-        outcome = Outcome(image=image)
+        if(spigot):
+            img_spigot = misc.GradSpigot(image)
+            image = img_spigot.tensor
+        else:
+            img_spigot = None
+
+        outcome = Outcome(image=image, img_spigot=img_spigot)
 
         return outcome
     

@@ -129,14 +129,14 @@ class Game(metaclass=ABCMeta):
 
                 batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
 
-                losses, *external_output = self.compute_interaction(batch)
+                optimization, *external_output = self.compute_interaction(batch)
 
-                for i, (optim, loss) in enumerate(losses):
-                    parameters = []
-                    for group in optim.param_groups: parameters.extend(group["params"])
-                    loss.backward(retain_graph=(i != len(losses)), inputs=parameters) # Backpropagation
+                # RMK: It could be easier to have all of the optimization within `compute_interaction` (possibly renamed).
+                for i, (_, _, backward_f) in enumerate(optimization):
+                    retain_graph = (i != len(optimization))
+                    backward_f(retain_graph) # Backpropagation
 
-                for (optim, _) in losses:
+                for (optim, loss, _) in optimization:
                     # Gradient clipping and scaling
                     if(self.grad_clipping > 0):
                         for group in optim.param_groups: torch.nn.utils.clip_grad_value_(group["params"], self.grad_clipping)

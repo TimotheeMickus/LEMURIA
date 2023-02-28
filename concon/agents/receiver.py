@@ -7,9 +7,10 @@ from torch.distributions.categorical import Categorical
 
 from .agent import Agent
 from ..utils.modules import MessageEncoder, build_cnn_encoder_from_args
+from ..utils import misc
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["scores"])
+Outcome = namedtuple("Outcome", ["scores", "msg_spigot"])
 
 # Scores images according to a message.
 class Receiver(Agent):
@@ -29,12 +30,18 @@ class Receiver(Agent):
     def encode_message(self, message, length):
         return self.message_encoder(message, length).unsqueeze(-1)
 
-    def forward(self, images, message, length):
-        return self.aux_forward(images, self.encode_message(message, length))
+    # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
+    # message: 
+    # spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
+    def forward(self, images, message, length, spigot=False):
+        encoded_message = self.encode_message(message, length) # Shape (batch size, hidden size)
+
+        return self.aux_forward(images, encoded_message, spigot)
 
     # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
     # encoded_messages: tensor of shape (batch size, hidden size)
-    def aux_forward(self, images, encoded_message):
+    # spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
+    def aux_forward(self, images, encoded_message, spigot):
         """
             Forward propagation.
             Input:
@@ -47,10 +54,16 @@ class Receiver(Agent):
         encoded_images = self.image_encoder(images.view(-1, *images.shape[2:])) # Shape: ((batch size * nb img), hidden size)
         encoded_images = encoded_images.view(images.shape[0], images.shape[1], -1) # Shape: (batch size, nb img, hidden size)
 
+        if(spigot):
+           msg_spigot = misc.GradSpigot(encoded_message)
+           encoded_message = msg_spigot.tensor
+        else:
+            msg_spigot = None
+
         # Scores the targets.
         scores = torch.bmm(encoded_images, encoded_message).squeeze(-1) # Shape: (batch size, nb img)
 
-        outcome = Outcome(scores=scores)
+        outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
 
         return outcome
     

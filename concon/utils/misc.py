@@ -11,6 +11,25 @@ from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import torchvision
 
+# loss: scalar tensor
+# agent: 
+# spigot: GradSpigot
+def get_backward_f(loss, agent=None, spigot=None):
+    def backward_f(retain_graph):
+        if(agent is None):
+            assert spigot is None
+            parameters = None
+        else:
+            parameters = list(agent.parameters())
+
+        if(spigot is None):
+            loss.backward(retain_graph=retain_graph, inputs=parameters)
+        else:
+            loss.backward(retain_graph=True, inputs=(parameters + [spigot.tensor]))
+            spigot.backward(retain_graph=retain_graph, inputs=parameters)
+
+    return backward_f
+
 # Produces a detached version of the input tensor and provides methods used to backpropagate the gradient.
 class GradSpigot:
     # t: tensor
@@ -23,12 +42,20 @@ class GradSpigot:
         self.tensor.requires_grad = self._input.requires_grad
 
     # RMK: Practical when there are multiple GradSpigot·s in the graph.
-    def backward_scalar(self):
-        return (self._input * self.tensor.grad).sum() # Shape: ()
+    # mask: None or a tensor that can be multiplied by self.tensor.grad
+    def backward_scalar(self, mask=None):
+        grad = self.tensor.grad
+        if(mask is not None): grad *= mask
+        
+        return (self._input * grad).sum() # Shape: ()
 
     # RMK: Practical when there is only one GradSpigot in the graph.
-    def backward(self, retain_graph=False):
-        self._input.backward(grad=self.tensor.grad, retain_graph=retain_graph)
+    # mask: None or a tensor that can be multiplied by self.tensor.grad
+    def backward(self, mask=None, retain_graph=False, inputs=None):
+        grad = self.tensor.grad
+        if(mask is not None): grad *= mask
+        
+        self._input.backward(gradient=grad, retain_graph=retain_graph, inputs=inputs)
 
 class Averager:
     def __init__(self, size, mem_factor=2, dtype=None, buffer_f=None):
