@@ -32,16 +32,16 @@ class Receiver(Agent):
 
     # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
     # message: 
-    # spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
-    def forward(self, images, message, length, spigot=False):
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
+    def forward(self, images, message, length, use_spigot=False):
         encoded_message = self.encode_message(message, length) # Shape (batch size, hidden size)
 
-        return self.aux_forward(images, encoded_message, spigot)
+        return self.aux_forward(images, encoded_message, use_spigot)
 
     # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
     # encoded_messages: tensor of shape (batch size, hidden size)
-    # spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
-    def aux_forward(self, images, encoded_message, spigot):
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
+    def aux_forward(self, images, encoded_message, use_spigot):
         """
             Forward propagation.
             Input:
@@ -54,7 +54,7 @@ class Receiver(Agent):
         encoded_images = self.image_encoder(images.view(-1, *images.shape[2:])) # Shape: ((batch size * nb img), hidden size)
         encoded_images = encoded_images.view(images.shape[0], images.shape[1], -1) # Shape: (batch size, nb img, hidden size)
 
-        if(spigot):
+        if(use_spigot):
            msg_spigot = misc.GradSpigot(encoded_message)
            encoded_message = msg_spigot.tensor
         else:

@@ -80,8 +80,8 @@ class AliceBobCharlie(AliceBob):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), forged_img.unsqueeze(1)], dim=1)
 
     # Overrides AliceBob.__call__.
-    # spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message)
-    def __call__(self, batch, spigot=False):
+    # use_spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message)
+    def __call__(self, batch, use_spigot=False):
         """
         Input:
             batch: Batch
@@ -94,15 +94,17 @@ class AliceBobCharlie(AliceBob):
         drawer = self.drawer
 
         sender_outcome = sender(self._alice_input(batch))
-        drawer_outcome = drawer(*sender_outcome.action, spigot=spigot)
-        receiver_outcome = receiver(self._bob_input(batch, drawer_outcome.image), *sender_outcome.action, spigot=spigot)
+        drawer_outcome = drawer(*sender_outcome.action, use_spigot=use_spigot)
+        receiver_outcome = receiver(self._bob_input(batch, drawer_outcome.image), *sender_outcome.action, use_spigot=use_spigot)
 
         return (sender_outcome, drawer_outcome, receiver_outcome)
 
     # Overrides AliceBob.compute_interaction.
     def compute_interaction(self, batch, temperature=1.0):
+        use_spigot = True
+
         # Predictions.
-        (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, spigot=True)
+        (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, use_spigot=use_spigot)
 
         # Alice's loss.
         (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contending_imgs=[0, 1])
@@ -135,7 +137,7 @@ class AliceBobCharlie(AliceBob):
         optim = self._optim_receiver
         loss = weighted_losses[1]
         agent = self.receiver
-        spigot = receiver_outcome.msg_spigot
+        spigot = receiver_outcome.msg_spigot if(use_spigot) else None
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
@@ -143,7 +145,7 @@ class AliceBobCharlie(AliceBob):
         optim = self._optim_drawer
         loss = weighted_losses[2]
         agent = self.drawer
-        spigot = drawer_outcome.img_spigot
+        spigot = drawer_outcome.img_spigot if(use_spigot) else None
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 

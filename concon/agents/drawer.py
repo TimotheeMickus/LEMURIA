@@ -23,14 +23,14 @@ class Drawer(Agent):
 
     # message: tensor of shape (batch size, max message length)
     # length: tensor of shape (batch size)
-    # spigot: boolean that indicates whether to use a GradSpigot (after the image)
-    def forward(self, message, length, spigot=False):
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the image)
+    def forward(self, message, length, use_spigot=False):
         encoded_message = self.message_encoder(message, length) # Shape: (batch size, hidden size)
         encoding = self.middle_nn(encoded_message) # Shape: (batch size, hidden size)
         encoding = encoding[:,:,None,None] # Because the deconvolution expects a 1 by 1 image with D channels. Shape: (batch size, hidden size, 1, 1)
         image = self.image_decoder(encoding) # Shape: (batch size, *IMG_SHAPE)
 
-        if(spigot):
+        if(use_spigot):
             img_spigot = misc.GradSpigot(image)
             image = img_spigot.tensor
         else:
