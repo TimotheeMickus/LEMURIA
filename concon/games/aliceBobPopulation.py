@@ -100,7 +100,6 @@ class AliceBobPopulation(AliceBob):
             if((self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0)):
                 reborn_agent = next(self._death_row)
                 reborn_agent.reinitialize()
-                #self.kill(reborn_agent)
 
                 if(self._pretrain_args['pretrain_CNN_mode'] is not None):
                     agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)
@@ -108,19 +107,3 @@ class AliceBobPopulation(AliceBob):
                     print(f"[{datetime.now()}] {agent_name} reinitialized.")
             
             self._current_epoch += 1
-
-    # 2023-02-14: The method is made obsolete, replaced with {Sender,Receiver}.reinitialize.
-    # Resets (randomly) the parameters of the Module given as argument.
-    # Warning: This might not always work as expected, as not all modules have a `reset_parameters` method.
-    # agent: torch.nn.Module
-    def kill(self, agent):
-        # Resets the parameters of the Module given as argument.
-        # submodule: torch.nn.Module
-        def weight_init(submodule):
-            try:
-                submodule.reset_parameters()
-                # TODO Also reset the requires_grad properties.
-            except:
-                pass
-
-        agent.apply(weight_init) # torch.nn.Module.apply: "Applies [the argument] recursively to every submodule (as returned by .children()) as well as self."
