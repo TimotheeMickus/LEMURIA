@@ -36,6 +36,8 @@ class AliceBobCharlie(AliceBob):
             self._receiver = Receiver.from_args(args)
             self._drawer = Drawer.from_args(args)
 
+        self.use_spigot = (not args.no_spigot) # A boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message). GradSpigot·s are meant for use during training only.
+
         # TODO Using different learning rates would probably prove beneficial.
         self._optim_sender = build_optimizer(self.sender.parameters(), args.learning_rate)
         self._optim_receiver = build_optimizer(self.receiver.parameters(), args.learning_rate)
@@ -80,7 +82,7 @@ class AliceBobCharlie(AliceBob):
         return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), forged_img.unsqueeze(1)], dim=1)
 
     # Overrides AliceBob.__call__.
-    # use_spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message)
+    # use_spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message); GradSpigot·s are meant for use during training only
     def __call__(self, batch, use_spigot=False):
         """
         Input:
@@ -101,10 +103,8 @@ class AliceBobCharlie(AliceBob):
 
     # Overrides AliceBob.compute_interaction.
     def compute_interaction(self, batch, temperature=1.0):
-        use_spigot = True
-
         # Predictions.
-        (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, use_spigot=use_spigot)
+        (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, use_spigot=self.use_spigot)
 
         # Alice's loss.
         (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contending_imgs=[0, 1])
@@ -137,7 +137,7 @@ class AliceBobCharlie(AliceBob):
         optim = self._optim_receiver
         loss = weighted_losses[1]
         agent = self.receiver
-        spigot = receiver_outcome.msg_spigot if(use_spigot) else None
+        spigot = receiver_outcome.msg_spigot # None or a GradSpigot.
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
@@ -145,7 +145,7 @@ class AliceBobCharlie(AliceBob):
         optim = self._optim_drawer
         loss = weighted_losses[2]
         agent = self.drawer
-        spigot = drawer_outcome.img_spigot if(use_spigot) else None
+        spigot = drawer_outcome.img_spigot # None or a GradSpigot.
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
