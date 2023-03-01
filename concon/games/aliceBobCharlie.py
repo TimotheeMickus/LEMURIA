@@ -37,6 +37,7 @@ class AliceBobCharlie(AliceBob):
             self._drawer = Drawer.from_args(args)
 
         self.use_spigot = (not args.no_spigot) # A boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message). GradSpigot·s are meant for use during training only.
+        self.loss_weight_temp = args.loss_weight_temp
 
         # TODO Using different learning rates would probably prove beneficial.
         self._optim_sender = build_optimizer(self.sender.parameters(), args.learning_rate)
@@ -102,7 +103,7 @@ class AliceBobCharlie(AliceBob):
         return (sender_outcome, drawer_outcome, receiver_outcome)
 
     # Overrides AliceBob.compute_interaction.
-    def compute_interaction(self, batch, temperature=1.0):
+    def compute_interaction(self, batch):
         # Predictions.
         (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, use_spigot=self.use_spigot)
 
@@ -117,7 +118,7 @@ class AliceBobCharlie(AliceBob):
         (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contending_imgs=[2, 0])
 
         scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]]) # Shape: (3)
-        if(temperature != 0.0): weights = torch.softmax((scores / temperature), dim=0) # Shape: (3)
+        if(self.loss_weight_temp != 0.0): weights = torch.softmax((scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
         
@@ -149,7 +150,7 @@ class AliceBobCharlie(AliceBob):
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
-        if(temperature == 0.0): optimization = [optimization[np.argmax(scores)]]
+        if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(scores)]]
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
