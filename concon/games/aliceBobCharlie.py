@@ -45,9 +45,9 @@ class AliceBobCharlie(AliceBob):
         self._optim_drawer = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
         self.score_trackers = {
-            'sender': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype))),
-            'receiver': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype))),
-            'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype))),
+            'sender': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
+            'receiver': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
+            'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
         }
 
         self.use_baseline = args.use_baseline
@@ -117,7 +117,7 @@ class AliceBobCharlie(AliceBob):
         # Charlie's loss.
         (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contending_imgs=[2, 0])
 
-        scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]]) # Shape: (3)
+        scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]], device=sender_loss.device) # Shape: (3)
         if(self.loss_weight_temp != 0.0): weights = torch.softmax((scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
