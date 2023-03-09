@@ -203,7 +203,7 @@ class AliceBob(Game):
         loss = 0.0
 
         if(use_REINFORCE): # REINFORCE
-            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected actions. Shape: (batch size)
+            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected images. Shape: (batch size)
             
             if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
             else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
@@ -216,9 +216,9 @@ class AliceBob(Game):
             reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
             loss += reinforce_loss
         else: # Cross-entropy maximization
-            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected actions. Shape: (batch size)
+            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(target_idx, device=img_scores.device)) # The log-probabilities of the target images. Shape: (batch size)
             
-            cross_entropy_loss = -log_prob.mean()
+            cross_entropy_loss = -log_prob.mean() # Shape: ()
             loss += cross_entropy_loss
         
         # Entropy penalty

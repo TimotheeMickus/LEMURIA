@@ -191,7 +191,12 @@ class AliceBobCharlie(AliceBob):
 
         perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
 
-        loss = -receiver_pointing['dist'].log_prob(torch.tensor(target_idx).to(img_scores.device)).mean() # Shape: ()
+        loss = 0.0
+
+        log_prob = receiver_pointing['dist'].log_prob(torch.tensor(target_idx, device=img_scores.device)) # The log-probabilities of the target images. Shape: (batch size)
+            
+        cross_entropy_loss = -log_prob.mean() # Shape: ()
+        loss += cross_entropy_loss
 
         return (loss, perf)
 
