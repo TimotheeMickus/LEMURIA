@@ -125,7 +125,7 @@ class DummyLogger(object):
 
 # TODO Could have a 'print(self, message, flush, type)' method
 class AutoLogger(object):
-    def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, debug=False,
+    def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, log_debug=False,
         log_lang_progress=False, log_entropy=False,
         device='cpu', no_summary=False, summary_dir=None, default_period=10,):
 
@@ -139,7 +139,7 @@ class AutoLogger(object):
         self.global_step = 0
         self.logged_items = {"S"}
 
-        self.log_debug = debug
+        self.log_debug = log_debug
         self.log_lang_progress = log_lang_progress
         self.log_entropy = log_entropy
 

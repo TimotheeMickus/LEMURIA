@@ -31,7 +31,7 @@ def train(args):
         run_models_dir = models_dir / str(run)
 
         data_loader = get_data_loader(args)
-        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, debug=args.debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)
+        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)
 
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
