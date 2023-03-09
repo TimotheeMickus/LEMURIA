@@ -166,11 +166,11 @@ class AliceBob(Game):
 
         (rewards, perf) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensor of shape (batch size).
 
-        log_prob = sender_outcome.log_prob.sum(dim=1)
-
         loss = 0.0
 
         # REINFORCE loss
+        log_prob = sender_outcome.log_prob.sum(dim=1) # The per-episode sum of the log-probabilies of the selection actions (they all get the same reward). Shape: (batch size)
+
         if(self.use_baseline):
             r_baseline = self._sender_avg_reward.get(default=0.0)
             self._sender_avg_reward.update_batch(rewards.cpu().numpy())
