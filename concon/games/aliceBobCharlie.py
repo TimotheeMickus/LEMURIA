@@ -49,6 +49,10 @@ class AliceBobCharlie(AliceBob):
             'receiver': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
             'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
         }
+        
+        self.weights_sum = torch.zeros(3, device=args.device)
+        self.weights_average_log_frequency = 10
+        self.weights_average_log_counter = 0
 
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the sender loss will take into account the "baseline term" into the average recent reward.
@@ -121,9 +125,17 @@ class AliceBobCharlie(AliceBob):
         if(self.loss_weight_temp != 0.0): weights = torch.softmax((scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
-
         weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-09 Deactivate Charlie's training.
-        
+
+        self.weights_sum += weights
+        self.weights_average_log_counter += 1
+        if(self.weights_average_log_counter == self.weights_average_log_frequency):
+            weights_average = self.weights_sum / self.weights_average_log_frequency
+            self.weights_sum = torch.zeros_like(self.weights_sum)
+            self.weights_average_log_counter = 0
+
+            # TODO Log weights_average.
+
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
 
