@@ -60,6 +60,8 @@ class AliceBobCharlie(AliceBob):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
+        self.debug = args.debug
+
     @property
     def drawer(self):
         return self._drawer
@@ -125,7 +127,7 @@ class AliceBobCharlie(AliceBob):
         if(self.loss_weight_temp != 0.0): weights = torch.softmax((scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
-        weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-09 Deactivate Charlie's training.
+        if(self.debug): weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-09 Deactivate Charlie's training.
 
         self.weights_sum += weights
         self.weights_average_log_counter += 1

@@ -37,7 +37,7 @@ def get_args():
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --display tqdm should be inferred from the env
     group.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
-    group.add_argument('--log_debug', '-d', help='log more stuf', action='store_true')
+    group.add_argument('--log_debug', '-ld', help='log more stuf', action='store_true')
     group.add_argument('--detect_anomaly', help='autodetect grad anomalies', action='store_true')
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
@@ -120,6 +120,7 @@ def get_args():
     group.add_argument('--load_other_model', help='path to a second model to load', type=pathlib.Path)
     group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
     group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
+    group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
     args = arg_parser.parse_args()
     if not args.quiet:
