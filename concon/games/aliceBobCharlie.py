@@ -121,6 +121,8 @@ class AliceBobCharlie(AliceBob):
         if(self.loss_weight_temp != 0.0): weights = torch.softmax((scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
+
+        weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-09 Deactivate Charlie's training.
         
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
