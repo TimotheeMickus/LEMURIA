@@ -32,7 +32,7 @@ class Drawer(Agent):
 
         if(use_spigot):
             img_spigot = misc.GradSpigot(image)
-            image = img_spigot.tensor
+            image = img_spigot.tensor # Shape: (batch size, *IMG_SHAPE)
         else:
             img_spigot = None
 

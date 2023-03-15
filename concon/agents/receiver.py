@@ -56,7 +56,7 @@ class Receiver(Agent):
 
         if(use_spigot):
            msg_spigot = misc.GradSpigot(encoded_message)
-           encoded_message = msg_spigot.tensor
+           encoded_message = msg_spigot.tensor # Shape: (batch size, hidden size)
         else:
             msg_spigot = None
 
