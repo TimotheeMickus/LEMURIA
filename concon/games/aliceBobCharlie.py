@@ -50,7 +50,7 @@ class AliceBobCharlie(AliceBob):
             'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
         }
         
-        self.weights_sum = torch.zeros(3, device=args.device)
+        self.weights_sum = torch.zeros(3, device=args.device) # Shape: (3)
         self.weights_average_log_frequency = 10
         self.weights_average_log_counter = 0
 
@@ -132,11 +132,12 @@ class AliceBobCharlie(AliceBob):
         self.weights_sum += weights
         self.weights_average_log_counter += 1
         if(self.weights_average_log_counter == self.weights_average_log_frequency):
-            weights_average = self.weights_sum / self.weights_average_log_frequency
-            self.weights_sum = torch.zeros_like(self.weights_sum)
+            weights_average = self.weights_sum / self.weights_average_log_frequency # Shape: (3)
+            self.weights_sum = torch.zeros_like(self.weights_sum) # Shape: (3)
             self.weights_average_log_counter = 0
 
-            # TODO Log weights_average.
+            # TODO Log weights_average (a float tensor of shape (3)).
+            # TODO Log scores (a float tensor of shape (3)).
 
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
