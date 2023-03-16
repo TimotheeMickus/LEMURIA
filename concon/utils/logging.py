@@ -204,6 +204,8 @@ class AutoLogger(object):
 
 
     def update(self, loss, *external_output, **supplementary_info):
+        # TODO: the autologger needs some clean up for user simplicity. Ideally I'd love to have it in its own thread as well
+
         rewards, successes, msg_length, sender_entropy, receiver_entropy, *external_output = external_output
 
         # Computes the minimum length the messages can have in order to get perfect accuracy (approximation when the size of the alphabet >> 1)

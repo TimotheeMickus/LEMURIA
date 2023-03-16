@@ -107,5 +107,5 @@ class AliceBobPopulation(AliceBob):
                     agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)
                     self.pretrain_agent_CNN(reborn_agent, data_iterator, **self._pretrain_args, agent_name=agent_name)
                     print(f"[{datetime.now()}] {agent_name} reinitialized.")
-            
+
             self._current_epoch += 1

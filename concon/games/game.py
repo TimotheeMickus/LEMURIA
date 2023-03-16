@@ -67,6 +67,7 @@ class Game(metaclass=ABCMeta):
         Output:
             rewards, successes, avg_msg_length, losses
         """
+        # TODO: change return signature to loss, {dict of things to log}
         pass
 
     def train(self):
@@ -262,7 +263,7 @@ class Game(metaclass=ABCMeta):
                         self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
                         self.autologger.summary_writer.add_scalar(acc_tag, (epoch_hits / (epoch_items * n_heads)), total_items)
                     pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
-            
+
             # Evaluation
             with torch.no_grad():
                 agent.image_encoder.eval()

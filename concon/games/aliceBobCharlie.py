@@ -110,6 +110,8 @@ class AliceBobCharlie(AliceBob):
 
     # Overrides AliceBob.compute_interaction.
     def compute_interaction(self, batch):
+        # TODO: change return signature to loss, {dict of things to log}
+
         # Predictions.
         (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, use_spigot=self.use_spigot)
 

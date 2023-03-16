@@ -37,19 +37,19 @@ class AliceBob(Game):
         self.shared = args.shared
         if(self.shared):
             senderReceiver = SenderReceiver.from_args(args)
-            
+
             self._sender = senderReceiver.sender
             self._receiver = senderReceiver.receiver
-            
+
             parameters = senderReceiver.parameters()
         else:
             self._sender = Sender.from_args(args)
             self._receiver = Receiver.from_args(args)
-            
+
             parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
 
         self._optim = build_optimizer(parameters, args.learning_rate)
-        
+
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
             # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
@@ -69,7 +69,7 @@ class AliceBob(Game):
     @property
     def all_agents(self):
         return (self.sender, self.receiver)
-    
+
     @property
     def current_agents(self):
         return self.all_agents
@@ -103,7 +103,7 @@ class AliceBob(Game):
             receiver_outcome: receiver.Outcome
         """
         return self.alice_to_bob(batch)
-    
+
     def alice_to_bob(self, batch):
         sender = self.sender
         receiver = self.receiver
@@ -115,6 +115,8 @@ class AliceBob(Game):
 
     # batch: Batch
     def compute_interaction(self, batch):
+        # TODO: change return signature to loss, {dict of things to log}
+        
         sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
@@ -192,7 +194,7 @@ class AliceBob(Game):
     def compute_receiver_loss(self, receiver_scores, use_REINFORCE=False, target_idx=0, contending_imgs=None, return_entropy=False):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
-        
+
         # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)
 
@@ -204,7 +206,7 @@ class AliceBob(Game):
 
         if(use_REINFORCE): # REINFORCE
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected images. Shape: (batch size)
-            
+
             if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
             else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
 
@@ -217,10 +219,10 @@ class AliceBob(Game):
             loss += reinforce_loss
         else: # Cross-entropy maximization
             log_prob = receiver_pointing['dist'].log_prob(torch.tensor(target_idx, device=img_scores.device)) # The log-probabilities of the target images. Shape: (batch size)
-            
+
             cross_entropy_loss = -log_prob.mean() # Shape: ()
             loss += cross_entropy_loss
-        
+
         # Entropy penalty
         entropy_loss = -(self.beta_receiver * entropy) # Entropy penalty
         loss += entropy_loss
