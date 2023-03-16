@@ -49,7 +49,7 @@ class AliceBobCharlie(AliceBob):
             'receiver': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
             'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
         }
-        
+
         self.weights_sum = torch.zeros(3, device=args.device) # Shape: (3)
         self.weights_average_log_frequency = 10
         self.weights_average_log_counter = 0
@@ -131,14 +131,23 @@ class AliceBobCharlie(AliceBob):
 
         self.weights_sum += weights
         self.weights_average_log_counter += 1
-        if(self.weights_average_log_counter == self.weights_average_log_frequency):
+        if(self.weights_average_log_counter % self.weights_average_log_frequency) == 0:
             weights_average = self.weights_sum / self.weights_average_log_frequency # Shape: (3)
             self.weights_sum = torch.zeros_like(self.weights_sum) # Shape: (3)
-            self.weights_average_log_counter = 0
-
-            # TODO Log weights_average (a float tensor of shape (3)).
-            # TODO Log scores (a float tensor of shape (3)).
-
+            # self.weights_average_log_counter = 0
+            for idx, agent in  enumerate('ABC'):
+                self.autologger._write(
+                    f'LWA/{agent}',
+                    weights_average[idx].item(),
+                    self.weights_average_log_counter,
+                    direct=True,
+                )
+                self.autologger._write(
+                    f'scores/{agent}',
+                    scores[idx].item(),
+                    self.weights_average_log_counter,
+                    direct=True,
+                )
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
 
@@ -175,10 +184,10 @@ class AliceBobCharlie(AliceBob):
 
         receiver_score = ((3 * receiver_perf) - 1) # Values usually in [0, 2] (otherwise, there might be a problem). Shape: (batch size)
         self.score_trackers["receiver"].update_batch(receiver_score.detach())
-        
+
         drawer_score = (2 * drawer_perf) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
         self.score_trackers["drawer"].update_batch(drawer_score.detach())
-        
+
         msg_length = sender_outcome.action[1].float().mean()
 
         return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
@@ -188,7 +197,7 @@ class AliceBobCharlie(AliceBob):
     def compute_drawer_loss(self, receiver_scores, target_idx=0, contending_imgs=None):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs]) # Shape: (batch size, len(contending_imgs))
-        
+
         # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)
 
@@ -197,7 +206,7 @@ class AliceBobCharlie(AliceBob):
         loss = 0.0
 
         log_prob = receiver_pointing['dist'].log_prob(torch.tensor(target_idx, device=img_scores.device)) # The log-probabilities of the target images. Shape: (batch size)
-            
+
         cross_entropy_loss = -log_prob.mean() # Shape: ()
         loss += cross_entropy_loss
 
