@@ -45,9 +45,9 @@ class AliceBobCharlie(AliceBob):
         self._optim_drawer = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
         self.score_trackers = {
-            'sender': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
-            'receiver': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
-            'drawer': misc.Averager(12800, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
+            'sender': misc.Averager(1280, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
+            'receiver': misc.Averager(1280, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
+            'drawer': misc.Averager(1280, buffer_f=(lambda size, dtype: torch.zeros(size, dtype=dtype).to(args.device))),
         }
 
         self.weights_sum = torch.zeros(3, device=args.device) # Shape: (3)
