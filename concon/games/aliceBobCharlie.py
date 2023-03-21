@@ -154,7 +154,7 @@ class AliceBobCharlie(AliceBob):
                 )
                 self.autologger._write(
                     f'train/loss_{agent}',
-                    lossos[idx].item(),
+                    losses[idx].item(),
                     self.weights_average_log_counter,
                     direct=True,
                 )
