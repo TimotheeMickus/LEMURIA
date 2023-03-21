@@ -139,7 +139,7 @@ class AliceBobCharlie(AliceBob):
             weights_average = self.weights_sum / self.weights_average_log_frequency # Shape: (3)
             self.weights_sum = torch.zeros_like(self.weights_sum) # Shape: (3)
             # self.weights_average_log_counter = 0
-            for idx, agent in  enumerate('ABC'):
+            for idx, agent in enumerate('ABC'):
                 self.autologger._write(
                     f'LWA/{agent}',
                     weights_average[idx].item(),
