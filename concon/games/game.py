@@ -150,7 +150,8 @@ class Game(metaclass=ABCMeta):
 
                 # TODO This needs an update.
                 udpated_state = self.autologger.update(
-                    loss, *external_output,
+                    loss, # This is only one of the losses. All losses should be logged. I'm doing that directlyin compute_interaction, but this should be cleaned.
+                    *external_output,
                     parameters=(p for a in self.all_agents for p in a.parameters()), # TODO `self.all_agents` or `self.current_agents`?
                     batch=batch,
                     index=iter_index,
