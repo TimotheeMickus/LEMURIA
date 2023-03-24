@@ -141,13 +141,13 @@ class AliceBobCharlie(AliceBob):
             # self.weights_average_log_counter = 0
             for idx, agent in enumerate('ABC'):
                 self.autologger._write(
-                    f'LWA/{agent}',
+                    f'train/weight_{agent}',
                     weights_average[idx].item(),
                     self.weights_average_log_counter,
                     direct=True,
                 )
                 self.autologger._write(
-                    f'scores/{agent}',
+                    f'train/score_{agent}',
                     scores[idx].item(),
                     self.weights_average_log_counter,
                     direct=True,
