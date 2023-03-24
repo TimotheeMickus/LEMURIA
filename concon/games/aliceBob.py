@@ -114,7 +114,7 @@ class AliceBob(Game):
         return sender_outcome, receiver_outcome
 
     # batch: Batch
-    def compute_interaction(self, batch):
+    def compute_interaction(self, batch, **kwargs):
         # TODO: change return signature to loss, {dict of things to log}
         
         sender_outcome, receiver_outcome = self(batch)
@@ -231,9 +231,9 @@ class AliceBob(Game):
         return (loss, perf)
 
     # Called at the end of each training epoch.
-    def evaluate(self, data_iterator, epoch):
+    def evaluate(self, data_iterator, epoch_index):
         def log(name, value):
-            self.autologger._write(name, value, epoch, direct=True)
+            self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))

@@ -109,7 +109,7 @@ class AliceBobCharlie(AliceBob):
         return (sender_outcome, drawer_outcome, receiver_outcome)
 
     # Overrides AliceBob.compute_interaction.
-    def compute_interaction(self, batch):
+    def compute_interaction(self, batch, **kwargs):
         # TODO: change return signature to loss, {dict of things to log}
 
         # Predictions.
