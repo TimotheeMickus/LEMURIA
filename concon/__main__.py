@@ -56,7 +56,7 @@ def train(args):
                 pretrain_CNN_mode=args.pretrain_CNNs,
                 freeze_pretrained_CNN=args.freeze_pretrained_CNNs,
                 learning_rate=args.pretrain_learning_rate or args.learning_rate,
-                nb_epochs=args.pretrain_epochs,
+                epochs=args.pretrain_epochs,
                 steps_per_epoch=args.steps_per_epoch,
                 display_mode=args.display,
                 pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval,
