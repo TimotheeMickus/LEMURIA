@@ -125,10 +125,10 @@ class AliceBobCharlie(AliceBob):
         # Charlie's loss.
         (drawer_loss, drawer_perf) = self.compute_drawer_loss(receiver_outcome.scores, contending_imgs=[2, 0])
 
-        scores = torch.tensor([-self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]], device=sender_loss.device) # Shape: (3)
-        if(self.loss_weight_temp != 0.0): weights = torch.softmax((scores / self.loss_weight_temp), dim=0) # Shape: (3)
-        else: weights = torch.nn.functional.one_hot(torch.argmax(scores), 3) # Shape: (3)
-        #else: weights = torch.ones_like(scores) # Only one of the value will be used. Shape: (3)
+        scores = torch.tensor([self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]], device=sender_loss.device) # Shape: (3)
+        if(self.loss_weight_temp != 0.0): weights = torch.softmax((-scores / self.loss_weight_temp), dim=0) # Shape: (3)
+        else: weights = torch.nn.functional.one_hot(torch.argmax(-scores), 3) # Shape: (3)
+        #else: weights = torch.ones_like(-scores) # Only one of the value will be used. Shape: (3)
         if(self.debug): weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-09 Deactivate Charlie's training.
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
@@ -184,7 +184,7 @@ class AliceBobCharlie(AliceBob):
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
-        if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(scores)]]
+        if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(weights)]]
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
