@@ -71,7 +71,6 @@ def get_args():
     group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
     group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
-    group.add_argument('--adv_pointer_training', help='non-standard pointer-based adversary_training', action='store_true')
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
