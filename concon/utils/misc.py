@@ -18,9 +18,9 @@ def get_backward_f(loss, agent=None, spigot=None):
     def backward_f(retain_graph):
         if(agent is None):
             assert spigot is None
-            parameters = None
+            parameters = None # The gradient will be accumulated into all parameters.
         else:
-            parameters = list(agent.parameters())
+            parameters = list(agent.parameters()) # The gradient will be accumulated into the agent's parameters only (except if other parameters are specified below).
 
         if(spigot is None):
             loss.backward(retain_graph=retain_graph, inputs=parameters)
