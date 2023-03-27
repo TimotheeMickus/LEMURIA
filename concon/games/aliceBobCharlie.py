@@ -206,7 +206,7 @@ class AliceBobCharlie(AliceBob):
     # contending_imgs: None or a list[int] containing the indices of the contending images
     def compute_drawer_loss(self, receiver_scores, target_idx=0, contending_imgs=None):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
-        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs]) # Shape: (batch size, len(contending_imgs))
+        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
 
         # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)
