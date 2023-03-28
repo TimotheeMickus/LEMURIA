@@ -11,6 +11,16 @@ from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import torchvision
 
+# model: nn.Module
+@torch.no_grad()
+def sum_params(model, abs=False):
+    s = 0.0
+    for p in model.parameters():
+        if(abs): p = p.abs()
+        s += p.sum()
+    
+    return s
+
 # loss: scalar tensor
 # agent: 
 # spigot: GradSpigot
