@@ -9,9 +9,9 @@ import torch.nn.functional as F
 import numpy as np
 
 from ..utils.logging import DummyLogger, Progress
+from ..utils import misc
 from ..utils.misc import build_optimizer, Unflatten
 from ..utils.modules import build_cnn_decoder_from_args, MultiHeadsClassifier
-
 from ..utils.data import Batch
 
 class Game(metaclass=ABCMeta):
