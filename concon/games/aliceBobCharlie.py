@@ -187,6 +187,10 @@ class AliceBobCharlie(AliceBob):
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
         if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(-scores)]]
+        
+        if(self.debug):
+            if(kwargs["epoch_index"] < 50): optimization = optimization[0:2] # DEBUG ONLY 2023-03-28 Deactivate Charlie's training.
+            else: optimization = [optimization[2]] # DEBUG ONLY 2023-03-28 Deactivate Alice's and Bob's training.
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
