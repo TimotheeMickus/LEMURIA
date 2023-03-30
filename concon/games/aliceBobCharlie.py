@@ -137,26 +137,33 @@ class AliceBobCharlie(AliceBob):
 
         self.weights_sum += weights
         self.weights_average_log_counter += 1
-        if(self.weights_average_log_counter % self.weights_average_log_frequency) == 0:
+        if((self.weights_average_log_counter % self.weights_average_log_frequency) == 0):
             weights_average = self.weights_sum / self.weights_average_log_frequency # Shape: (3)
             self.weights_sum = torch.zeros_like(self.weights_sum) # Shape: (3)
-            # self.weights_average_log_counter = 0
-            for idx, agent in enumerate('ABC'):
+            for idx, x in enumerate('ABC'):
+                agent = self.all_agents[idx]
+
                 self.autologger._write(
-                    f'train/weight_{agent}',
+                    f'train/weight_{x}',
                     weights_average[idx].item(),
                     self.weights_average_log_counter,
                     direct=True,
                 )
                 self.autologger._write(
-                    f'train/score_{agent}',
+                    f'train/score_{x}',
                     scores[idx].item(),
                     self.weights_average_log_counter,
                     direct=True,
                 )
                 self.autologger._write(
-                    f'train/loss_{agent}',
+                    f'train/loss_{x}',
                     losses[idx].item(),
+                    self.weights_average_log_counter,
+                    direct=True,
+                )
+                self.autologger._write(
+                    f'train/L1_{x}',
+                    misc.sum_params(agent, abs=True).item(),
                     self.weights_average_log_counter,
                     direct=True,
                 )
