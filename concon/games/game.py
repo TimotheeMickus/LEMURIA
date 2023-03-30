@@ -148,6 +148,11 @@ class Game(metaclass=ABCMeta):
                     optim.step() # Parameters update. Should not be performed until all gradients have been computed.
                     optim.zero_grad() # Reinitialization of the gradient buffers.
 
+                #for agent in self.all_agents:
+                #    #print(agent)
+                #    print(misc.sum_params(agent, abs=True)) # L1 norm of the parameters of the agent.
+                #    #print()
+
                 # TODO This needs an update.
                 udpated_state = self.autologger.update(
                     loss, # This is only one of the losses. All losses should be logged. I'm doing that directlyin compute_interaction, but this should be cleaned.
