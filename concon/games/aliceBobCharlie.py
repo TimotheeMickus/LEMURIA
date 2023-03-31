@@ -130,8 +130,10 @@ class AliceBobCharlie(AliceBob):
         else: weights = torch.nn.functional.one_hot(torch.argmax(-scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(-scores) # Only one of the value will be used. Shape: (3)
         if(self.debug):
-            if(kwargs["epoch_index"] < 50): weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-24 Deactivate Charlie's training.
-            else: weights = torch.tensor([0.0, 0.0, 1.0], device=weights.device) # DEBUG ONLY 2023-03-24 Deactivate Alice's and Bob's training.
+            if(kwargs["epoch_index"] < 50): weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates Charlie's training.
+            elif(kwargs["epoch_index"] < 60): weights = torch.tensor([0.0, 0.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates everyone's training.
+            elif(kwargs["epoch_index"] < 75): weights = torch.tensor([0.0, 0.0, 1.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates Alice's and Bob's training.
+            else: weights = torch.tensor([0.0, 0.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-28 Deactivates everyone's training.
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
 
@@ -196,8 +198,10 @@ class AliceBobCharlie(AliceBob):
         if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(-scores)]]
         
         if(self.debug):
-            if(kwargs["epoch_index"] < 50): optimization = optimization[0:2] # DEBUG ONLY 2023-03-28 Deactivate Charlie's training.
-            else: optimization = [optimization[2]] # DEBUG ONLY 2023-03-28 Deactivate Alice's and Bob's training.
+            if(kwargs["epoch_index"] < 50): optimization = optimization[0:2] # DEBUG ONLY 2023-03-31 Deactivates Charlie's training.
+            elif(kwargs["epoch_index"] < 60): optimization = [] # DEBUG ONLY 2023-03-31 Deactivates everyone's training.
+            elif(kwargs["epoch_index"] < 75): optimization = [optimization[2]] # DEBUG ONLY 2023-03-31 Deactivates Alice's and Bob's training.
+            else: optimization = [] # DEBUG ONLY 2023-03-28 Deactivates everyone's training.
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)

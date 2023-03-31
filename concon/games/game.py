@@ -150,7 +150,7 @@ class Game(metaclass=ABCMeta):
 
                 # TODO This needs an update.
                 udpated_state = self.autologger.update(
-                    loss, # This is only one of the losses. All losses should be logged. I'm doing that directlyin compute_interaction, but this should be cleaned.
+                    torch.tensor(0.0), # This is where "the loss" should be, but I'm logging the losses directly in compute_interaction.
                     *external_output,
                     parameters=(p for a in self.all_agents for p in a.parameters()), # TODO `self.all_agents` or `self.current_agents`?
                     batch=batch,
