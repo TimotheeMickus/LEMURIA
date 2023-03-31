@@ -95,6 +95,9 @@ class InputDataPoint():
         return InputDataPoint(img, self.category)
 
 class DataPoint():
+    # idx: int
+    # category: ?
+    # img: tensor of shape ?
     def __init__(self, idx, category, img):
         self.idx = idx
         self.category = category
