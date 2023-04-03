@@ -83,12 +83,13 @@ class InputDataPoint():
     def copy(self):
         return InputDataPoint(self.img, self.category)
 
-    # Adds noise if necessary (normal random noise + clamping)
+    # Adds (inplace) noise if necessary (normal random noise + clamping).
     def add_normal_noise_(self, noise):
         if(noise <= 0.0): return
 
         self.img = add_normal_noise(self.img, std_dev=noise, clamp_values=(0.0, 1.0))
     
+    # Adds noise if necessary (normal random noise + clamping).
     def add_normal_noise(self, noise):
         img = self.img if(noise <= 0.0) else add_normal_noise(self.img, std_dev=noise, clamp_values=(0.0, 1.0))
         
@@ -310,7 +311,7 @@ class Dataset():
             if(target_is_original): _target = _original.copy()
             else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
             
-            # Noise is applied independently to the two images
+            # Noise is applied independently to the two images. The modification is inplace, but should only affect the InputDataPoint·s themselves, and not the DataPoint·s they are derived from.
             _original.add_normal_noise_(self.noise)
             _target.add_normal_noise_(self.noise)
 
@@ -325,7 +326,7 @@ class Dataset():
 
             batch.append((_original, _target, _base_distractors))
 
-        original, target, base_distractors = zip(*batch) # Unzips the list of pairs (to a pair of lists)
+        original, target, base_distractors = zip(*batch) # Unzips the list of pairs (to a pair of lists).
 
         return Batch(size=size, original=original, target=target, base_distractors=base_distractors)
 
