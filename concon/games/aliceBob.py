@@ -132,7 +132,7 @@ class AliceBob(Game):
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
         if(self.debug):
-            if(kwargs["epoch_index"] < 50): optimization = [] # DEBUG ONLY 2023-03-31 Deactivates training.
+            if(kwargs["epoch_index"] >= 50): optimization = [] # DEBUG ONLY 2023-03-31 Deactivates training.
 
         msg_length = sender_outcome.action[1].float().mean()
 
