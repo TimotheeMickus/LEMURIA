@@ -393,12 +393,12 @@ class SimpleDataset(Dataset):
             tensor_img = torchvision.transforms.functional.to_tensor(pil_img)
 
             dataset.append(DataPoint(idx, category, tensor_img))
-        self._dataset = np.array(dataset)
+        self._dataset = np.array(dataset) # np.array[DataPoint]
 
         categories = defaultdict(list) # Will end as a dictionary from category (tuple) to Numpy array of DataPoint·s
         for img in self._dataset:
             categories[img.category].append(img)
-        self.categories = {k: np.array(v) for (k, v) in categories.items()}
+        self.categories = {k: np.array(v) for (k, v) in categories.items()} # dict[tuple[int], np.array[DataPoint]]
 
         # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
         # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
@@ -409,10 +409,14 @@ class SimpleDataset(Dataset):
         #show_imgs([self.average_image()], 1)
     
     # Should only be used for debugging purpose. Use `get_batch` instead
+    # Returns a DataPoint.
+    # i: int
     def get_datapoint(self, i):
         return self._dataset[i]
 
     # Category tuples are read from left to right (contrary to usual numbers)
+    # Return a tuple[int].
+    # category_idx: int
     def category_tuple(self, category_idx):
         ks = []
         k = 1
@@ -434,6 +438,8 @@ class SimpleDataset(Dataset):
 
         return category_tuple
 
+    # Returns an int.
+    # category_tuple: tuple[int]
     def category_idx(self, category_tuple):
         category_idx = 0
         k = 1
@@ -468,6 +474,9 @@ class SimpleDataset(Dataset):
     #def __len__(self):
     #    return len(self._dataset)
 
+    # Returns an int.
+    # category: tuple[int]
+    # data_type: string
     def category_size(self, category, data_type):
         split = self.category_split(category)
         
@@ -476,6 +485,8 @@ class SimpleDataset(Dataset):
         elif(data_type == 'any'): return split[-1] - split[0]
         else: assert False, ('Data type \'%s\' unknown.' % data_type)
 
+    # Returns of list[int] of length 3.
+    # category: tuple[int]
     def category_split(self, category):
         l = len(self.categories[category])
         
@@ -485,6 +496,9 @@ class SimpleDataset(Dataset):
         
         return [0, 0, l] # Everything in the test portion
 
+    # Returns a Datapoint.
+    # category: tuple[int]
+    # data_type: string
     def category_to_datapoint(self, category, data_type):
         split = self.category_split(category)
 
