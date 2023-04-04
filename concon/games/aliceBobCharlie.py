@@ -196,7 +196,7 @@ class AliceBobCharlie(AliceBob):
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
         if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(-scores)]]
-        
+
         if(self.debug):
             if(kwargs["epoch_index"] < 50): optimization = optimization[0:2] # DEBUG ONLY 2023-03-31 Deactivates Charlie's training.
             elif(kwargs["epoch_index"] < 60): optimization = [] # DEBUG ONLY 2023-03-31 Deactivates everyone's training.
@@ -239,3 +239,11 @@ class AliceBobCharlie(AliceBob):
 
     def test_visualize(self, data_iterator, learning_rate):
         raise NotImplementedError
+
+    def evaluate(self, data_iterator, epoch_index):
+        if self.debug: # DEBUG ONLY 2023-03-31 Deactivates Charlie during eval.
+            removed = self._drawer
+            self._drawer = None
+        super().evaluate()
+        if self.debug:
+            self._drawer = removed
