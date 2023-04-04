@@ -244,6 +244,6 @@ class AliceBobCharlie(AliceBob):
         if self.debug: # DEBUG ONLY 2023-03-31 Deactivates Charlie during eval.
             removed = self._drawer
             self._drawer = None
-        super().evaluate()
+        super().evaluate(data_iterator, epoch_index)
         if self.debug:
             self._drawer = removed
