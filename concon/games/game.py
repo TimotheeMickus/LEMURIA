@@ -82,7 +82,10 @@ class Game(metaclass=ABCMeta):
         Sets the agents involved in the current round of the game to eval mode.
         """
         for agent in self.current_agents:
-            agent.eval()
+            try: # DEBUG ONLY 2023-03-31 Deactivates Charlie during eval.
+                agent.eval()
+            except:
+                pass
 
     def start_episode(self, train_episode=True):
         """
