@@ -9,6 +9,7 @@ import scipy.special as scispe
 
 import tqdm
 
+import sys
 import os
 from collections import namedtuple, defaultdict
 import itertools
@@ -19,10 +20,28 @@ from .misc import add_normal_noise, show_imgs, combine_images
 
 class Batch():
     def __init__(self, size, original, target, base_distractors):
-       self.size = size
+       self.size = size # int
        self.original = original # List of InputDataPoint·s
        self.target = target # List of InputDataPoint·s
        self.base_distractors = base_distractors # List of lists of InputDataPoint·s
+
+    def __eq__(self, other):
+        if(not isinstance(other, Batch)): return NotImplemented
+
+        if(self.size != other.size):
+            print("Batch.eq//size")
+            return False
+        if(self.original != other.original):
+            print("Batch.eq//original")
+            return False
+        if(self.target != other.target):
+            print("Batch.eq//target")
+            return False
+        if(self.base_distractors != other.base_distractors):
+            print("Batch.eq//base_distractors")
+            return False
+
+        return True
 
     def original_img(self, stack=False, f=None):
         if(f is None): f = (lambda x: x)
@@ -76,12 +95,30 @@ class Batch():
             img.requires_grad = True
 
 class InputDataPoint():
+    # img: tensor of shape [*IMG_SHAPE]
+    # category: None or tuple[int]
     def __init__(self, img, category=None):
-        self.img = img
+        self.img = img # Shape: [*IMG_SHAPE]
         self.category = category
 
-    def copy(self):
-        return InputDataPoint(self.img, self.category)
+    def __eq__(self, other):
+        if(not isinstance(other, InputDataPoint)): return NotImplemented
+
+        if(not torch.equal(self.img, other.img)):
+            print("InputDataPoint.eq//img")
+            return False
+        if(self.category != other.category):
+            print("InputDataPoint.eq//category")
+            return False
+
+        return True
+
+    # deep: bool
+    def copy(self, deep):
+        if(deep): img = img.clone() # RMK: `clone` is differentiable.
+        else: img = self.img
+
+        return InputDataPoint(img, self.category)
 
     # Adds (inplace) noise if necessary (normal random noise + clamping).
     def add_normal_noise_(self, noise):
@@ -141,12 +178,14 @@ class FailureBasedDistribution():
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
 class Dataset():
-    def __init__(self, same_img, device, noise, batch_size, sampling_strategies):
+    def __init__(self, same_img, device, noise, batch_size, sampling_strategies, args=None):
         self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category); but any noise will be applied independently
         self.device = device
         self.noise = noise
         self.batch_size = batch_size
         self.sampling_strategies = sampling_strategies
+        
+        self.args = args
 
         # Other properties that will be needed: self.nb_concepts, self.evaluation_categories, self.training_categories_idx, failure_based_distribution
 
@@ -283,15 +322,16 @@ class Dataset():
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
+    # Returns a Batch.
     def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=None, keep_category=False):
         """Generates a batch as a Batch object.
-        'size' is the size of the batch.
-        'data_type' (train, test, any) indicates, when selecting an image from a category, from what part of this category we take it.
-        'sampling_strategies' indicates how the distractor·s are determined.
-        'no_evaluation' indicates whether we avoid evaluation categories.
-        'target_evaluation' indicates whether the original/target category must be one of the evaluation categories.
-        'noise' indicates how much (random normal) noise must be added to the images.
-        'device' is a PyTorch parameter.
+        size: int, the size of the batch.
+        data_type: string ("train", "test" or "any"), indicates, when selecting an image from a category, from what part of this category we take it.
+        sampling_strategies: list[string], indicates how the distractor·s are determined.
+        no_evaluation: bool, indicates whether we avoid evaluation categories.
+        target_evaluation: bool, indicates whether the original/target category must be one of the evaluation categories.
+        target_is_original: None or ?, ?
+        keep_category: bool, ?
         """
         batch = []
         if(size is None): size = self.batch_size
@@ -308,7 +348,7 @@ class Dataset():
             _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device)
 
             # Target image
-            if(target_is_original): _target = _original.copy()
+            if(target_is_original): _target = _original.copy(deep=False)
             else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
             
             # Noise is applied independently to the two images. The modification is inplace, but should only affect the InputDataPoint·s themselves, and not the DataPoint·s they are derived from.
@@ -331,8 +371,8 @@ class Dataset():
         return Batch(size=size, original=original, target=target, base_distractors=base_distractors)
 
 class SimpleDataset(Dataset):
-    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
-        super().__init__(same_img, device, noise, batch_size, sampling_strategies)
+    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None, args=None):
+        super().__init__(same_img, device, noise, batch_size, sampling_strategies, args)
 
         # The concepts
         possible_shapes = ['cube', 'sphere'] if binary else ['cube', 'sphere', 'ring']
@@ -408,6 +448,33 @@ class SimpleDataset(Dataset):
         if(display != 'tqdm'): print('Loading done')
         
         #show_imgs([self.average_image()], 1)
+
+    # Checks (nondeterministically) whether the dataset has changed somehow. (This method is used for debugging.)
+    # Returns True (to be interpreted as a maybe) but might raise an exception.
+    def check_integrity(self, nb_batch=1):
+        assert self.args is not None
+
+        fresh_dataset = get_data_loader(self.args)
+
+        assert self.size(data_type="any", no_evaluation=False) == fresh_dataset.size(data_type="any", no_evaluation=False)
+        assert torch.equal(self.average_image(force=True), fresh_dataset.average_image(force=True))
+
+        def check_random_batch():
+            random_seed = random.randrange(2**32) # Random.random.seed accepts any hashable object but numpy.random.seed only accepts integer in [0, (2**32 - 1)].
+
+            random.seed(random_seed)
+            np.random.seed(seed=random_seed)
+            this_batch = self.get_batch(data_type="any", sampling_strategies=["different"], no_evaluation=False, keep_category=True)
+
+            random.seed(random_seed)
+            np.random.seed(seed=random_seed)
+            other_batch = fresh_dataset.get_batch(data_type="any", sampling_strategies=["different"], no_evaluation=False, keep_category=True)
+
+            assert this_batch == other_batch
+
+        for _ in range(nb_batch): check_random_batch()
+
+        return True
     
     # Should only be used for debugging purpose. Use `get_batch` instead
     # Returns a DataPoint.
@@ -452,15 +519,18 @@ class SimpleDataset(Dataset):
 
         return category_idx
 
-    _average_image = None
-    def average_image(self):
-        if(self._average_image is None):
+    _average_image = None # None or a tensor of shape [*IMG_SHAPE]
+    # Returns a tensor of shape [*IMG_SHAPE].
+    def average_image(self, force=False):
+        if((self._average_image is None) or force):
             tmp = torch.stack([x.img for x in self._dataset])
             self._average_image = tmp.mean(axis=0)
 
         return self._average_image
     
     # Should be consistant with `category_to_datapoint`
+    # data_type: string ("train", "test" or "any")
+    # no_evaluation: bool
     def size(self, data_type, no_evaluation):
         size = 0
         
@@ -477,7 +547,7 @@ class SimpleDataset(Dataset):
 
     # Returns an int.
     # category: tuple[int]
-    # data_type: string
+    # data_type: string ("train", "test" or "any")
     def category_size(self, category, data_type):
         split = self.category_split(category)
         
@@ -512,8 +582,8 @@ class SimpleDataset(Dataset):
         return self.categories[category][i]
 
 class PairDataset(Dataset):
-    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None):
-        super().__init__(same_img, device, noise, batch_size, sampling_strategies)
+    def __init__(self, same_img=False, evaluation_categories=-1, data_set=None, display='tqdm', noise=0.0, device='cpu', batch_size=128, sampling_strategies=['different'], binary=False, constrain_dim=None, args=None):
+        super().__init__(same_img, device, noise, batch_size, sampling_strategies, args)
 
         self.base_dataset = SimpleDataset(same_img=None, evaluation_categories=-1, data_set=data_set, display=display, noise=None, device=None, batch_size=None, sampling_strategies=None, binary=binary, constrain_dim=constrain_dim) # Maybe the display argument should be modified. Also note that some batch_size and sampling strategies should be useless, and probably evaluation_categories and device too
 
@@ -630,8 +700,8 @@ class PairDataset(Dataset):
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    if(args.pair_images): dataset = PairDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
-    else: dataset = SimpleDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim)
+    if(args.pair_images): dataset = PairDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim, args=args)
+    else: dataset = SimpleDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim, args=args)
 
     dataset.print_info()
 

@@ -481,7 +481,7 @@ class AliceBob(Game):
         self.start_episode(train_episode=False)
 
         batch_size = 4
-        batch = data_iterator.get_batch(batch_size, data_type='any') # Standard training batch
+        batch = data_iterator.get_batch(batch_size, data_type='any', sampling_strategies=["different"])
 
         batch.require_grad()
 

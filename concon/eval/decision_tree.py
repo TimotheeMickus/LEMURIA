@@ -230,7 +230,7 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
         ngrams_idx = {ngram: i for (i, ngram) in enumerate(ngrams)}
 
         # Generates the (n-gram) feature vectors
-        ngram_vectors = np.zeros((len(messages), len(ngrams)), dtype=np.int)
+        ngram_vectors = np.zeros((len(messages), len(ngrams)), dtype=np.int32)
         for i, message in enumerate(messages):
             for ngram in get_ngrams(message, gram_size):
                 idx = ngrams_idx[ngram]
@@ -254,7 +254,7 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
             features_idx = {ngram: i for (i, ngram) in enumerate(features)}
 
             # Feature vectors
-            feature_vectors = np.zeros((len(messages), len(features)), dtype=np.int)
+            feature_vectors = np.zeros((len(messages), len(features)), dtype=np.int32)
             feature_vectors[:, :len(ngrams)] = ngram_vectors
             for i in range(len(ngrams), len(features)): # For all disjunctive terms (by index)
                 disjunction = features[i]
