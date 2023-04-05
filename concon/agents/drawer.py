@@ -18,7 +18,7 @@ class Drawer(Agent):
         self.middle_nn = middle_nn
         self.image_decoder = image_decoder
         
-        self.args = args
+        self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
 
     # message: tensor of shape (batch size, max message length)

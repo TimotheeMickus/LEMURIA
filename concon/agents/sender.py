@@ -17,7 +17,7 @@ class Sender(Agent):
         self.image_encoder = image_encoder
         self.message_decoder = message_decoder
         
-        self.args = args
+        self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
 
     def forward(self, image):

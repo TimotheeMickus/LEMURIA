@@ -24,7 +24,7 @@ class Receiver(Agent):
         self.image_encoder = image_encoder
         self.message_encoder = message_encoder
         
-        self.args = args
+        self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
 
     def encode_message(self, message, length):
