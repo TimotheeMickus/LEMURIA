@@ -29,16 +29,16 @@ class Batch():
         if(not isinstance(other, Batch)): return NotImplemented
 
         if(self.size != other.size):
-            print("Batch.eq//size")
+            print("Batch.__eq__//size")
             return False
         if(self.original != other.original):
-            print("Batch.eq//original")
+            print("Batch.__eq__//original")
             return False
         if(self.target != other.target):
-            print("Batch.eq//target")
+            print("Batch.__eq__//target")
             return False
         if(self.base_distractors != other.base_distractors):
-            print("Batch.eq//base_distractors")
+            print("Batch.__eq__//base_distractors")
             return False
 
         return True
@@ -105,10 +105,10 @@ class InputDataPoint():
         if(not isinstance(other, InputDataPoint)): return NotImplemented
 
         if(not torch.equal(self.img, other.img)):
-            print("InputDataPoint.eq//img")
+            print("InputDataPoint.__eq__//img")
             return False
         if(self.category != other.category):
-            print("InputDataPoint.eq//category")
+            print("InputDataPoint.__eq__//category")
             return False
 
         return True
