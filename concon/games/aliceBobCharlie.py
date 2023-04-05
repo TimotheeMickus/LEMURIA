@@ -128,7 +128,7 @@ class AliceBobCharlie(AliceBob):
         scores = torch.tensor([self.score_trackers[role].get(default=0.0) for role in ["sender", "receiver", "drawer"]], device=sender_loss.device) # Shape: (3)
         if(self.loss_weight_temp != 0.0): weights = torch.softmax((-scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(-scores), 3) # Shape: (3)
-        #else: weights = torch.ones_like(-scores) # Only one of the value will be used. Shape: (3)
+        #else: weights = torch.ones_like(-scores) # Only one of the values will be used. Shape: (3)
         if(self.debug):
             if(kwargs["epoch_index"] < 50): weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates Charlie's training.
             elif(kwargs["epoch_index"] < 60): weights = torch.tensor([0.0, 0.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates everyone's training.
