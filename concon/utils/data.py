@@ -43,6 +43,24 @@ class Batch():
 
         return True
 
+    # Used for debugging.
+    # Returns (list[None|int], list[None|int], list[None|int]).
+    def indices(self):
+        return ([dp.idx for dp in self.original], [dp.idx for dp in self.target], [dp.idx for l in self.base_distractors for dp in l])
+
+    # Used for debugging.
+    # Returns (list[None|tuple[int]], list[None|tuple[int]], list[None|tuple[int]]).
+    def categories(self):
+        return ([dp.category for dp in self.original], [dp.category for dp in self.target], [dp.category for l in self.base_distractors for dp in l])
+
+    # Used for debugging.
+    # Returns an int.
+    def signature(self):
+        a, b, c = self.indices()
+        d, e, f = self.categories()
+
+        return hash(tuple([tuple(x) for x in [a, b, c, d, e, f]]))
+
     def original_img(self, stack=False, f=None):
         if(f is None): f = (lambda x: x)
 
@@ -75,9 +93,9 @@ class Batch():
         if(f is None): f = (lambda x: x)
 
         if(not flat):
-            tmp = [[f(x.img) for x in base_distractor] for base_distractor in self.base_distractors]
-            if(stack): tmp = list(map(torch.stack, tmp))
-        else: tmp = [f(x.img) for base_distractor in self.base_distractors for x in base_distractor]
+            tmp = [[f(x.img) for x in base_distractor] for base_distractor in self.base_distractors] # list[list[tensor of shape (*IMG_SHAPE)]]
+            if(stack): tmp = list(map(torch.stack, tmp)) # list[tensor of shape (1, *IMG_SHAPE)]
+        else: tmp = [f(x.img) for base_distractor in self.base_distractors for x in base_distractor] # list[tensor of shape (*IMG_SHAPE)]
 
         if(stack): return torch.stack(tmp)
         else: return tmp
@@ -97,9 +115,11 @@ class Batch():
 class InputDataPoint():
     # img: tensor of shape [*IMG_SHAPE]
     # category: None or tuple[int]
-    def __init__(self, img, category=None):
+    # idx: None or int
+    def __init__(self, img, category=None, idx=None):
         self.img = img # Shape: [*IMG_SHAPE]
         self.category = category
+        self.idx = idx
 
     def __eq__(self, other):
         if(not isinstance(other, InputDataPoint)): return NotImplemented
@@ -118,7 +138,7 @@ class InputDataPoint():
         if(deep): img = img.clone() # RMK: `clone` is differentiable.
         else: img = self.img
 
-        return InputDataPoint(img, self.category)
+        return InputDataPoint(img, self.category, self.idx)
 
     # Adds (inplace) noise if necessary (normal random noise + clamping).
     def add_normal_noise_(self, noise):
@@ -130,22 +150,23 @@ class InputDataPoint():
     def add_normal_noise(self, noise):
         img = self.img if(noise <= 0.0) else add_normal_noise(self.img, std_dev=noise, clamp_values=(0.0, 1.0))
         
-        return InputDataPoint(img, self.category)
+        return InputDataPoint(img, self.category, self.idx)
 
 class DataPoint():
     # idx: int
-    # category: ?
+    # category: tuple[int]
     # img: tensor of shape ?
     def __init__(self, idx, category, img):
         self.idx = idx
         self.category = category
         self.img = img
 
-    def toInput(self, keep_category=False, device=None):
+    def toInput(self, keep_category=False, device=None, keep_idx=False):
         img = self.img if(device is None) else self.img.to(device)
-        category = self.category if keep_category else None
+        category = self.category if(keep_category) else None
+        idx = self.idx if(keep_idx) else None
 
-        return InputDataPoint(img, category)
+        return InputDataPoint(img, category, idx)
 
 class FailureBasedDistribution():
     def __init__(self, nb_categories, momentum_factor=0.99, smoothing_factor=1.0):
@@ -323,7 +344,7 @@ class Dataset():
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
 
     # Returns a Batch.
-    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=None, keep_category=False):
+    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=None, keep_category=False, keep_idx=False):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates, when selecting an image from a category, from what part of this category we take it.
@@ -331,7 +352,8 @@ class Dataset():
         no_evaluation: bool, indicates whether we avoid evaluation categories.
         target_evaluation: bool, indicates whether the original/target category must be one of the evaluation categories.
         target_is_original: None or ?, ?
-        keep_category: bool, ?
+        keep_category: bool, the InputDataPoint·s of the batch will contain the category of their DataPoint·s,
+        keep_idx: bool, the InputDataPoint·es of the batch will contain the index of their DataPoint·s.
         """
         batch = []
         if(size is None): size = self.batch_size
@@ -345,11 +367,11 @@ class Dataset():
             target_category = random.choice(list(categories))
 
             # Original image
-            _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device)
+            _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx)
 
             # Target image
             if(target_is_original): _target = _original.copy(deep=False)
-            else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category, self.device) # Same category
+            else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx) # Same category
             
             # Noise is applied independently to the two images. The modification is inplace, but should only affect the InputDataPoint·s themselves, and not the DataPoint·s they are derived from.
             _original.add_normal_noise_(self.noise)
@@ -359,7 +381,7 @@ class Dataset():
             _base_distractors = []
             for sampling_strategy in sampling_strategies:
                 distractor_category = self.sample_category(sampling_strategy, target_category, no_evaluation)
-                distractor = self.category_to_datapoint(distractor_category, data_type).toInput(keep_category, self.device)
+                distractor = self.category_to_datapoint(distractor_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx)
                 distractor.add_normal_noise_(self.noise)
 
                 _base_distractors.append(distractor)

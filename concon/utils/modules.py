@@ -86,7 +86,7 @@ class MessageDecoder(nn.Module):
         output_dim,
         max_msg_len,
         symbol_embeddings,
-        ):
+    ):
         super(MessageDecoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
@@ -104,6 +104,8 @@ class MessageDecoder(nn.Module):
         self.eos_index = 0
         self.padding_idx = base_alphabet_size + 1
 
+    # Returns a dictionary.
+    # encoded: tensor of shape (batch size, encoding size)
     def forward(self, encoded):
         # Initialisation
         last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
@@ -127,9 +129,9 @@ class MessageDecoder(nn.Module):
             output = self.action_space_proj(output).squeeze(0)
 
             # Selects actions
-            probs = F.softmax(output, dim=-1)
+            probs = F.softmax(output, dim=-1) # Shape: (batch size, (alphabet size + 1))
             dist = Categorical(probs)
-            action = dist.sample() if self.training else probs.argmax(dim=-1)
+            action = dist.sample() if(self.training) else probs.argmax(dim=-1) # Shape: (batch size)
 
             # Ignores prediction for completed messages
             ent = dist.entropy() * (~has_stopped).float()
@@ -148,14 +150,14 @@ class MessageDecoder(nn.Module):
             last_symbol = action
 
         # Converts output to tensor
-        message = torch.stack(message, dim=1)
-        message_len = (message != self.padding_idx).sum(dim=1)[:,None]
-        log_probs = torch.stack(log_probs, dim=1)
+        message = torch.stack(message, dim=1) # Shape: (batch size, max msg length)
+        message_len = (message != self.padding_idx).sum(dim=1)[:, None] # Shape: (batch size, 1)
+        log_probs = torch.stack(log_probs, dim=1) # Shape: (batch size, max msg length)
 
         # Average entropy over timesteps, hence ignore padding
-        entropy = torch.stack(entropy, dim=1)
-        entropy = entropy.sum(dim=1, keepdim=True)
-        entropy = entropy / message_len.float() # The average symbol distribution entropy over the message
+        entropy = torch.stack(entropy, dim=1) # Shape: (batch size, max msg length)
+        entropy = entropy.sum(dim=1, keepdim=True) # Shape: (batch size, 1)
+        entropy = entropy / message_len.float() # The average symbol distribution entropy over the message. Shape: (batch size, 1)
 
         outputs = {
             "entropy": entropy,
@@ -192,7 +194,9 @@ class NoiseAdder(nn.Module):
         return cls()
 
 # output: torch.nn.Module
-def _dcgan_tuto_cnn(hidden_size):
+# hidden_size: int
+# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
+def _dcgan_tuto_cnn(hidden_size, track_running_stats=True):
     # params of convs:
     # input chans, output chans, kernel, stride, padding
     # ignore coms which are incorrect wrt. our IMG size
@@ -202,19 +206,19 @@ def _dcgan_tuto_cnn(hidden_size):
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (hidden_size) x 32 x 32
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (hidden_size*2) x 16 x 16
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (hidden_size*4) x 8 x 8
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (hidden_size*4) x 8 x 8
             nn.Conv2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (hidden_size*8) x 4 x 4
             nn.Conv2d(hidden_size, hidden_size, 4, 1, 0, bias=False),
@@ -223,30 +227,32 @@ def _dcgan_tuto_cnn(hidden_size):
         )
 
 # output: torch.nn.Module
-def _dcgan_tuto_decnn(hidden_size):
+# hidden_size: int
+# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
+def _dcgan_tuto_decnn(hidden_size, track_running_stats=True):
     # params of convs:
     # input chans, output chans, kernel, stride, padding
     # ignore coms which are incorrect wrt. our IMG size
     return nn.Sequential(
             # input is Z, going into a convolution
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 1, 0, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*8) x 4 x 4
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*8) x 4 x 4
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*4) x 8 x 8
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*2) x 16 x 16
             nn.ConvTranspose2d(hidden_size, hidden_size, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size) x 32 x 32
             nn.ConvTranspose2d(hidden_size, 3, 4, 2, 1, bias=False),
@@ -255,7 +261,9 @@ def _dcgan_tuto_decnn(hidden_size):
         )
 
 # output: torch.nn.Module
-def _dcgan_decnn(hidden_size):
+# hidden_size: int
+# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
+def _dcgan_decnn(hidden_size, track_running_stats=True):
     """A more viable CNN/DCNN architecture"""
     # params of convs:
     # input chans, output chans, kernel, stride, padding
@@ -266,31 +274,31 @@ def _dcgan_decnn(hidden_size):
             nn.Upsample(scale_factor=4, mode='nearest'),
             #nn.ReflectionPad2d(1),
             nn.Conv2d(hidden_size, hidden_size * 16, 3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_size * 16),
+            nn.BatchNorm2d(hidden_size * 16, track_running_stats=track_running_stats),
             nn.ReLU(True),
              # state size. (hidden_size*16) x 4 x 4
             nn.Upsample(scale_factor=2, mode='nearest'),
             #nn.ReflectionPad2d(1),
             nn.Conv2d(hidden_size * 16, hidden_size * 8, 3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_size * 8),
+            nn.BatchNorm2d(hidden_size * 8, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*8) x 8 x 8
             nn.Upsample(scale_factor=2, mode='nearest'),
             #nn.ReflectionPad2d(1),
             nn.Conv2d(hidden_size * 8, hidden_size * 4, 3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_size * 4),
+            nn.BatchNorm2d(hidden_size * 4, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*4) x 16 x 16
             nn.Upsample(scale_factor=2, mode='nearest'),
             #nn.ReflectionPad2d(1),
             nn.Conv2d(hidden_size * 4, hidden_size *2, 3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_size * 2),
+            nn.BatchNorm2d(hidden_size * 2, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size*2) x 32 x 32
             nn.Upsample(scale_factor=2, mode='nearest'),
             #nn.ReflectionPad2d(1),
             nn.Conv2d(hidden_size * 2, hidden_size, 3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_size),
+            nn.BatchNorm2d(hidden_size, track_running_stats=track_running_stats),
             nn.ReLU(True),
             # state size. (hidden_size) x 64 x 64
             nn.Upsample(scale_factor=2, mode='nearest'),
@@ -301,7 +309,9 @@ def _dcgan_decnn(hidden_size):
         )
 
 # output: torch.nn.Module
-def _dcgan_cnn(hidden_size):
+# hidden_size: int
+# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
+def _dcgan_cnn(hidden_size, track_running_stats=True):
     """A more viable CNN/DCNN architecture"""
     # params of convs:
     # input chans, output chans, kernel, stride, padding
@@ -313,22 +323,22 @@ def _dcgan_cnn(hidden_size):
 
             # state size. (hidden_size) x 64 x 64
             nn.Conv2d(hidden_size, hidden_size * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size * 2),
+            nn.BatchNorm2d(hidden_size * 2, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
             # state size. (hidden_size) x 32 x 32
             nn.Conv2d(hidden_size * 2, hidden_size * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size * 4),
+            nn.BatchNorm2d(hidden_size * 4, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
             # state size. (hidden_size*2) x 16 x 16
             nn.Conv2d(hidden_size * 4, hidden_size * 8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size * 8),
+            nn.BatchNorm2d(hidden_size * 8, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
             # state size. (hidden_size*4) x 8 x 8
             nn.Conv2d(hidden_size * 8, hidden_size * 16, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(hidden_size * 16),
+            nn.BatchNorm2d(hidden_size * 16, track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
             # state size. (hidden_size*8) x 4 x 4
@@ -426,7 +436,8 @@ def _dcgan_cnn(hidden_size):
 #     return cnn
 
 # output: torch.nn.Module
-def build_cnn_encoder_from_args(args):
+# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
+def build_cnn_encoder_from_args(args, track_running_stats=False):
     """
     Factory for convolutionnal networks
     """
@@ -434,10 +445,10 @@ def build_cnn_encoder_from_args(args):
     
     if(args.use_legacy_cnn or args.use_legacy_convolutions):
         if(not args.quiet): print("Using legacy convolution architecture")
-        short_cut = _dcgan_tuto_cnn(features)
+        short_cut = _dcgan_tuto_cnn(features, track_running_stats=track_running_stats)
     else:
         if(not args.quiet): print("Using modern convolution architecture")
-        short_cut = _dcgan_cnn(features)
+        short_cut = _dcgan_cnn(features, track_running_stats=track_running_stats)
     
     return short_cut
     #
@@ -454,17 +465,18 @@ def build_cnn_encoder_from_args(args):
     #     paddings=None,)
 
 # output: torch.nn.Module
-def build_cnn_decoder_from_args(args):
+# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
+def build_cnn_decoder_from_args(args, track_running_stats=False):
     """
     Factory for deconvolutionnal networks
     """
     features = args.decnn_channel_size or args.hidden_size
     if(args.use_legacy_decnn or args.use_legacy_convolutions):
         if(not args.quiet): print("Using legacy deconvolution architecture")
-        short_cut = _dcgan_tuto_decnn(features)
+        short_cut = _dcgan_tuto_decnn(features, track_running_stats=track_running_stats)
     else:
         if(not args.quiet): print("Using modern deconvolution architecture")
-        short_cut = _dcgan_decnn(features)
+        short_cut = _dcgan_decnn(feature, strack_running_stats=track_running_stats)
     
     return short_cut
 

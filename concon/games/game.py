@@ -372,11 +372,11 @@ class Game(metaclass=ABCMeta):
         """
         Trains all agents over a given number of epochs.
         """
-        # DEBUG 2023-04-05
-        if(self.debug):
-            print("Checking dataset integrity…")
-            data_loader.check_integrity(nb_batch=100)
-            print("Dataset seems fine.")
+        ## DEBUG 2023-04-05
+        #if(self.debug):
+        #    print("Checking dataset integrity…")
+        #    data_loader.check_integrity(nb_batch=100)
+        #    print("Dataset seems fine.")
         
         for epoch_index in range(epochs):
             timepoint_0 = time.time()
@@ -393,11 +393,11 @@ class Game(metaclass=ABCMeta):
             print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
 
-            # DEBUG 2023-04-05
-            if(self.debug):
-                print("Checking dataset integrity…")
-                data_loader.check_integrity(nb_batch=100)
-                print("Dataset seems fine.")
+            ## DEBUG 2023-04-05
+            #if(self.debug):
+            #    print("Checking dataset integrity…")
+            #    data_loader.check_integrity(nb_batch=100)
+            #    print("Dataset seems fine.")
 
             if((save_every > 0) and (((epoch_index + 1) % save_every) == 0)):
                 model_name = "model_e{epoch_index}.pt"

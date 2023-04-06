@@ -28,7 +28,7 @@ class Sender(Agent):
             Output:
                 `Outcome`, where `action` is the produced message
         """
-        encoded_image = self.image_encoder(image)
+        encoded_image = self.image_encoder(image) # Shape: (batch size, encoding size)
         outputs = self.message_decoder(encoded_image)
 
         outcome = Outcome(

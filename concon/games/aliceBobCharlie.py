@@ -170,6 +170,12 @@ class AliceBobCharlie(AliceBob):
                     direct=True,
                 )
 
+        #if(self.debug): # 2023-04-06
+        #    for idx, x in enumerate('ABC'):
+        #        agent = self.all_agents[idx]
+        #        print(f'train/weight_{x}: {weights[idx].item()}')
+        #        print(f'train/L1_{x}: {misc.sum_params(agent, abs=True).item()}')
+
         optimization = []
 
         # Alice backward.

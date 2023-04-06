@@ -171,7 +171,7 @@ class AliceBob(Game):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
 
-        (rewards, perf) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensor of shape (batch size).
+        (rewards, perf) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensors of shape (batch size).
 
         loss = 0.0
 
@@ -261,15 +261,36 @@ class AliceBob(Game):
             success_prob = [] # Probabilities
             scrambled_success_prob = [] # Probabilities
 
-            for _ in batch_numbers:
+            for batch_index in batch_numbers:
                 self.start_episode(train_episode=False)
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
+                #if(self.debug): # 2023-04-06
+                #    random_seed = batch_index
+                #    random.seed(random_seed)
+                #    np.random.seed(seed=random_seed)
+
+                #    batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category
+
+                #    #print(batch.indices())
+                #    #print(batch.categories())
+                #    print(f"batch n°{batch_index}'s signature: {batch.signature()}")
+                #else:
+                #    batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
+
                 sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
                 receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
                 success.append((receiver_pointing['action'] == 0).float())
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
+                
+                #if(self.debug): # 2023-04-06
+                #    print(f"messages' signature: {hash(tuple(map(tuple, sender_outcome.action[0].numpy())))}")
+                #    #print(sender_outcome.log_prob) # Probability of the symbols
+                #    print(sender_outcome.log_prob.abs().sum().item())
+                #    #print(receiver_outcome.scores[:, 0]) # Score of the target
+                #    print(receiver_outcome.scores[:, 0].abs().sum().item())
+                #    #print(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
@@ -309,7 +330,7 @@ class AliceBob(Game):
             n = (32 * data_iterator.nb_categories)
             n = min(max_datapoints, n)
             nb_batch = int(np.ceil(n / batch_size))
-            for _ in range(nb_batch):
+            for batch_index in range(nb_batch):
                 self.start_episode(train_episode=False)
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from the same category
