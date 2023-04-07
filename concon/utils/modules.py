@@ -436,12 +436,12 @@ def _dcgan_cnn(hidden_size, track_running_stats=True):
 #     return cnn
 
 # output: torch.nn.Module
-# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
-def build_cnn_encoder_from_args(args, track_running_stats=False):
+def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
     """
     features = args.cnn_channel_size or args.hidden_size
+    track_running_stats = (not args.local_batchnorm) # Pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added).
     
     if(args.use_legacy_cnn or args.use_legacy_convolutions):
         if(not args.quiet): print("Using legacy convolution architecture")
@@ -465,12 +465,13 @@ def build_cnn_encoder_from_args(args, track_running_stats=False):
     #     paddings=None,)
 
 # output: torch.nn.Module
-# track_running_stats: bool, pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added)
-def build_cnn_decoder_from_args(args, track_running_stats=False):
+def build_cnn_decoder_from_args(args):
     """
     Factory for deconvolutionnal networks
     """
     features = args.decnn_channel_size or args.hidden_size
+    track_running_stats = (not args.local_batchnorm) # Pertains to torch.nn.BatchNorm2d (if True, hidden statistics tracking parameters are added).
+
     if(args.use_legacy_decnn or args.use_legacy_convolutions):
         if(not args.quiet): print("Using legacy deconvolution architecture")
         short_cut = _dcgan_tuto_decnn(features, track_running_stats=track_running_stats)

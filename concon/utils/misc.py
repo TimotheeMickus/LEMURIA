@@ -175,9 +175,13 @@ class Vocabulary:
     def __getitem__(self, idx):
         return self.entries[idx]
 
+# Returns a zero-place function.
+# base_fn: one-place function
+# args: any (meant to be the argument of base_fn)
 def get_default_fn(base_fn, args):
     def _wrap():
         return base_fn(args)
+    
     return _wrap
 
 # scores: tensor of shape (batch size, #options)

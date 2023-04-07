@@ -86,6 +86,7 @@ def get_args():
     group.add_argument('--img_size', help='Width/height of images', type=int, default=128)
     group.add_argument('--decnn_channel_size', help="factor to determine number of channel features in deconvolutions (defaults to hidden size)", type=int, default=None)
     group.add_argument('--cnn_channel_size', help="factor to determine number of channel features in convolutions (defaults to hidden size)", type=int, default=None)
+    group.add_argument('--local_batchnorm', help="indicates whether BatchNorme2D layers use global statistics (False) or not (True)", action="store_true")
     group.add_argument('--use_legacy_convolutions', help="use old architectures for both CNN and DeCNN", action="store_true")
     group.add_argument('--use_legacy_decnn', help="use old architecture for DeCNN", action="store_true")
     group.add_argument('--use_legacy_cnn', help="use old architecture for CNN", action="store_true")
