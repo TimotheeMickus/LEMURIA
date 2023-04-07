@@ -129,11 +129,6 @@ class AliceBobCharlie(AliceBob):
         if(self.loss_weight_temp != 0.0): weights = torch.softmax((-scores / self.loss_weight_temp), dim=0) # Shape: (3)
         else: weights = torch.nn.functional.one_hot(torch.argmax(-scores), 3) # Shape: (3)
         #else: weights = torch.ones_like(-scores) # Only one of the values will be used. Shape: (3)
-        if(self.debug):
-            if(kwargs["epoch_index"] < 50): weights = torch.tensor([1.0, 1.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates Charlie's training.
-            elif(kwargs["epoch_index"] < 60): weights = torch.tensor([0.0, 0.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates everyone's training.
-            elif(kwargs["epoch_index"] < 75): weights = torch.tensor([0.0, 0.0, 1.0], device=weights.device) # DEBUG ONLY 2023-03-31 Deactivates Alice's and Bob's training.
-            else: weights = torch.tensor([0.0, 0.0, 0.0], device=weights.device) # DEBUG ONLY 2023-03-28 Deactivates everyone's training.
         losses = torch.stack([sender_loss, receiver_loss, drawer_loss]) # Shape: (3)
         weighted_losses = weights * losses # Shape: (3)
 
@@ -163,18 +158,6 @@ class AliceBobCharlie(AliceBob):
                     self.weights_average_log_counter,
                     direct=True,
                 )
-                self.autologger._write(
-                    f'train/L1_{x}',
-                    misc.sum_params(agent, abs=True).item(),
-                    self.weights_average_log_counter,
-                    direct=True,
-                )
-
-        #if(self.debug): # 2023-04-06
-        #    for idx, x in enumerate('ABC'):
-        #        agent = self.all_agents[idx]
-        #        print(f'train/weight_{x}: {weights[idx].item()}')
-        #        print(f'train/L1_{x}: {misc.sum_params(agent, abs=True).item()}')
 
         optimization = []
 
@@ -202,12 +185,6 @@ class AliceBobCharlie(AliceBob):
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
         if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(-scores)]]
-
-        if(self.debug):
-            if(kwargs["epoch_index"] < 50): optimization = optimization[0:2] # DEBUG ONLY 2023-03-31 Deactivates Charlie's training.
-            elif(kwargs["epoch_index"] < 60): optimization = [] # DEBUG ONLY 2023-03-31 Deactivates everyone's training.
-            elif(kwargs["epoch_index"] < 75): optimization = [optimization[2]] # DEBUG ONLY 2023-03-31 Deactivates Alice's and Bob's training.
-            else: optimization = [] # DEBUG ONLY 2023-03-28 Deactivates everyone's training.
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
@@ -245,11 +222,3 @@ class AliceBobCharlie(AliceBob):
 
     def test_visualize(self, data_iterator, learning_rate):
         raise NotImplementedError
-
-    def evaluate(self, data_iterator, epoch_index):
-        if self.debug: # DEBUG ONLY 2023-03-31 Deactivates Charlie during eval.
-            removed = self._drawer
-            self._drawer = None
-        super().evaluate(data_iterator, epoch_index)
-        if self.debug:
-            self._drawer = removed

@@ -82,10 +82,7 @@ class Game(metaclass=ABCMeta):
         Sets the agents involved in the current round of the game to eval mode.
         """
         for agent in self.current_agents:
-            try: # DEBUG ONLY 2023-03-31 Deactivates Charlie during eval.
-                agent.eval()
-            except:
-                pass
+            agent.eval()
 
     def start_episode(self, train_episode=True):
         """
@@ -372,12 +369,6 @@ class Game(metaclass=ABCMeta):
         """
         Trains all agents over a given number of epochs.
         """
-        ## DEBUG 2023-04-05
-        #if(self.debug):
-        #    print("Checking dataset integrity…")
-        #    data_loader.check_integrity(nb_batch=100)
-        #    print("Dataset seems fine.")
-        
         for epoch_index in range(epochs):
             timepoint_0 = time.time()
 
@@ -392,12 +383,6 @@ class Game(metaclass=ABCMeta):
             timepoint_1 = time.time()
             print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
-
-            ## DEBUG 2023-04-05
-            #if(self.debug):
-            #    print("Checking dataset integrity…")
-            #    data_loader.check_integrity(nb_batch=100)
-            #    print("Dataset seems fine.")
 
             if((save_every > 0) and (((epoch_index + 1) % save_every) == 0)):
                 model_name = "model_e{epoch_index}.pt"

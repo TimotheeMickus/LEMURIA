@@ -131,9 +131,6 @@ class AliceBob(Game):
         loss = sender_loss + receiver_loss
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
-        if(self.debug):
-            if(kwargs["epoch_index"] >= 50): optimization = [] # DEBUG ONLY 2023-03-31 Deactivates training.
-
         msg_length = sender_outcome.action[1].float().mean()
 
         return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
@@ -265,32 +262,12 @@ class AliceBob(Game):
                 self.start_episode(train_episode=False)
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
-                #if(self.debug): # 2023-04-06
-                #    random_seed = batch_index
-                #    random.seed(random_seed)
-                #    np.random.seed(seed=random_seed)
-
-                #    batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category
-
-                #    #print(batch.indices())
-                #    #print(batch.categories())
-                #    print(f"batch n°{batch_index}'s signature: {batch.signature()}")
-                #else:
-                #    batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category
 
                 sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
                 receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
                 success.append((receiver_pointing['action'] == 0).float())
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
-                
-                #if(self.debug): # 2023-04-06
-                #    print(f"messages' signature: {hash(tuple(map(tuple, sender_outcome.action[0].numpy())))}")
-                #    #print(sender_outcome.log_prob) # Probability of the symbols
-                #    print(sender_outcome.log_prob.abs().sum().item())
-                #    #print(receiver_outcome.scores[:, 0]) # Score of the target
-                #    print(receiver_outcome.scores[:, 0].abs().sum().item())
-                #    #print(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
 
                 target_category = [data_iterator.category_idx(x.category) for x in batch.original]
                 distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
