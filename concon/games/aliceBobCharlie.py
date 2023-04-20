@@ -1,4 +1,5 @@
 import torch
+import torchvision
 import numpy as np
 import scipy
 
@@ -61,6 +62,7 @@ class AliceBobCharlie(AliceBob):
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
 
         self.debug = args.debug
+        self.log_charlie_sample_imgs = not (args.no_summary or args.no_log_imgs)
 
     @property
     def drawer(self):
@@ -219,6 +221,32 @@ class AliceBobCharlie(AliceBob):
         loss += cross_entropy_loss
 
         return (loss, perf)
+
+
+    # Overrides AliceBob.evaluate
+    @torch.no_grad()
+    def evaluate(self, data_iterator, epoch_index):
+        ret_vals = super().evaluate(data_iterator, epoch_index)
+
+        if not self.log_charlie_sample_imgs:
+            return ret_vals
+        # retrieve agents necessary for image generation
+        sender, drawer = self.sender, self.drawer
+        # get data
+        batch = data_iterator.get_batch(32, data_type='test', no_evaluation=False, sampling_strategies=['different'])
+
+        # get image
+        action = sender(self._alice_input(batch)).action
+        images = drawer(*action).image
+        # format
+        images = torch.cat([batch.target_img(stack=True).unsqueeze(1), images.unsqueeze(1)], dim=1).flatten(end_dim=1)
+        images = torchvision.utils.make_grid(images, 8)
+        # log to summary writer
+        writer = self.autologger.summary_writer.writer
+
+        writer.add_image('C/sample', images, epoch_index)
+
+        return ret_vals
 
     def test_visualize(self, data_iterator, learning_rate):
         raise NotImplementedError

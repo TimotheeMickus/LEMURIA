@@ -42,6 +42,7 @@ def get_args():
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
     group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
+    group.add_argument('--no_log_imgs', help='do not log image samples', action='store_true')
     # TODO: refactor logging: --logging_period should control the frequency of step reports when --display minimal
     group.add_argument('--logging_period', help='how often counts of logged variables are accumulated', type=int, default=10)
     # TODO: refactor logging: --quiet vs. --display quiet?
