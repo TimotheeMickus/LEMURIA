@@ -321,7 +321,7 @@ class AliceBob(Game):
         abstractness_rate = abstractness.mean().item()
         log('eval/abstractness', abstractness_rate)
 
-        use_legacy_names = False # New (non-legacy) names are the ones used in the ACL submission. Currently, legacy names are used in the code/comments.
+        use_legacy_names = False # New (non-legacy) names are the ones used in the ACL submission.
         if(not use_legacy_names):
             name_acc = "accuracy"
             name_c_e = "c.e."
@@ -339,61 +339,61 @@ class AliceBob(Game):
             name_tgen_c_e = "accuracy-eval-t" # At least one generalization category (target/original images).
             name_dgen_c_e = "accuracy-eval-d" # At least one generalization category (distractor).
 
-        # Here, we compute the actual success rate with argmax pointing, and not the mean expected success based on probabilities like is done after (for accuracies).
+        # Here, we compute the actual accuracy rate with argmax pointing, and not the mean expected accuracy based on probabilities like is done after (for communication efficiency).
         success = torch.stack(success)
-        success_rate = success.mean().item()
-        log(f'eval/{name_acc}', success_rate)
+        accuracy = success.mean().item()
+        log(f'eval/{name_acc}', accuracy)
 
-        # Computes the accuracy when the images are selected from all categories.
-        accuracy_all = 1 - (failure_matrix.sum() / counts_matrix.sum())
-        log(f'eval/{name_c_e}', accuracy_all)
+        # Computes the communication efficiency when the images are selected from all categories.
+        c_e = 1 - (failure_matrix.sum() / counts_matrix.sum())
+        log(f'eval/{name_c_e}', c_e)
 
         train_categories = data_iterator.training_categories_idx
         eval_categories = data_iterator.evaluation_categories_idx
         if(eval_categories != []):
-            # Computes the accuracy when both the target and the distractor are selected from training categories.
+            # Computes the communication efficiency when both the target and the distractor are selected from training categories.
             failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
             counts_matrix_train_td = counts_matrix[np.ix_(train_categories, train_categories)]
 
             counts = counts_matrix_train_td.sum()
-            accuracy_train_td = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_base_c_e}', accuracy_train_td)
+            base_c_e = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
+            log(f'eval/{name_base_c_e}', base_c_e)
 
-            # Computes the accuracy when both the target and the distractor are selected from evaluation categories (never seen during training).
+            # Computes the communication efficiency when both the target and the distractor are selected from evaluation categories (never seen during training).
             failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
             counts_matrix_eval_td = counts_matrix[np.ix_(eval_categories, eval_categories)]
 
             counts = counts_matrix_eval_td.sum()
-            accuracy_eval_td = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_gen_c_e}', accuracy_eval_td)
+            gen_c_e = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
+            log(f'eval/{name_gen_c_e}', gen_c_e)
             
-            # Computes the accuracy when exactly one evaluation category (never seen during training) is used.
+            # Computes the communication efficiency when exactly one evaluation category (never seen during training) is used.
             failure_matrix_tbase_dgen = failure_matrix[np.ix_(train_categories, eval_categories)]
             counts_matrix_tbase_dgen = counts_matrix[np.ix_(train_categories, eval_categories)]
             failure_matrix_tgen_dbase = failure_matrix[np.ix_(eval_categories, train_categories)]
             counts_matrix_tgen_dbase = counts_matrix[np.ix_(eval_categories, train_categories)]
 
             counts = counts_matrix_tbase_dgen.sum() + counts_matrix_tgen_dbase.sum()
-            accuracy_one = (1 - ((failure_matrix_tbase_dgen.sum() + failure_matrix_tgen_dbase.sum()) / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_mixed_c_e}', accuracy_one)
+            mixed_c_e = (1 - ((failure_matrix_tbase_dgen.sum() + failure_matrix_tgen_dbase.sum()) / counts)) if(counts > 0.0) else -1
+            log(f'eval/{name_mixed_c_e}', mixed_c_e)
 
-            # Computes the accuracy when the target is selected from an evaluation category (never seen during training).
+            # Computes the communication efficiency when the target is selected from an evaluation category (never seen during training).
             failure_matrix_eval_t = failure_matrix[eval_categories, :]
             counts_matrix_eval_t = counts_matrix[eval_categories, :]
 
             counts = counts_matrix_eval_t.sum()
-            accuracy_eval_t = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_tgen_c_e}', accuracy_eval_t)
+            tgen_c_e = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
+            log(f'eval/{name_tgen_c_e}', tgen_c_e)
 
-            # Computes the accuracy when the distractor is selected from an evaluation category (never seen during training).
+            # Computes the communication efficiency when the distractor is selected from an evaluation category (never seen during training).
             failure_matrix_eval_d = failure_matrix[:, eval_categories]
             counts_matrix_eval_d = counts_matrix[:, eval_categories]
 
             counts = counts_matrix_eval_d.sum()
-            accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_dgen_c_e}', accuracy_eval_d)
+            dgen_c_e = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
+            log(f'eval/{name_dgen_c_e}', dgen_c_e)
 
-        # If the "same_img" option is used, the accuracy is also computed without this feature.
+        # If the "same_img" option is used, the communication efficiency is also computed without this feature.
         if(data_iterator.same_img):
             success_prob = []
             n = (32 * data_iterator.nb_categories)
@@ -410,8 +410,8 @@ class AliceBob(Game):
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target.
 
             success_prob = torch.stack(success_prob)
-            diff_tgt_accuracy = success_prob.mean().item()
-            log(f'eval/{name_c_e}_diff_tgt', diff_tgt_accuracy)
+            diff_tgt_c_e = success_prob.mean().item()
+            log(f'eval/{name_c_e}_diff_tgt', diff_tgt_c_e)
 
         # Computes metrics related to symbol-order.
         # First tries to rank each symbol according to its average relative position in messages.
