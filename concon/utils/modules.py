@@ -477,7 +477,7 @@ def build_cnn_decoder_from_args(args):
         short_cut = _dcgan_tuto_decnn(features, track_running_stats=track_running_stats)
     else:
         if(not args.quiet): print("Using modern deconvolution architecture")
-        short_cut = _dcgan_decnn(feature, strack_running_stats=track_running_stats)
+        short_cut = _dcgan_decnn(features, track_running_stats=track_running_stats)
     
     return short_cut
 
