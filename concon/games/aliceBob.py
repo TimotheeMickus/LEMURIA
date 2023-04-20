@@ -410,8 +410,8 @@ class AliceBob(Game):
                 success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target.
 
             success_prob = torch.stack(success_prob)
-            same_img_accuracy = success_prob.mean().item()
-            log(f'eval/{name_c_e}_same_img', same_img_accuracy)
+            diff_tgt_accuracy = success_prob.mean().item()
+            log(f'eval/{name_c_e}_diff_tgt', diff_tgt_accuracy)
 
         # Computes metrics related to symbol-order.
         # First tries to rank each symbol according to its average relative position in messages.
