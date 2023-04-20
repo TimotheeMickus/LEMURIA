@@ -233,6 +233,7 @@ class AliceBob(Game):
         return (loss, perf)
 
     # Called at the end of each training epoch.
+    @torch.no_grad()
     def evaluate(self, data_iterator, epoch_index):
         def log(name, value):
             self.autologger._write(name, value, epoch_index, direct=True)
@@ -253,73 +254,72 @@ class AliceBob(Game):
         categories = []
         batch_numbers = range(nb_batch)
         if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
-        with torch.no_grad():
-            success = [] # Binary
-            success_prob = [] # Probabilities
-            scrambled_success_prob = [] # Probabilities
+        success = [] # Binary
+        success_prob = [] # Probabilities
+        scrambled_success_prob = [] # Probabilities
 
-            for batch_index in batch_numbers:
-                self.start_episode(train_episode=False)
+        for batch_index in batch_numbers:
+            self.start_episode(train_episode=False)
 
-                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
 
-                sender_outcome, receiver_outcome = self.alice_to_bob(batch)
+            sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
-                receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
-                success.append((receiver_pointing['action'] == 0).float())
-                success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
+            receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
+            success.append((receiver_pointing['action'] == 0).float())
+            success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
 
-                target_category = [data_iterator.category_idx(x.category) for x in batch.original]
-                distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
+            target_category = [data_iterator.category_idx(x.category) for x in batch.original]
+            distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
-                failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
-                data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
+            failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
+            data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
 
-                np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
-                np.add.at(failure_matrix, (target_category, distractor_category), failure)
+            np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
+            np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
-                scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
-                for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepares for scrambling
-                    msg = sender_outcome.action[0][i]
-                    msg_len = sender_outcome.action[1][i]
-                    cat = datapoint.category
+            scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
+            for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepares for scrambling
+                msg = sender_outcome.action[0][i]
+                msg_len = sender_outcome.action[1][i]
+                cat = datapoint.category
 
-                    if((not self.correct_only) or (receiver_pointing['action'][i] == 0)):
-                        messages.append(msg.tolist()[:msg_len])
-                        categories.append(cat)
+                if((not self.correct_only) or (receiver_pointing['action'][i] == 0)):
+                    messages.append(msg.tolist()[:msg_len])
+                    categories.append(cat)
 
-                    # Scrambles the whole message, including the EOS (but not the padding symbols, of course)
-                    l = msg_len.item()
-                    scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
+                # Scrambles the whole message, including the EOS (but not the padding symbols, of course)
+                l = msg_len.item()
+                scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
-                scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
-                scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
-                scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+            scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+            scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
+            scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
-            success_prob = torch.stack(success_prob)
-            scrambled_success_prob = torch.stack(scrambled_success_prob)
-            scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
-            log('eval/scrambling-resistance', scrambling_resistance)
+        success_prob = torch.stack(success_prob)
+        scrambled_success_prob = torch.stack(scrambled_success_prob)
+        scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
+        log('eval/scrambling-resistance', scrambling_resistance)
 
-            # Here, we try to see how much the messages describe the categories and not the particular images
-            # To do so, we use the original image as target, and an image of the same category as distractor
-            abstractness = []
-            n = (32 * data_iterator.nb_categories)
-            n = min(max_datapoints, n)
-            nb_batch = int(np.ceil(n / batch_size))
-            for batch_index in range(nb_batch):
-                self.start_episode(train_episode=False)
+        # Here, we try to see how much the messages describe the categories and not the particular images
+        # To do so, we use the original image as target, and an image of the same category as distractor
+        abstractness = []
+        n = (32 * data_iterator.nb_categories)
+        n = min(max_datapoints, n)
+        nb_batch = int(np.ceil(n / batch_size))
+        for batch_index in range(nb_batch):
+            self.start_episode(train_episode=False)
 
-                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from the same category
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from the same category
 
-                sender_outcome, receiver_outcome = self.alice_to_bob(batch)
+            sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
-                receiver_pointing = misc.pointing(receiver_outcome.scores)
-                abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
+            receiver_pointing = misc.pointing(receiver_outcome.scores)
+            abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
 
-            abstractness = torch.stack(abstractness)
-            abstractness_rate = abstractness.mean().item()
-            log('eval/abstractness', abstractness_rate)
+        abstractness = torch.stack(abstractness)
+        abstractness_rate = abstractness.mean().item()
+        log('eval/abstractness', abstractness_rate)
 
         use_legacy_names = False # New (non-legacy) names are the ones used in the ACL submission. Currently, legacy names are used in the code/comments.
         if(not use_legacy_names):
@@ -393,6 +393,26 @@ class AliceBob(Game):
             accuracy_eval_d = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
             log(f'eval/{name_dgen_c_e}', accuracy_eval_d)
 
+        # If the "same_img" option is used, the accuracy is also computed without this feature.
+        if(data_iterator.same_img):
+            success_prob = []
+            n = (32 * data_iterator.nb_categories)
+            n = min(max_datapoints, n)
+            nb_batch = int(np.ceil(n / batch_size))
+            for batch_index in range(nb_batch):
+                self.start_episode(train_episode=False)
+
+                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], target_is_original=False, keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected uniformly from the original image's category.
+
+                sender_outcome, receiver_outcome = self.alice_to_bob(batch)
+
+                receiver_pointing = misc.pointing(receiver_outcome.scores)
+                success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target.
+
+            success_prob = torch.stack(success_prob)
+            same_img_accuracy = success_prob.mean().item()
+            log(f'eval/{name_c_e}_same_img', same_img_accuracy)
+
         # Computes metrics related to symbol-order.
         # First tries to rank each symbol according to its average relative position in messages.
         rel_positions = {} # From symbol to list of relative positions
@@ -405,7 +425,7 @@ class AliceBob(Game):
         avg_positions.sort()
         mapping = {sym: i for (i, (_, sym)) in enumerate(avg_positions)} # From symbol to rank
 
-        # Then builds the two lists that we want to test the correlation of
+        # Then builds the two lists that we want to test the correlation of.
         value_list = []
         position_list = []
         for message in messages:
