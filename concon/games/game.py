@@ -97,12 +97,6 @@ class Game(metaclass=ABCMeta):
         """
         self.train()
 
-    def end_episode(self, **kwargs):
-        """
-        Called after finishing a round of the game. Override for cleanup behavior.
-        """
-        self.eval()
-
     @property
     @abstractmethod
     def autologger(self):
@@ -156,8 +150,6 @@ class Game(metaclass=ABCMeta):
                     batch=batch,
                     index=iter_index,
                 )
-
-                self.end_episode(**udpated_state)
 
     def save(self, path):
         """
