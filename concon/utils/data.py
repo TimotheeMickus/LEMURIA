@@ -200,7 +200,7 @@ class FailureBasedDistribution():
 
 class Dataset():
     def __init__(self, same_img, device, noise, batch_size, sampling_strategies, args=None):
-        self.same_img = same_img # Whether Bob sees Alice's image or another one (of the same category); but any noise will be applied independently
+        self.same_img = same_img # Indicates if, by default, Bob sees Alice's image or another one (of the same category); but any noise will be applied independently.
         self.device = device
         self.noise = noise
         self.batch_size = batch_size
