@@ -377,5 +377,5 @@ class Game(metaclass=ABCMeta):
             timepoint_0 = timepoint_1
 
             if((save_every > 0) and (((epoch_index + 1) % save_every) == 0)):
-                model_name = "model_e{epoch_index}.pt"
+                model_name = f"model_e{epoch_index}.pt"
                 self.save(run_models_dir / model_name)
