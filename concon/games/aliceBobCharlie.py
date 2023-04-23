@@ -63,6 +63,8 @@ class AliceBobCharlie(AliceBob):
 
         self.debug = args.debug
         self.log_charlie_sample_imgs = not (args.no_summary or args.no_log_imgs)
+        self.log_img_every = args.log_img_every
+        self._batch_for_img_gen = None
 
     @property
     def drawer(self):
@@ -228,22 +230,29 @@ class AliceBobCharlie(AliceBob):
     def evaluate(self, data_iterator, epoch_index):
         ret_vals = super().evaluate(data_iterator, epoch_index)
 
-        if not self.log_charlie_sample_imgs:
-            return ret_vals
+        if(not self.log_charlie_sample_imgs): return ret_vals
+        if(((epoch_index + 1) % self.log_img_every) != 0): return ret_vals
+
         # retrieve agents necessary for image generation
         sender, drawer = self.sender, self.drawer
         # get data
-        batch = data_iterator.get_batch(32, data_type='test', no_evaluation=False, sampling_strategies=['different'])
+        if self._batch_for_img_gen is None:
+            self._batch_for_img_gen = data_iterator.get_batch(32, data_type='test', no_evaluation=False, sampling_strategies=['different'])
 
         # get image
-        action = sender(self._alice_input(batch)).action
+        action = sender(self._alice_input(self._batch_for_img_gen)).action
         images = drawer(*action).image
         # format
-        images = torch.cat([batch.target_img(stack=True).unsqueeze(1), images.unsqueeze(1)], dim=1).flatten(end_dim=1)
+        images = torch.cat(
+            [
+                self._batch_for_img_gen.target_img(stack=True).unsqueeze(1),
+                images.unsqueeze(1),
+            ],
+            dim=1,
+        ).flatten(end_dim=1)
         images = torchvision.utils.make_grid(images, 8)
         # log to summary writer
         writer = self.autologger.summary_writer.writer
-
         writer.add_image('C/sample', images, epoch_index)
 
         return ret_vals
