@@ -18,6 +18,8 @@ from ..utils.misc import build_optimizer
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization; Charlie is trained by log-likelihood maximization.
 class AliceBobCharlie(AliceBob):
     def __init__(self, args, logger):
+        self.max_perf = 0.0
+
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len

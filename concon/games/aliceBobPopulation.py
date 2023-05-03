@@ -16,6 +16,8 @@ from ..utils.modules import build_cnn_decoder_from_args
 # If required, the agents are regularly reinitialized.
 class AliceBobPopulation(AliceBob):
     def __init__(self, args, logger): # TODO We could consider calling super().__init__(args)
+        self.max_perf = 0.0
+
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len

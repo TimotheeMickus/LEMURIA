@@ -103,7 +103,13 @@ def train(args):
         print(("[%s] training start…" % datetime.now()), flush=True)
 
         model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
-
+        
+        # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
+        performance_threshold = 0.6
+        if(model.max_perf < performance_threshold):
+            print("This runs has failed.")
+            filename = run_summary_dir / "FAILURE"
+            open(filename, 'a').close()
 
 if(__name__ == "__main__"):
     args = get_args()

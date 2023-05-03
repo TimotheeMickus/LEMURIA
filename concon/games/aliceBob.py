@@ -23,6 +23,8 @@ from .game import Game
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
 class AliceBob(Game):
     def __init__(self, args, logger):
+        self.max_perf = 0.0
+
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_msg = args.max_len
@@ -347,6 +349,7 @@ class AliceBob(Game):
         # Computes the communication efficiency when the images are selected from all categories.
         c_e = 1 - (failure_matrix.sum() / counts_matrix.sum())
         log(f'eval/{name_c_e}', c_e)
+        if(not data_iterator.same_img): main_perf = c_e
 
         train_categories = data_iterator.training_categories_idx
         eval_categories = data_iterator.evaluation_categories_idx
@@ -412,6 +415,9 @@ class AliceBob(Game):
             success_prob = torch.stack(success_prob)
             diff_tgt_c_e = success_prob.mean().item()
             log(f'eval/{name_c_e}_diff_tgt', diff_tgt_c_e)
+            main_perf = diff_tgt_c_e
+
+        if(main_perf > self.max_perf): self.max_perf = main_perf
 
         # Computes metrics related to symbol-order.
         # First tries to rank each symbol according to its average relative position in messages.
