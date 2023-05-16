@@ -351,7 +351,7 @@ class Dataset():
         sampling_strategies: list[string], indicates how the distractor·s are determined.
         no_evaluation: bool, indicates whether we avoid evaluation categories.
         target_evaluation: bool, indicates whether the original/target category must be one of the evaluation categories.
-        target_is_original: None or ?, ?
+        target_is_original: None or bool
         keep_category: bool, the InputDataPoint·s of the batch will contain the category of their DataPoint·s,
         keep_idx: bool, the InputDataPoint·es of the batch will contain the index of their DataPoint·s.
         """

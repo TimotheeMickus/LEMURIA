@@ -312,7 +312,7 @@ class AliceBob(Game):
         for batch_index in range(nb_batch):
             self.start_episode(train_episode=False)
 
-            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from the same category
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from a different category.
 
             sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
