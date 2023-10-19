@@ -167,7 +167,7 @@ def levenshtein_normalised(str1, str2):
 
 @ft.lru_cache(maxsize=32768)
 def jaccard(seq1, seq2):
-    union = len(seq1) # Will contain the total number of symbols (with repetition) in both sequences
+    union = len(seq1) # Will contain the total number of symbols (with repetition) in both sequences, not counting twice those in common (e.g. if 'a' appears twice in `seq1` and once in `seq2`, it is counted only twice, not thrice)
     intersection = 0 # Will contain the number of symbols (with repetition) in common in the two sequences
     d = collections.defaultdict(int) # This dictionary is used to track which symbols in seq1 are not exhausted by seq2
     for i in seq1:
