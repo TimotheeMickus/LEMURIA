@@ -338,10 +338,14 @@ class Dataset():
 
             return self.category_tuple(sample_idx)
 
-        if(sampling_strategy == 'same'): # Should not be used during training
+        if(sampling_strategy == '_same'): # Should not be used during training
             return category
 
+        if(sampling_strategy == "random"):
+            return random.choice(self.training_categories)
+
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
+    
 
     # Returns a Batch.
     def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=None, keep_category=False, keep_idx=False):
