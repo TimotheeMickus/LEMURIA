@@ -265,7 +265,7 @@ class AliceBob(Game):
         for batch_index in batch_numbers:
             self.start_episode(train_episode=False)
 
-            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
 
             sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
@@ -307,6 +307,7 @@ class AliceBob(Game):
                 _ = writer.writerow(['msg', 'cat', 'idx'])
                 for msg, cat, idx in zip(messages, categories, input_ids):
                     msg = ' '.join(map(str, msg))
+                    cat = ' '.join(map(str, cat))
                     row = [msg, cat, idx]
                     _ = writer.writerow(row)
 
