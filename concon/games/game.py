@@ -280,9 +280,10 @@ class Game(metaclass=ABCMeta):
         return model
 
     # Pretrains the CNN of an agent in auto-encoder mode
-    def _pretrain_ae(self, agent, data_iterator, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent", _is_external_ae=False):
+    def _pretrain_ae(self, agent, data_iterator, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent", _is_external_ae=False, device=None):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
-        device = next(agent.parameters()).device
+        if device is None:
+            device = next(agent.parameters()).device
 
         found = False
         if agent is not None and hasattr(agent, 'image_encoder'):

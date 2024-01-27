@@ -66,9 +66,8 @@ class AliceBob(Game):
         self._init_receiver_preprocessor(args, dataset)
     
     def _init_receiver_preprocessor(self, args, dataset):
-
-        dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
-        cnn_factory_fn = get_default_fn(build_cnn_encoder_from_args, args)
+        dcnn_factory_fn = misc.get_default_fn(build_cnn_decoder_from_args, args)
+        cnn_factory_fn = misc.get_default_fn(build_cnn_encoder_from_args, args)
         if args.autoencode_receiver_inputs:
             self.receiver_preprocessor = self._pretrain_ae(
                 None, # no agent
@@ -77,6 +76,9 @@ class AliceBob(Game):
                 deconvolution_factory=dcnn_factory_fn, 
                 pretrain_CNNs_on_eval=True, 
                 _is_external_ae=True,
+                device=args.device,
+                display_mode=args.display,
+                agent_name='receiver preprocessor AE'
             )['model']
             self.receiver_preprocessor.requires_grad_(False)
         else:
