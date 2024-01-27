@@ -38,9 +38,9 @@ def train(args):
         
         if(args.charlie):
             assert (args.population is None) # NotImplementedFeature
-            model = AliceBobCharlie(args, autologger)
-        elif(args.population is not None): model = AliceBobPopulation(args, autologger)
-        else: model = AliceBob(args, autologger)
+            model = AliceBobCharlie(args, autologger, data_loader)
+        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader)
+        else: model = AliceBob(args, autologger, data_loader)
         model = model.to(args.device)
 
         if(args.detect_anomaly):
