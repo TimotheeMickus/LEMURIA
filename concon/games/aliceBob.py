@@ -121,7 +121,7 @@ class AliceBob(Game):
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
         # TODO: change return signature to loss, {dict of things to log}
-        
+
         sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
@@ -304,12 +304,12 @@ class AliceBob(Game):
             import csv
             with open(self.message_dump_file + f'.e{epoch_index}.csv', 'w') as ostr:
                 writer = csv.writer(ostr)
-                _ = writer.writerow('msg', 'cat', 'idx')
+                _ = writer.writerow(['msg', 'cat', 'idx'])
                 for msg, cat, idx in zip(messages, categories, input_ids):
                     msg = ' '.join(map(str, msg))
                     row = [msg, cat, idx]
                     _ = writer.writerow(row)
-        
+
 
         success_prob = torch.stack(success_prob)
         scrambled_success_prob = torch.stack(scrambled_success_prob)
