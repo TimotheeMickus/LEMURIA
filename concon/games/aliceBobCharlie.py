@@ -94,12 +94,11 @@ class AliceBobCharlie(AliceBob):
     # forged_img: tensor of shape [args.batch_size, *IMG_SHAPE]
     # Overrides AliceBob._bob_input.
     def _bob_input(self, batch, forged_img=None):
-        if(forged_img is None):
-            ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
-        else:
-            ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), forged_img.unsqueeze(1)], dim=1)
+        ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
         with torch.no_grad():
-            ipts = self.receiver_preprocessor(ipts)
+            ipts = self.receiver_preprocessor(ipts.flatten(0, 1)).view(*ipts.shape).detach()
+        if(forged_img is not None):
+            ipts = torch.cat([ipts, forged_img.unsqueeze(1)], dim=1)
         return ipts
 
     # Overrides AliceBob.__call__.

@@ -308,6 +308,8 @@ class Game(metaclass=ABCMeta):
         optimizer = build_optimizer(model.parameters(), learning_rate)
 
         total_items = 0
+        data_type = 'any' if pretrain_CNNs_on_eval else 'train'
+
 
         for epoch_index in range(epochs):
             # Optimization
@@ -317,7 +319,7 @@ class Game(metaclass=ABCMeta):
                 for _ in range(steps_per_epoch):
                     optimizer.zero_grad()
 
-                    batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch = data_iterator.get_batch(data_type=data_type, keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
                     output = model(batch_img)
 

@@ -78,7 +78,9 @@ class AliceBob(Game):
                 _is_external_ae=True,
                 device=args.device,
                 display_mode=args.display,
-                agent_name='receiver preprocessor AE'
+                agent_name='receiver preprocessor AE',
+                epochs=args.pretrain_epochs,
+                learning_rate=args.pretrain_learning_rate,
             )['model']
             self.receiver_preprocessor.requires_grad_(False)
         else:
@@ -121,7 +123,7 @@ class AliceBob(Game):
     def _bob_input(self, batch):
         with torch.no_grad():
             ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
-            ipts = self.receiver_preprocessor(ipts)
+            ipts = self.receiver_preprocessor(ipts.flatten(0, 1)).view(*ipts.shape).detach()
         return ipts
 
     def __call__(self, batch):
