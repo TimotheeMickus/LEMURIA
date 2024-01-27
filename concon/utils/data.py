@@ -338,11 +338,11 @@ class Dataset():
 
             return self.category_tuple(sample_idx)
 
-        if(sampling_strategy == '_same'): # Should not be used during training
+        if(sampling_strategy == 'same'): # Should not be used during training
             return category
 
         if(sampling_strategy == "random"):
-            return random.choice(self.training_categories)
+            return random.choice(list(self.training_categories))
 
         assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
     
