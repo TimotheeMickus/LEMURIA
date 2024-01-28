@@ -67,6 +67,7 @@ class AliceBobCharlie(AliceBob):
         self.log_charlie_sample_imgs = not (args.no_summary or args.no_log_imgs)
         self.log_img_every = args.log_img_every
         self._batch_for_img_gen = None
+        self.message_dump_file = args.message_dump_file
 
     @property
     def drawer(self):

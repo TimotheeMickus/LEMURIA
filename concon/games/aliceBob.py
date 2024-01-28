@@ -61,6 +61,7 @@ class AliceBob(Game):
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
         
         self.debug = args.debug
+        self.message_dump_file = args.message_dump_file
 
     @property
     def sender(self):
@@ -120,7 +121,7 @@ class AliceBob(Game):
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
         # TODO: change return signature to loss, {dict of things to log}
-        
+
         sender_outcome, receiver_outcome = self(batch)
 
         # Alice's part
@@ -254,6 +255,7 @@ class AliceBob(Game):
 
         messages = []
         categories = []
+        input_ids = []
         batch_numbers = range(nb_batch)
         if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
         success = [] # Binary
@@ -263,7 +265,7 @@ class AliceBob(Game):
         for batch_index in batch_numbers:
             self.start_episode(train_episode=False)
 
-            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
+            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
 
             sender_outcome, receiver_outcome = self.alice_to_bob(batch)
 
@@ -289,7 +291,7 @@ class AliceBob(Game):
                 if((not self.correct_only) or (receiver_pointing['action'][i] == 0)):
                     messages.append(msg.tolist()[:msg_len])
                     categories.append(cat)
-
+                    input_ids.append(datapoint.idx)
                 # Scrambles the whole message, including the EOS (but not the padding symbols, of course)
                 l = msg_len.item()
                 scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
@@ -297,6 +299,18 @@ class AliceBob(Game):
             scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
             scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
             scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+
+        if self.message_dump_file is not None:
+            import csv
+            with open(self.message_dump_file + f'.e{epoch_index}.csv', 'w') as ostr:
+                writer = csv.writer(ostr)
+                _ = writer.writerow(['msg', 'cat', 'idx'])
+                for msg, cat, idx in zip(messages, categories, input_ids):
+                    msg = ' '.join(map(str, msg))
+                    cat = ' '.join(map(str, cat))
+                    row = [msg, cat, idx]
+                    _ = writer.writerow(row)
+
 
         success_prob = torch.stack(success_prob)
         scrambled_success_prob = torch.stack(scrambled_success_prob)

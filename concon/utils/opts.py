@@ -119,9 +119,11 @@ def get_args():
     group.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path)
     # For evaluate_language.py
     group.add_argument('--load_other_model', help='path to a second model to load', type=pathlib.Path)
-    group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
     group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
+
+    group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
+
 
     args = arg_parser.parse_args()
     if not args.quiet:
