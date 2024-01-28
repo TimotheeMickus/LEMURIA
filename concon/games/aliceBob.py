@@ -353,7 +353,7 @@ class AliceBob(Game):
 
         train_categories = data_iterator.training_categories_idx
         eval_categories = data_iterator.evaluation_categories_idx
-        if(eval_categories != []):
+        if(len(eval_categories) > 0):
             # Computes the communication efficiency when both the target and the distractor are selected from training categories.
             failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
             counts_matrix_train_td = counts_matrix[np.ix_(train_categories, train_categories)]
