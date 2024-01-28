@@ -25,7 +25,7 @@ def get_args():
     group.add_argument('--pair_images', '-pi', help='generates a new dataset by combining pairs of images', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
-    group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty)', default='difficulty')
+    group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty, random)', default='difficulty', choices=['hamming1', 'different', 'difficulty', 'random'])
     group.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
     group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=5, type=int)
 
