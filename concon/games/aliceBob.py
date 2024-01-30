@@ -65,6 +65,9 @@ class AliceBob(Game):
         self.message_dump_file = args.message_dump_file
         self._init_receiver_preprocessor(args, dataset)
     
+    #TODO: the preprocessor currently requires the dataloader to be passed as argument upon construction.
+    # a cleaner fix would be to implement a flag to signal the preprocessor needs to be pretrained before actual training can start
+    # or include the preprocessor in the pre-training round.
     def _init_receiver_preprocessor(self, args, dataset):
         dcnn_factory_fn = misc.get_default_fn(build_cnn_decoder_from_args, args)
         cnn_factory_fn = misc.get_default_fn(build_cnn_encoder_from_args, args)
