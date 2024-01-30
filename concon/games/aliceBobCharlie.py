@@ -17,7 +17,7 @@ from ..utils.misc import build_optimizer
 # Charlie is trained to maximize the probability that Bob assigns to the fake image when comparing the target image and the fake image.
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization; Charlie is trained by log-likelihood maximization.
 class AliceBobCharlie(AliceBob):
-    def __init__(self, args, logger):
+    def __init__(self, args, logger, dataset):
         self.max_perf = 0.0
 
         self._logger = logger
@@ -38,6 +38,8 @@ class AliceBobCharlie(AliceBob):
             self._sender = Sender.from_args(args)
             self._receiver = Receiver.from_args(args)
             self._drawer = Drawer.from_args(args)
+
+        self._init_receiver_preprocessor(args, dataset)
 
         self.use_spigot = (not args.no_spigot) # A boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message). GradSpigot·s are meant for use during training only.
         self.loss_weight_temp = args.loss_weight_temp
@@ -92,8 +94,12 @@ class AliceBobCharlie(AliceBob):
     # forged_img: tensor of shape [args.batch_size, *IMG_SHAPE]
     # Overrides AliceBob._bob_input.
     def _bob_input(self, batch, forged_img=None):
-        if(forged_img is None): return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
-        return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True), forged_img.unsqueeze(1)], dim=1)
+        ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
+        with torch.no_grad():
+            ipts = self.receiver_preprocessor(ipts.flatten(0, 1)).view(*ipts.shape).detach()
+        if(forged_img is not None):
+            ipts = torch.cat([ipts, forged_img.unsqueeze(1)], dim=1)
+        return ipts
 
     # Overrides AliceBob.__call__.
     # use_spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message); GradSpigot·s are meant for use during training only

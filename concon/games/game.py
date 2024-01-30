@@ -280,23 +280,24 @@ class Game(metaclass=ABCMeta):
         return model
 
     # Pretrains the CNN of an agent in auto-encoder mode
-    def _pretrain_ae(self, agent, data_iterator, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
+    def _pretrain_ae(self, agent, data_iterator, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent", _is_external_ae=False, device=None):
         loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
-        device = next(agent.parameters()).device
+        if device is None:
+            device = next(agent.parameters()).device
 
         found = False
-        if hasattr(agent, 'image_encoder'):
+        if agent is not None and hasattr(agent, 'image_encoder'):
             encoder = agent.image_encoder
             found = True
         else:
             encoder = convolution_factory()
-        if hasattr(agent, 'image_decoder'):
+        if agent is not None and hasattr(agent, 'image_decoder'):
             decoder = agent.image_decoder
             found = True
         else:
             decoder = deconvolution_factory()
 
-        assert found, "Agent must have an image encoder or decoder!"
+        assert found or _is_external_ae, "Agent must have an image encoder or decoder!"
 
         model = nn.Sequential(
             encoder,
@@ -307,6 +308,8 @@ class Game(metaclass=ABCMeta):
         optimizer = build_optimizer(model.parameters(), learning_rate)
 
         total_items = 0
+        data_type = 'any' if pretrain_CNNs_on_eval else 'train'
+
 
         for epoch_index in range(epochs):
             # Optimization
@@ -316,7 +319,7 @@ class Game(metaclass=ABCMeta):
                 for _ in range(steps_per_epoch):
                     optimizer.zero_grad()
 
-                    batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
+                    batch = data_iterator.get_batch(data_type=data_type, keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
                     batch_img = batch.target_img(stack=True)
                     output = model(batch_img)
 

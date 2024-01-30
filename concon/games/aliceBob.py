@@ -12,6 +12,7 @@ import time
 from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import show_imgs, max_normalize_, to_color, add_normal_noise, build_optimizer, compute_entropy_stats
 from ..utils import misc
+from ..utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
 
 from ..eval import compute_correlation
 from ..eval import decision_tree
@@ -22,7 +23,7 @@ from .game import Game
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
 class AliceBob(Game):
-    def __init__(self, args, logger):
+    def __init__(self, args, logger, dataset):
         self.max_perf = 0.0
 
         self._logger = logger
@@ -62,6 +63,32 @@ class AliceBob(Game):
         
         self.debug = args.debug
         self.message_dump_file = args.message_dump_file
+        self._init_receiver_preprocessor(args, dataset)
+    
+    #TODO: the preprocessor currently requires the dataloader to be passed as argument upon construction.
+    # a cleaner fix would be to implement a flag to signal the preprocessor needs to be pretrained before actual training can start
+    # or include the preprocessor in the pre-training round.
+    def _init_receiver_preprocessor(self, args, dataset):
+        dcnn_factory_fn = misc.get_default_fn(build_cnn_decoder_from_args, args)
+        cnn_factory_fn = misc.get_default_fn(build_cnn_encoder_from_args, args)
+        if args.autoencode_receiver_inputs:
+            self.receiver_preprocessor = self._pretrain_ae(
+                None, # no agent
+                dataset, #
+                convolution_factory=cnn_factory_fn, 
+                deconvolution_factory=dcnn_factory_fn, 
+                pretrain_CNNs_on_eval=True, 
+                _is_external_ae=True,
+                device=args.device,
+                display_mode=args.display,
+                agent_name='receiver preprocessor AE',
+                epochs=args.pretrain_epochs,
+                learning_rate=args.pretrain_learning_rate,
+            )['model']
+            self.receiver_preprocessor.requires_grad_(False)
+        else:
+            self.receiver_preprocessor = nn.Identity()
+
 
     @property
     def sender(self):
@@ -97,7 +124,10 @@ class AliceBob(Game):
 
     # batch: Batch
     def _bob_input(self, batch):
-        return torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
+        with torch.no_grad():
+            ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
+            ipts = self.receiver_preprocessor(ipts.flatten(0, 1)).view(*ipts.shape).detach()
+        return ipts
 
     def __call__(self, batch):
         """
