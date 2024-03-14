@@ -269,7 +269,6 @@ def main(args):
         print("Directory '%s' not found." % args.data_set)
         sys.exit()
     assert args.load_model is not None, "You need to specify 'load_model'"
-    #assert args.message_dump_file is not None, "a valid output file is required."
 
     if(args.population is not None): model = AliceBobPopulation.load(args.load_model, args)
     else: model = AliceBob.load(args.load_model, args)

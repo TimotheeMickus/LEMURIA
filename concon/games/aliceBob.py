@@ -23,7 +23,7 @@ from .game import Game
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
 class AliceBob(Game):
-    def __init__(self, args, logger, dataset):
+    def __init__(self, args, logger, dataset, message_dump_dir):
         self.max_perf = 0.0
 
         self._logger = logger
@@ -62,7 +62,7 @@ class AliceBob(Game):
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
         
         self.debug = args.debug
-        self.message_dump_file = args.message_dump_file
+        self.message_dump_dir = message_dump_dir # str|None
         self._init_receiver_preprocessor(args, dataset)
     
     #TODO: the preprocessor currently requires the dataloader to be passed as argument upon construction.
@@ -330,9 +330,12 @@ class AliceBob(Game):
             scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
             scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
-        if self.message_dump_file is not None:
+        if(self.message_dump_dir is not None):
             import csv
-            with open(self.message_dump_file + f'.e{epoch_index}.csv', 'w') as ostr:
+            import os
+
+            filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
+            with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
                 _ = writer.writerow(['msg', 'cat', 'idx'])
                 for msg, cat, idx in zip(messages, categories, input_ids):
@@ -340,7 +343,6 @@ class AliceBob(Game):
                     cat = ' '.join(map(str, cat))
                     row = [msg, cat, idx]
                     _ = writer.writerow(row)
-
 
         success_prob = torch.stack(success_prob)
         scrambled_success_prob = torch.stack(scrambled_success_prob)

@@ -29,6 +29,7 @@ def train(args):
 
         run_summary_dir = summary_dir / str(run)
         run_models_dir = models_dir / str(run)
+        message_dump_dir = run_summary_dir if(args.dump_message) else None
 
         data_loader = get_data_loader(args)
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)
@@ -38,9 +39,9 @@ def train(args):
         
         if(args.charlie):
             assert (args.population is None) # NotImplementedFeature
-            model = AliceBobCharlie(args, autologger, data_loader)
-        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader)
-        else: model = AliceBob(args, autologger, data_loader)
+            model = AliceBobCharlie(args, autologger, data_loader, message_dump_dir)
+        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader, message_dump_dir)
+        else: model = AliceBob(args, autologger, data_loader, message_dump_dir)
         model = model.to(args.device)
 
         if(args.detect_anomaly):

@@ -23,7 +23,6 @@ def main(args):
         print("Directory '%s' not found." % args.data_set)
         sys.exit()
     assert args.load_model is not None, "You need to specify 'load_model'"
-    #assert args.message_dump_file is not None, "a valid output file is required."
 
     if(args.population is not None): model = AliceBobPopulation.load(args.load_model, args)
     else: model = AliceBob.load(args.load_model, args)
@@ -32,16 +31,6 @@ def main(args):
     data_iterator = get_data_loader(args)
 
     #model.eval()
-    '''
-    counts = torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
-
-    if args.load_other_model is not None:
-        other_model = type(model).load(args.load_other_model, args)
-        counts_other_model == torch.zeros(args.base_alphabet_size, dtype=torch.float).to(args.device)
-
-    ostr = open(args.message_dump_file, 'w') if(args.message_dump_file is not None) else None
-    #with open(args.message_dump_file, 'w') as ostr:
-    '''
    
     # We try to visit each category on average 32 times
     batch_size = 256

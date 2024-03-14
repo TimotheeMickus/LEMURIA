@@ -125,9 +125,7 @@ class DummyLogger(object):
 
 # TODO Could have a 'print(self, message, flush, type)' method
 class AutoLogger(object):
-    def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, log_debug=False,
-        log_lang_progress=False, log_entropy=False,
-        device='cpu', no_summary=False, summary_dir=None, default_period=10,):
+    def __init__(self, base_alphabet_size, data_loader, display='tqdm', steps_per_epoch=1000, log_debug=False, log_lang_progress=False, log_entropy=False, device='cpu', no_summary=False, summary_dir=None, default_period=10,):
 
         self.base_alphabet_size = base_alphabet_size
         self.data_loader = data_loader
@@ -145,7 +143,7 @@ class AutoLogger(object):
 
         self.device = device
 
-        if no_summary:
+        if(no_summary):
             self.summary_writer = None
         else:
             self.summary_writer = AverageSummaryWriter(log_dir=summary_dir, default_period=default_period)
@@ -157,7 +155,7 @@ class AutoLogger(object):
 
     def new_progress_bar(self):
         """
-        Initialize a progress bar.
+        Initializes a progress bar.
         """
         progress_cls = Progress.get_progress_cls(self.display)
         self._pbar = progress_cls(self.steps_per_epoch, self.current_epoch, self.logged_items)

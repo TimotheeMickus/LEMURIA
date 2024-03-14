@@ -33,6 +33,7 @@ def get_args():
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
+    group.add_argument('--dump_message', help='whether to regularly save the messages in a file', action="store_true")
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --display tqdm should be inferred from the env
@@ -114,6 +115,7 @@ def get_args():
     group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
     group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')
     group.add_argument('--threeway_correlation', help='compute three-way correlation between image vectors, meaning distance and message distance instead of training', action='store_true')
+    group.add_argument('--message_dump_file', help='file containing language sample (for analysis)')
 
     # TODO: assuming subcommands, these should end up in relevant subparsers
     # For visualize.py / evaluate_language.py
@@ -123,7 +125,6 @@ def get_args():
     group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
-    group.add_argument('--message_dump_file', help='file containing language sample, or file where to dump language sample.')
 
 
     args = arg_parser.parse_args()

@@ -17,7 +17,7 @@ from ..utils.misc import build_optimizer
 # Charlie is trained to maximize the probability that Bob assigns to the fake image when comparing the target image and the fake image.
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization; Charlie is trained by log-likelihood maximization.
 class AliceBobCharlie(AliceBob):
-    def __init__(self, args, logger, dataset):
+    def __init__(self, args, logger, dataset, message_dump_dir):
         self.max_perf = 0.0
 
         self._logger = logger
@@ -69,7 +69,7 @@ class AliceBobCharlie(AliceBob):
         self.log_charlie_sample_imgs = not (args.no_summary or args.no_log_imgs)
         self.log_img_every = args.log_img_every
         self._batch_for_img_gen = None
-        self.message_dump_file = args.message_dump_file
+        self.message_dump_dir = message_dump_dir # str|None
 
     @property
     def drawer(self):

@@ -15,7 +15,7 @@ from ..utils.modules import build_cnn_decoder_from_args
 # For each training batch, a pair of (Alice, Bob) is randomly selected and trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
 # If required, the agents are regularly reinitialized.
 class AliceBobPopulation(AliceBob):
-    def __init__(self, args, logger): # TODO We could consider calling super().__init__(args)
+    def __init__(self, args, logger, message_dump_dir): # TODO We could consider calling super().__init__(args)
         self.max_perf = 0.0
 
         self._logger = logger
@@ -69,6 +69,9 @@ class AliceBobPopulation(AliceBob):
             self._receiver_avg_reward = misc.Averager(size=12800)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
+        
+        self.debug = args.debug
+        self.message_dump_file = args.message_dump_file
 
     @property
     def sender(self):
