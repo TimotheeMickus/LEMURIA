@@ -21,8 +21,8 @@ def train(args):
         print((f"Directory '{args.data_set}' not found."), flush=True)
         sys.exit()
 
-    summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
-    models_dir = path_replace(args.models, '[summary]', summary_dir)
+    summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S')) # PosixPath
+    models_dir = path_replace(args.models, '[summary]', summary_dir) # PosixPath
 
     for run in range(args.runs):
         print(f'Run {run}', flush=True)
@@ -31,12 +31,15 @@ def train(args):
         run_models_dir = models_dir / str(run)
         message_dump_dir = run_summary_dir if(args.dump_message) else None
 
+        # Loads the data.
         data_loader = get_data_loader(args)
-        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,)
+        
+        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
         
+        # Creates the model.
         if(args.charlie):
             assert (args.population is None) # NotImplementedFeature
             model = AliceBobCharlie(args, autologger, data_loader, message_dump_dir)
@@ -47,7 +50,7 @@ def train(args):
         if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)
 
-        if(args.pretrain_CNNs):
+        if(args.pretrain_CNNs): # Pretrains the agents.
             print(("[%s] pretraining start…" % datetime.now()), flush=True)
 
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
@@ -99,6 +102,7 @@ def train(args):
 
                 sys.exit(0)
 
+        # Runs the run.
         if(args.save_every > 0): model.save(run_models_dir / ("model_e%i.pt" % -1))
 
         print(("[%s] training start…" % datetime.now()), flush=True)
