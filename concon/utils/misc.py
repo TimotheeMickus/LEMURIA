@@ -282,5 +282,8 @@ def build_optimizer(θ, learning_rate):
     """
     return optim.RMSprop(θ, lr=learning_rate)
 
+# Builds a path by replacing `substring` with `replacement` in `path` (all converted to strings)
+# path, substring, replacement: any
+# The output is a PosixPath
 def path_replace(path, substring, replacement):
     return pathlib.Path(str(path).replace(str(substring), str(replacement)))
