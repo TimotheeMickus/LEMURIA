@@ -367,18 +367,21 @@ class Game(metaclass=ABCMeta):
         for epoch_index in range(epochs):
             timepoint_0 = time.time()
 
+            # Training phase.
             self.train_epoch(data_loader, epoch_index=epoch_index, steps_per_epoch=steps_per_epoch)
 
             timepoint_1 = time.time()
             print('Training took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
-
+            
+            # Evaluation phase.
             self.evaluate(data_loader, epoch_index=epoch_index)
 
             timepoint_1 = time.time()
             print('Evaluating took %f s.' % (timepoint_1 - timepoint_0))
             timepoint_0 = timepoint_1
-
+            
+            # Saving.
             if((save_every > 0) and (((epoch_index + 1) % save_every) == 0)):
                 model_name = f"model_e{epoch_index}.pt"
                 self.save(run_models_dir / model_name)
