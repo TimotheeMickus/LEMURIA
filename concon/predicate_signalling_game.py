@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from .utils.property_data import get_data_loader
+from .utils.predicate import get_data_loader
 from .utils.misc import build_optimizer, get_default_fn, path_replace
 from .utils.logging import AutoLogger
 
