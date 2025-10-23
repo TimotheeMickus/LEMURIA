@@ -8,11 +8,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from ..utils.logging import DummyLogger, Progress
-from ..utils import misc
+from ..utils.logging import Progress
 from ..utils.misc import build_optimizer, Unflatten
 from ..utils.modules import MultiHeadsClassifier
-from ..utils.data import Batch
 
 class Game(metaclass=ABCMeta):
     @abstractmethod

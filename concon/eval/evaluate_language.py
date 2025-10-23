@@ -16,7 +16,7 @@ from .decision_tree import decision_tree
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
 from ..utils import misc
-from ..utils.data import get_data_loader
+from ..utils.image_data import get_data_loader
 
 def main(args):
     if(not os.path.isdir(args.data_set)):

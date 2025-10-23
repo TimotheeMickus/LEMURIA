@@ -19,7 +19,7 @@ from .decision_tree import decision_tree
 
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
-from ..utils.data import get_data_loader
+from ..utils.image_data import get_data_loader
 
 # The output values `messages` and `categories` are both lists of tuples of integers.
 # If `string_msgs` is set to True, then the messages in the file are considered string and then converted to tuples of integers.

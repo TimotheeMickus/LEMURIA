@@ -9,11 +9,10 @@ from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
 from .games import AliceBob, AliceBobPopulation, AliceBobCharlie
-from .utils.data import get_data_loader
+from .utils.image_data import get_data_loader, Batch
 from .utils.misc import build_optimizer, get_default_fn, path_replace
 from .utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
 from .utils.logging import AutoLogger
-from .utils.data import Batch
 
 def main(global_args=None, remaining_args=None):
     args = get_args(remaining_args)

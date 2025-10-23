@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from .utils.data import get_data_loader
+from .utils.property_data import get_data_loader
 from .utils.misc import build_optimizer, get_default_fn, path_replace
 from .utils.logging import AutoLogger
 
@@ -40,7 +40,7 @@ def do(args):
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
         
         # Creates the model.
-        model = …
+        model = None # TODO
         model = model.to(args.device)
 
         if(args.detect_anomaly):

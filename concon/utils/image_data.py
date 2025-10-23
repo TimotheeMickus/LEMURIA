@@ -14,7 +14,6 @@ import os
 from collections import namedtuple, defaultdict
 import itertools
 import random
-from deprecated import deprecated
 
 from .misc import add_normal_noise, show_imgs, combine_images
 

@@ -11,7 +11,7 @@ import tqdm
 
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer
-from ..utils.data import get_data_loader
+from ..utils.image_data import get_data_loader
 
 from .decision_tree import decision_tree_standalone
 
