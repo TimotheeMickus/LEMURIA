@@ -1,3 +1,66 @@
+#!/usr/bin/env python
+
+from datetime import datetime
+import sys
+
+import torch
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+import tqdm
+
+from .utils.data import get_data_loader
+from .utils.misc import build_optimizer, get_default_fn, path_replace
+from .utils.logging import AutoLogger
+
+def main(global_args=None, remaining_args=None):
+    args = get_args(remaining_args)
+    do(args)
+
+def do(args):
+    if(not args.data_set.is_dir()):
+        print((f"Directory '{args.data_set}' not found."), flush=True)
+        sys.exit()
+
+    summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S')) # PosixPath
+    models_dir = path_replace(args.models, '[summary]', summary_dir) # PosixPath
+
+    for run in range(args.runs):
+        print(f'Run {run}', flush=True)
+
+        run_summary_dir = summary_dir / str(run)
+        run_models_dir = models_dir / str(run)
+        message_dump_dir = run_summary_dir if(args.dump_message) else None
+
+        # Loads the data.
+        data_loader = get_data_loader(args)
+        
+        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
+
+        if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
+        if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Creates the model.
+        model = …
+        model = model.to(args.device)
+
+        if(args.detect_anomaly):
+            torch.autograd.set_detect_anomaly(True)
+
+        # Runs the run.
+        if(args.save_every > 0): model.save(run_models_dir / ("model_e%i.pt" % -1))
+
+        print(("[%s] training start…" % datetime.now()), flush=True)
+
+        model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
+        
+        # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
+        performance_threshold = 0.6
+        if(model.max_perf < performance_threshold):
+            print("This runs has failed.")
+            filename = run_summary_dir / "FAILURE"
+            open(filename, 'a').close()
+
+
 import argparse
 import os
 import pathlib
@@ -10,8 +73,7 @@ import socket # for `gethostname`
 import torch # for device
 from datetime import datetime
 
-def get_args():
-    # TODO: given the number of args, i'd be in favor of a config file (e.g., configargparse)
+def get_args(remaining_args=None):
     arg_parser = argparse.ArgumentParser()
 
     default_data_set = pathlib.Path('data') / 'concon'
@@ -64,7 +126,6 @@ def get_args():
     group.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
 
     group = arg_parser.add_argument_group(title='Perfs', description='arguments relative to performances')
-
     # device_choices = ['cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'msnpu']
     # group.add_argument('--device', help='what to run PyTorch on (potentially available: ' + ', '.join(device_choices) + ')', choices=device_choices, default='cpu')
     group.add_argument('--device', help='what to run PyTorch on', type=torch.device, default=torch.device('cpu'))
@@ -106,29 +167,18 @@ def get_args():
     group.add_argument('--autoencode_receiver_inputs', help='run all receiver image inputs through a pretrained autoencoder', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
-    # TODO: --evaluate_language should be a separate subcommand entirely
-    group.add_argument('--evaluate_language', help='evaluate language instead of training', action='store_true')
-    group.add_argument('--analysis_gram_size', help='size of the n-grams considered during language analysis', type=int, default=1)
-    group.add_argument('--analysis_disj_size', help='size of the disjunctions considered during language analysis', type=int, default=1)
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
-    # TODO: --visualize should be a separate subcommand entirely
-    group.add_argument('--visualize', help='visualize language instead of training', action='store_true')
-    group.add_argument('--compute_correlation', help='compute correlation between meaning distance and message distance instead of training', action='store_true')
-    group.add_argument('--threeway_correlation', help='compute three-way correlation between image vectors, meaning distance and message distance instead of training', action='store_true')
-    group.add_argument('--message_dump_file', help='file containing language sample (for analysis)')
-
-    # TODO: assuming subcommands, these should end up in relevant subparsers
-    # For visualize.py / evaluate_language.py
-    group.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path)
-    # For evaluate_language.py
-    group.add_argument('--load_other_model', help='path to a second model to load', type=pathlib.Path)
-    group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
+    
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
-
 
 
     args = arg_parser.parse_args()
     if not args.quiet:
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)
+    
     return args
+
+
+if(__name__ == "__main__"):
+    do(global_args=None, remaining_args=None)

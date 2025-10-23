@@ -3,132 +3,70 @@
 from datetime import datetime
 import sys
 
-import torch
-import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
-import tqdm
+import argparse
+import os
+import pathlib
+import pprint
+import sys
 
-from .games import AliceBob, AliceBobPopulation, AliceBobCharlie
-from .utils.data import get_data_loader
-from .utils.opts import get_args
-from .utils.misc import build_optimizer, get_default_fn, path_replace
-from .utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
-from .utils.logging import AutoLogger
-from .utils.data import Batch
+#this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
 
-def train(args):
-    if(not args.data_set.is_dir()):
-        print((f"Directory '{args.data_set}' not found."), flush=True)
-        sys.exit()
+import socket # for `gethostname`
+import torch # for device
+from datetime import datetime
 
-    summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S')) # PosixPath
-    models_dir = path_replace(args.models, '[summary]', summary_dir) # PosixPath
+def get_args():
+    arg_parser = argparse.ArgumentParser()
+    
+    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'property_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation'])
+    
+    group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
+    # TODO: refactor logging: --quiet vs. --display quiet?
+    group.add_argument('--quiet', help='display less information', action='store_true')
+    
+    group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
+    group.add_argument('--analysis_gram_size', help='size of the n-grams considered during language analysis', type=int, default=1)
+    group.add_argument('--analysis_disj_size', help='size of the disjunctions considered during language analysis', type=int, default=1)
 
-    for run in range(args.runs):
-        print(f'Run {run}', flush=True)
+    # TODO: assuming subcommands, these should end up in relevant subparsers
+    # For visualize.py / evaluate_language.py
+    group.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path)
+    # For evaluate_language.py
+    group.add_argument('--load_other_model', help='path to a second model to load', type=pathlib.Path)
+    group.add_argument('--string_msgs', action='store_true', help='specifies whether provided messages should be considered as strings rather than sequences of symbols (integers).')
+    
+    group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
-        run_summary_dir = summary_dir / str(run)
-        run_models_dir = models_dir / str(run)
-        message_dump_dir = run_summary_dir if(args.dump_message) else None
 
-        # Loads the data.
-        data_loader = get_data_loader(args)
-        
-        autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
+    #args = arg_parser.parse_args()
+    (args, remaining_args) = arg_parser.parse_known_args()
+    if not args.quiet:
+        print("command-line arguments:")
+        pprint.pprint(vars(args), indent=4)
+    
+    return (args, remaining_args)
 
-        if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
-        if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Creates the model.
-        if(args.charlie):
-            assert (args.population is None) # NotImplementedFeature
-            model = AliceBobCharlie(args, autologger, data_loader, message_dump_dir)
-        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader, message_dump_dir)
-        else: model = AliceBob(args, autologger, data_loader, message_dump_dir)
-        model = model.to(args.device)
 
-        if(args.detect_anomaly):
-            torch.autograd.set_detect_anomaly(True)
-
-        if(args.pretrain_CNNs): # Pretrains the agents.
-            print(("[%s] pretraining start…" % datetime.now()), flush=True)
-
-            dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
-            cnn_factory_fn = get_default_fn(build_cnn_encoder_from_args, args)
-            pretrained_models = model.pretrain_CNNs(
-                data_loader,
-                pretrain_CNN_mode=args.pretrain_CNNs,
-                freeze_pretrained_CNN=args.freeze_pretrained_CNNs,
-                learning_rate=args.pretrain_learning_rate or args.learning_rate,
-                epochs=args.pretrain_epochs,
-                steps_per_epoch=args.steps_per_epoch,
-                display_mode=args.display,
-                pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval,
-                deconvolution_factory=dcnn_factory_fn,
-                convolution_factory=cnn_factory_fn
-            )
-
-            if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
-                (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())
-                print(pretrained_name)
-
-                outliers = []
-                with torch.no_grad():
-                    batch_size = args.batch_size
-                    max_datapoints = 2 ** 15
-                    n = data_loader.size(data_type='any', no_evaluation=False) # We would like to see all datapoints
-                    if((n is None) or (n > max_datapoints)):
-                        print('The dataset is too big, so we are only going to be looking at %i datapoints.' % max_datapoints)
-                        n = max_datapoints
-                    nb_batch = int(np.ceil(n / batch_size))
-                    for batch_i in range(nb_batch):
-                        datapoints = [data_loader.get_datapoint(i) for i in range((batch_size * batch_i), min((batch_size * (batch_i + 1)), n))]
-                        batch = Batch(size=batch_size, original=[], target=[x.toInput(keep_category=True, device=args.device) for x in datapoints], base_distractors=[])
-                        hits, losses = pretrained_model.forward(batch)
-
-                        misses = 0 # Will be a vector with one value (number of misses over all heads) per element in the batch
-                        for x in hits: misses += (1 - x.cpu().numpy())
-
-                        for i, miss in enumerate(misses):
-                            if(miss == 0.0): continue
-                            outliers.append((miss, datapoints[i]))
-                            #print('Ahah! Datapoint idx=%i (category %s) has a high miss of %s!' % (datapoints[i].idx, datapoints[i].category, miss))
-
-                outliers.sort(key=(lambda x: x[0]), reverse=True)
-                print('%i outliers (%s%%)' % (len(outliers), (100 * len(outliers) / n)))
-                for i in range(len(outliers)): #range(min(len(outliers), 1000)):
-                    miss, datapoint = outliers[i]
-                    print('%i - %i' % (datapoint.idx, miss))
-
-                sys.exit(0)
-
-        # Runs the run.
-        if(args.save_every > 0): model.save(run_models_dir / ("model_e%i.pt" % -1))
-
-        print(("[%s] training start…" % datetime.now()), flush=True)
-
-        model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
-        
-        # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
-        performance_threshold = 0.6
-        if(model.max_perf < performance_threshold):
-            print("This runs has failed.")
-            filename = run_summary_dir / "FAILURE"
-            open(filename, 'a').close()
 
 if(__name__ == "__main__"):
-    args = get_args()
-    if args.evaluate_language:
+    args, remaining_args = get_args()
+    if(args.do == 'evaluate_language'):
         from .eval.evaluate_language import main
-        main(args)
-    elif args.visualize:
+        main(args) # maybe switch to main(args, remaining_args)
+    elif(args.do == 'args.visualize'):
         from .eval.visualize import main
-        main(args)
-    elif args.compute_correlation:
+        main(args) # maybe switch to main(args, remaining_args)
+    elif(args.do == 'args.compute_correlation'):
         from .eval.compute_correlation import main
-        main(args)
-    elif args.threeway_correlation:
+        main(args) # maybe switch to main(args, remaining_args)
+    elif(args.do == 'args.threeway_correlation'):
         from .eval.three_way_correlation import main
-        main(args)
+        main(args) # maybe switch to main(args, remaining_args)
+    elif(args.do == 'image_signalling_game'):
+        from .image_signalling_game import main
+        main(args, remaining_args)
+    elif(args.do == 'property_signalling_game'):
+        from .property_signalling_game import main
+        main(args, remaining_args)
     else:
-        train(args)
+        print(f'I do not know what to do ("{args.do}")')
