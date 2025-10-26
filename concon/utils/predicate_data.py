@@ -1,13 +1,4 @@
-from abc import ABCMeta, abstractmethod
-import torch, torchvision
-from torch.utils.data import DataLoader
-from torchvision.datasets import ImageFolder
-import PIL
 import numpy as np
-import scipy
-import scipy.special as scispe
-
-import tqdm
 
 import sys
 import os
@@ -100,36 +91,182 @@ class Batch():
     #
     #    return images
 
+class Property():
+    # name: str
+    # values: set[Value]
+    def __init__(self, name, values=set()):
+        self.name = name
+        self.values = values
+
+    def __str__(self):
+        return self.name
+
+
+# A predicate is equivalent to a first-order logic formula.
 class Predicate():
-    pass
+    # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    # candidate: Candidate
+    # Outputs an int.
+    def check(self, candidate):
+        raise NotImplementedError
+
+    # target: -1, 0 or 1
+    # Outputs a list[Candidate].
+    def build(self, target=1):
+        raise NotImplementedError
+
+    # Outputs a Bool.
+    def isVerifiable(self):
+        return (len(self.build(target=1)) > 0)
+
+    # Outputs a Bool.
+    def isFalsifiable(self):
+        return (len(self.build(target=-1)) > 0)
+
+    # Outputs a Bool.
+    def isNontrivial(self):
+        return self.isVerifiable() and self.isFalsifiable()
+
+    # other: Predicate
+    # Outputs a Bool.
+    def isAsStrongAs(self, other):
+        for c in self.build(target=1):
+            if(other.check(c) < 1): return False
+
+        for c in self.build(target=0):
+            if(other.check(c) < 0): return False
+
+        return True
+    
+    # other: Predicate
+    # Outputs a Bool.
+    def isEquivalentTo(self, other):
+        return self.isAsStrongAs(other) and other.isAsStrongAs(self)
+
+    # others: iterable[Predicate]
+    # Outputs a Bool.
+    def hasEquivalentIn(self, others):
+        for other in others:
+            if(self.isEquivalentTo(other)):
+                return True
+        return False
+
+    def __repr__(self):
+        return str(self)
 
 class Value(Predicate):
-    def __init__(self, value):
-        self.value = value # str
+    # name: str
+    # prop: Property
+    def __init__(self, name, prop):
+        self.name = name
+        self.prop = prop
 
-    def __str__(self): return self.value
+    # candidate: Candidate
+    # Outputs a truth value in {-1, 0, 1} based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    def check(self, candidate):
+        v = candidate.get(self.prop)
+        if(v is None): return 0
+        if(v == self): return 1
+        return -1
+    
+    # target: -1, 0 or 1
+    # Outputs a list[Candidate].
+    def build(self, target=1):
+        if(target == 1): return [Candidate(prop2value={self.prop: self})]
+        if(target == -1): return [Candidate(prop2value={self.prop: value}) for value in self.prop.values if value != self]
+        if(target == 0): return [Candidate(prop2value={self.prop: None})]
+        assert False
+
+    def __str__(self): return self.name
 
 class Negation(Predicate):
     def __init__(self, predicate):
         self.predicate = predicate # Predicate
 
+    # candidate: Candidate
+    # Outputs a truth value in {-1, 0, 1} based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    def check(self, candidate):
+        return -self.predicate.check(candidate)
+    
+    # target: -1, 0 or 1
+    # Outputs a list[Candidate].
+    def build(self, target=1):
+        return self.predicate.build(target=(-target))
+
     def __str__(self): return f"(¬{self.predicate})"
 
 class Conjunction(Predicate):
-    def __init__(self, predicates):
-        self.predicates = predicates # set[Predicate]
+    # pred1, pred2: Predicate
+    def __init__(self, pred1, pred2):
+        self.pred1 = pred1
+        self.pred2 = pred2
+
+    # candidate: Candidate
+    # Outputs a truth value in {-1, 0, 1} based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    def check(self, candidate):
+        return min(self.pred1.check(candidate), self.pred2.check(candidate))
+    
+    # target: -1, 0 or 1
+    # Outputs a list[Candidate].
+    def build(self, target=1):
+        if(target == 1):
+            l1 = self.pred1.build(target=1)
+            l2 = self.pred2.build(target=1)
+            s = set()
+            for c1, c2 in itertools.product(l1, l2):
+                c = c1.merge(c2)
+                if(c is not None): s.add(c)
+            
+            return list(s)
+            
+        if(target == 0):
+            l1 = self.pred1.build(target=0)
+            l2 = self.pred2.build(target=0)
+            s = set()
+            for c1 in l1:
+                if(self.pred2.check(c1) >= 0): s.add(c1)
+            for c2 in l2:
+                if(self.pred1.check(c2) >= 0): s.add(c2)
+            
+            return list(s)
+            
+        if(target == -1):
+            l1 = self.pred1.build(target=-1)
+            l2 = self.pred2.build(target=-1)
+            s = set()
+            for c in itertools.chain(l1, l2): s.add(c)
+            
+            return list(s)
+        
+        assert False
+            
 
     def __str__(self):
-        if(len(self.predicates) == 0): return "⊤"
-        
-        return f"({'∧'.join([str(predicate) for predicate in self.predicates])})"
+        return f"({self.pred1}∧{self.pred2})"
+
 
 class Candidate():
-    def __init__(self, values):
-        self.values = values # set[Value]
+    def __init__(self, prop2value):
+        self.prop2value = prop2value # dict[Property, Value|NoneType]
+
+    # prop: Property
+    # Outputs a Value|NoneType.
+    def get(self, prop):
+        return self.prop2value.get(prop)
+
+    # other: Candidate
+    # Outputs a Candidate|NoneType.
+    def merge(self, other):
+        prop2value = dict(self.prop2value) # copy
+        for (p, v) in other.prop2value.items():
+            if(not (p in prop2value)): prop2value[p] = v
+            elif(prop2value[p] != v): return None
+
+        return Candidate(prop2value)
 
     def __str__(self):
-        return f"\{{','.join([str(value) for value in self.values])}\}"
+        return f"{{{','.join([str(value) for value in self.prop2value.values()])}}}"
+
 
 class failureBasedDistribution():
     def __init__(self, nb_categories, momentum_factor=0.99, smoothing_factor=1.0):
@@ -162,46 +299,82 @@ class failureBasedDistribution():
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
 class SimpleDataset():
-    def __init__(self, device='cpu', batch_size=128, sampling_strategies=["random"], properties="3-4"):
+    def __init__(self, device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="3-4", max_depth=2, nontrivial_only=True, allow_negation=True, allow_conjunction=True):
         self.device = device
         self.batch_size = batch_size
+        self.nb_candidates = nb_candidates
         self.sampling_strategies = sampling_strategies
 
-        # Generates the properties and the values ("3-4" means four three-valued properties).
-        self.properties = dict() # dict[str, set[str]]
-        self.values = set() # set[str]
+        # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
+        self.properties = set() # set[Property]
+        self.values = set() # set[Value]
         for i, n in enumerate([int(s) for s in properties.split("-")]):
             property_name = f"P{i}"
-            value_names = set{f"{property_name}-v{j}" for j in range(n)}
-            self.properties[property_name] = value_names
-            self.values.update(value_names)
+            prop = Property(name=property_name)
+            prop.values = {Value(prop=prop, name=f"{property_name}-v{j}") for j in range(n)}
+            
+            self.properties.add(prop)
+            self.values.update(prop.values)
+
+        # Generates predicates.
+        self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, allow_negation=allow_negation, allow_conjunction=allow_conjunction)
+
+    # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
+    # max_depth: int
+    # Outputs a list[Predicate]
+    def generateAllPredicates(self, max_depth, nontrivial_only, allow_negation, allow_conjunction):
+        depth2predicates = [] # list[list[Predicate]]
+        depth2predicates.append([value for value in self.values if (not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
+        while(len(depth2predicates) < max_depth):
+            predicates = list() # list[Predicate]
+
+            if(allow_negation):
+                for predicate in depth2predicates[-1]:
+                    pred = Negation(predicate=predicate)
+
+                    if(pred.hasEquivalentIn(itertools.chain(*depth2predicates, predicates))): continue
+                    #if(nontrivial_only and (not pred.isNontrivial())): continue
+
+                    predicates.append(pred)
+             
+            if(allow_conjunction):
+                for pred1 in depth2predicates[-1]:
+                    for pred2 in itertools.chain.from_iterable(depth2predicates):
+                        pred = Conjunction(pred1=pred1, pred2=pred2)
+
+                        if(pred.hasEquivalentIn(itertools.chain(*depth2predicates, predicates))): continue
+                        if(nontrivial_only and (not pred.isNontrivial())): continue
+
+                        predicates.append(pred)
+
+            depth2predicates.append(predicates)
+
+        return list(itertools.chain.from_iterable(depth2predicates)) # list[Predicate]
 
     def print_info(self):
         print(f"{len(self.properties)} properties:")
-        for property_name in self.properties: print(f"{property_name} (size {len(self.properties[property_name])})")
+        #for prop in self.properties: print(f"{prop} (size {len(prop.values)})")
+        for prop in self.properties: print(f"{prop} ({prop.values})")
+
+        print(f"{len(self.predicates)} predicates ({self.predicates})")
 
     # Returns a Batch.
-    def get_batch(self, size=None, data_type='any', sampling_strategies=None, no_evaluation=True, target_evaluation=False, target_is_original=None, keep_category=False, keep_idx=False):
+    def get_batch(self, size=None, nb_candidates=None, data_type='any', sampling_strategies=None):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
-        data_type: string ("train", "test" or "any"), indicates, when selecting an image from a category, from what part of this category we take it.
-        sampling_strategies: list[string], indicates how the distractor·s are determined.
-        no_evaluation: bool, indicates whether we avoid evaluation categories.
-        target_evaluation: bool, indicates whether the original/target category must be one of the evaluation categories.
-        target_is_original: None or bool
-        keep_category: bool, the InputDataPoint·s of the batch will contain the category of their DataPoint·s,
-        keep_idx: bool, the InputDataPoint·es of the batch will contain the index of their DataPoint·s.
+        data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
+        sampling_strategies: list[string], indicates how the candidates are determined.
         """
         batch = []
         if(size is None): size = self.batch_size
+        if(nb_candidates is None): nb_candidates = self.nb_candidates
         if(sampling_strategies is None): sampling_strategies = self.sampling_strategies
-        if(target_is_original is None): target_is_original = self.same_img
         for _ in range(size):
-            # Choice of the original/target category
-            categories = self.training_categories
-            if(not no_evaluation): categories = categories.union(self.evaluation_categories)
-            if(target_evaluation): categories = categories.intersection(self.evaluation_categories)
-            target_category = random.choice(list(categories))
+            # Selects a predicate.
+            # TODO
+
+            # Selects candidates.
+            # TODO
 
             # Original image
             _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx)
@@ -210,10 +383,6 @@ class SimpleDataset():
             if(target_is_original): _target = _original.copy(deep=False)
             else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx) # Same category
             
-            # Noise is applied independently to the two images. The modification is inplace, but should only affect the InputDataPoint·s themselves, and not the DataPoint·s they are derived from.
-            _original.add_normal_noise_(self.noise)
-            _target.add_normal_noise_(self.noise)
-
             # Base distractors
             _base_distractors = []
             for sampling_strategy in sampling_strategies:
@@ -401,3 +570,8 @@ def get_data_loader(args):
     dataset.print_info()
 
     return dataset
+
+
+if(__name__ == "__main__"):
+    dataset = SimpleDataset(device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="3-3", max_depth=3, nontrivial_only=True, allow_negation=True, allow_conjunction=True)
+    dataset.print_info()
