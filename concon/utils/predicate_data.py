@@ -93,8 +93,8 @@ class Batch():
 
 class Property():
     # name: str
-    # values: set[Value]
-    def __init__(self, name, values=set()):
+    # values: list[Value]
+    def __init__(self, name, values=list()):
         self.name = name
         self.values = values
 
@@ -288,6 +288,9 @@ class Candidate():
 
     def __str__(self):
         return f"{{{','.join([str(value) for value in self.prop2value.values()])}}}"
+    
+    def __repr__(self):
+        return str(self)
 
 
 class failureBasedDistribution():
@@ -320,30 +323,31 @@ class failureBasedDistribution():
 
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
-class SimpleDataset():
-    def __init__(self, device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="3-4", max_depth=2, nontrivial_only=True, allow_negation=True, allow_conjunction=True):
+class Dataset():
+    def __init__(self, device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="3-4", max_depth=2, nontrivial_only=False, allow_negation=True, allow_conjunction=True, allow_indeterminate=False):
         self.device = device
         self.batch_size = batch_size
         self.nb_candidates = nb_candidates
         self.sampling_strategies = sampling_strategies
+        self.allow_indeterminate = allow_indeterminate
 
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
-        self.properties = set() # set[Property]
-        self.values = set() # set[Value]
+        self.properties = list() # list[Property]
+        self.values = list() # list[Value]
         for i, n in enumerate([int(s) for s in properties.split("-")]):
             property_name = f"P{i}"
             prop = Property(name=property_name)
-            prop.values = {Value(prop=prop, name=f"{property_name}-v{j}") for j in range(n)}
+            prop.values = [Value(prop=prop, name=f"{property_name}-v{j}") for j in range(n)]
             
-            self.properties.add(prop)
-            self.values.update(prop.values)
+            self.properties.append(prop)
+            self.values.extend(prop.values)
 
         # Generates predicates.
-        self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, allow_negation=allow_negation, allow_conjunction=allow_conjunction)
+        self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, allow_negation=allow_negation, allow_conjunction=allow_conjunction) # ndarray[Predicate]
 
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int
-    # Outputs a list[Predicate]
+    # Outputs a ndarray[Predicate]
     def generateAllPredicates(self, max_depth, nontrivial_only, allow_negation, allow_conjunction):
         depth2predicates = [] # list[list[Predicate]]
         depth2predicates.append([value for value in self.values if (not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
@@ -371,17 +375,18 @@ class SimpleDataset():
 
             depth2predicates.append(predicates)
 
-        return list(itertools.chain.from_iterable(depth2predicates)) # list[Predicate]
+        return np.array(list(itertools.chain.from_iterable(depth2predicates))) # ndarray[Predicate]
 
     def print_info(self):
         print(f"{len(self.properties)} properties:")
         #for prop in self.properties: print(f"{prop} (size {len(prop.values)})")
         for prop in self.properties: print(f"{prop} ({prop.values})")
-
+        
         print(f"{len(self.predicates)} predicates ({self.predicates})")
 
-    # Returns a Batch.
-    def get_batch(self, size=None, nb_candidates=None, data_type='any', sampling_strategies=None):
+    # Generates a batch.
+    # Outputs a Batch.
+    def get_batch(self, size=None, nb_candidates=None, data_type='any', sampling_strategies=None, allow_indeterminate=None):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
@@ -391,147 +396,37 @@ class SimpleDataset():
         if(size is None): size = self.batch_size
         if(nb_candidates is None): nb_candidates = self.nb_candidates
         if(sampling_strategies is None): sampling_strategies = self.sampling_strategies
+        if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
         for _ in range(size):
             # Selects a predicate.
-            # TODO
+            predicate = self.selectPredicate()
 
             # Selects candidates.
-            # TODO
+            candidates = [self.generateCandidate(allow_indeterminate=allow_indeterminate) for _ in range(nb_candidates)] # list[]
 
-            # Original image
-            _original = self.category_to_datapoint(target_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx)
+            batch.append((predicate, candidates))
 
-            # Target image
-            if(target_is_original): _target = _original.copy(deep=False)
-            else: _target = self.category_to_datapoint(target_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx) # Same category
+        predicate, candidates = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
+
+        return Batch(size=size, predicate=predicate, candidates=candidates)
+
+    # Outputs a Predicate.
+    def selectPredicate(self):
+        return np.random.choice(self.predicates)
+
+    # allow_indeterminate: Bool
+    # Outputs a Candidate.
+    def generateCandidate(self, allow_indeterminate):
+        prop2value = dict() # dict[Property, Value|NoneType]
+        
+        for prop in self.properties:
+            if(allow_indeterminate and (np.random.rand() < (1 / (1 + len(prop.values))))): continue
             
-            # Base distractors
-            _base_distractors = []
-            for sampling_strategy in sampling_strategies:
-                distractor_category = self.sample_category(sampling_strategy, target_category, no_evaluation)
-                distractor = self.category_to_datapoint(distractor_category, data_type).toInput(keep_category=keep_category, device=self.device, keep_idx=keep_idx)
-                distractor.add_normal_noise_(self.noise)
+            prop2value[prop] = np.random.choice(prop.values) # All values are equiprobable.
+        
+        return Candidate(prop2value)
 
-                _base_distractors.append(distractor)
-
-            batch.append((_original, _target, _base_distractors))
-
-        original, target, base_distractors = zip(*batch) # Unzips the list of pairs (to a pair of lists).
-
-        return Batch(size=size, original=original, target=target, base_distractors=base_distractors)
-
-    # If `d` is -1, all categories are used during training.
-    # Otherwise, a reference category and all categories with a distance from it that is a multiple of `d` are reserved for evaluation.
-    # The reference category is picked randomly except if given as `ref_category`.
-    def set_evaluation_categories(self, concepts, d, ref_category=None, random_ref=False):
-        training_categories = set()
-        evaluation_categories = set()
-
-        if(ref_category is not None): assert (not random_ref), "One cannot both specify a reference category and ask for a random one at the same time."
-        else: ref_category = np.array([np.random.randint(len(concept)) for concept in concepts]) if(random_ref) else np.full(len(concepts), 0)
-
-        category = np.full(len(concepts), 0) # Encodes the current category.
-        while(True): # Iterates over all categories to categorise them. Alternatively, we could use the number of categories
-            dist = (category != ref_category).sum()
-            if((d >= 0) and ((dist % d) == 0)):
-                evaluation_categories.add(tuple(category))
-            else:
-                training_categories.add(tuple(category))
-
-            # Let's go to the next category
-            for i, concept in enumerate(concepts):
-                if(category[i] < (len(concept) - 1)):
-                    category[i] += 1
-                    break
-
-                category[i] = 0
-            if(category.sum() == 0): break # If we're back to (0,0,…,0), then we've seen all categories
-
-        self.training_categories = training_categories
-        self.evaluation_categories = evaluation_categories
-
-        return ref_category
-
-    def _different_category(self, category, no_evaluation):
-        """Returns a category that is different from `category`.
-        If `no_evaluation` is True, evaluation categories are ignored."""
-        categories = self.training_categories
-        if(not no_evaluation): categories = categories.union(self.evaluation_categories)
-        categories = list(categories.difference(set([category])))
-        assert (categories != []), f"There is no other category than category {category} (with{'out considering' if(no_evaluation) else ''} evaluation categories)."
-
-        return random.choice(categories)
-
-        # The following code was very efficient, but only works when there is no split between training and evaluation categories
-        #distance = np.random.randint(self.nb_concepts) + 1
-        #return self._distance_to_category(category, distance)
-
-    def sample_category(self, sampling_strategy, category, no_evaluation):
-        if(sampling_strategy == 'hamming1'): # Selects a category at distance 1 in the concept space
-            return self._distance_to_category(category, 1, no_evaluation)
-
-        if(sampling_strategy == 'different'): # Selects a different category
-            return self._different_category(category, no_evaluation)
-
-        if(sampling_strategy == 'difficulty'): # Selects a category based on the difficulty scores, that are softmaxed
-            category_idx = self.category_idx(category)
-            allowed_categories_idx = self.training_categories_idx if(no_evaluation) else None
-            sample_idx = self.failure_based_distribution.sample(category_idx, allowed_categories_idx)
-
-            return self.category_tuple(sample_idx)
-
-        if(sampling_strategy == 'same'): # Should not be used during training
-            return category
-
-        if(sampling_strategy == "random"):
-            return random.choice(list(self.training_categories))
-
-        assert False, ('Sampling strategy \'%s\' unknown.' % sampling_strategy)
-
-    # Should only be used for debugging purpose. Use `get_batch` instead
-    # Returns a DataPoint.
-    # i: int
-    def get_datapoint(self, i):
-        return self._dataset[i]
-
-    # Category tuples are read from left to right (contrary to usual numbers)
-    # Return a tuple[int].
-    # category_idx: int
-    def category_tuple(self, category_idx):
-        ks = []
-        k = 1
-        for i, concept in enumerate(self.concepts):
-            ks.append(k)
-            k *= len(concept)
-        ks.reverse()
-
-        l = []
-        remainder = category_idx
-        for k in ks:
-            l.append(remainder // k)
-            remainder = (remainder % k)
-        l.reverse()
-
-        category_tuple = tuple(l)
-
-        #if(np.random.randint(2)): assert self.category_idx(category_tuple) == category_idx # DEBUG ONLY
-
-        return category_tuple
-
-    # Returns an int.
-    # category_tuple: tuple[int]
-    def category_idx(self, category_tuple):
-        category_idx = 0
-        k = 1
-        for i, concept in enumerate(self.concepts):
-            category_idx += category_tuple[i] * k
-            k *= len(concept)
-
-        #if(np.random.randint(2)): assert self.category_tuple(category_idx) == category_tuple # DEBUG ONLY
-
-        return category_idx
-    
-    # Should be consistant with `category_to_datapoint`
+    # RMK: Should be consistant with `category_to_datapoint`.
     # data_type: string ("train", "test" or "any")
     # no_evaluation: bool
     def size(self, data_type, no_evaluation):
@@ -545,49 +440,10 @@ class SimpleDataset():
 
         return size
 
-    #def __len__(self):
-    #    return len(self._dataset)
-
-    # Returns an int.
-    # category: tuple[int]
-    # data_type: string ("train", "test" or "any")
-    def category_size(self, category, data_type):
-        split = self.category_split(category)
-        
-        if(data_type == 'train'): return split[1] - split[0]
-        elif(data_type == 'test'): return split[2] - split[1]
-        elif(data_type == 'any'): return split[-1] - split[0]
-        else: assert False, ('Data type \'%s\' unknown.' % data_type)
-
-    # Returns of list[int] of length 3.
-    # category: tuple[int]
-    def category_split(self, category):
-        l = len(self.categories[category])
-        
-        if(category in self.training_categories):
-            split_point = ((4 * l) // 5)
-            return [0, split_point, l] # 4/5th in the train portion, 1/5th in the test portion
-        
-        return [0, 0, l] # Everything in the test portion
-
-    # Returns a Datapoint.
-    # category: tuple[int]
-    # data_type: string
-    def category_to_datapoint(self, category, data_type):
-        split = self.category_split(category)
-
-        if(data_type == 'train'): a, b = split[0], (split[1]-1)
-        elif(data_type == 'test'): a, b = split[1], (split[2]-1)
-        elif(data_type == 'any'): a, b = split[0], (split[-1]-1)
-        else: assert False, ('Data type \'%s\' unknown.' % data_type)
-        i = random.randint(a, b) # A random integer between a and b (included)
-
-        return self.categories[category][i]
-
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 
-    dataset = SimpleDataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim, args=args)
+    dataset = Dataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim, args=args)
 
     dataset.print_info()
 
@@ -595,5 +451,18 @@ def get_data_loader(args):
 
 
 if(__name__ == "__main__"):
-    dataset = SimpleDataset(device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="6-6", max_depth=3, nontrivial_only=True, allow_negation=True, allow_conjunction=True)
+    # Creates a dataset.
+    dataset = Dataset(device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="10-10", max_depth=3, nontrivial_only=False, allow_negation=True, allow_conjunction=True)
     dataset.print_info()
+    
+    # Estimates the probability that a random candidate satisfy a random predicate.
+    nb = 100000
+    for allow_indeterminate in [True, False]:
+        counts = dict() # dict[int, int]
+        for _ in range(nb):
+            predicate = dataset.selectPredicate()
+            candidate = dataset.generateCandidate(allow_indeterminate=allow_indeterminate)
+            truth_value = predicate.check(candidate)
+            counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1
+        
+        print({truth_value: (100 * c / nb) for (truth_value, c) in counts.items()})
