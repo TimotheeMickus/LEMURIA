@@ -104,15 +104,28 @@ class Property():
 
 # A predicate is equivalent to a first-order logic formula.
 class Predicate():
+    def __init__(self):
+        self._build_cache = dict() # dict[int, list[Candidate]]
+    
     # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
     # Outputs an int.
     def check(self, candidate):
         raise NotImplementedError
-
+    
     # target: -1, 0 or 1
     # Outputs a list[Candidate].
     def build(self, target=1):
+        # Uncached version
+        #return self._build(target)
+        
+        # Cached version
+        if(target not in self._build_cache): self._build_cache[target] = self._build(target)
+        return self._build_cache[target]
+    
+    # target: -1, 0 or 1
+    # Outputs a list[Candidate].
+    def _build(self, target=1):
         raise NotImplementedError
 
     # Outputs a Bool.
@@ -158,6 +171,8 @@ class Value(Predicate):
     # name: str
     # prop: Property
     def __init__(self, name, prop):
+        super(Value, self).__init__()
+        
         self.name = name
         self.prop = prop
 
@@ -171,7 +186,7 @@ class Value(Predicate):
     
     # target: -1, 0 or 1
     # Outputs a list[Candidate].
-    def build(self, target=1):
+    def _build(self, target=1):
         if(target == 1): return [Candidate(prop2value={self.prop: self})]
         if(target == -1): return [Candidate(prop2value={self.prop: value}) for value in self.prop.values if value != self]
         if(target == 0): return [Candidate(prop2value={self.prop: None})]
@@ -181,6 +196,8 @@ class Value(Predicate):
 
 class Negation(Predicate):
     def __init__(self, predicate):
+        super(Negation, self).__init__()
+        
         self.predicate = predicate # Predicate
 
     # candidate: Candidate
@@ -190,7 +207,7 @@ class Negation(Predicate):
     
     # target: -1, 0 or 1
     # Outputs a list[Candidate].
-    def build(self, target=1):
+    def _build(self, target=1):
         return self.predicate.build(target=(-target))
 
     def __str__(self): return f"(¬{self.predicate})"
@@ -198,6 +215,8 @@ class Negation(Predicate):
 class Conjunction(Predicate):
     # pred1, pred2: Predicate
     def __init__(self, pred1, pred2):
+        super(Conjunction, self).__init__()
+        
         self.pred1 = pred1
         self.pred2 = pred2
 
@@ -208,7 +227,7 @@ class Conjunction(Predicate):
     
     # target: -1, 0 or 1
     # Outputs a list[Candidate].
-    def build(self, target=1):
+    def _build(self, target=1):
         if(target == 1):
             l1 = self.pred1.build(target=1)
             l2 = self.pred2.build(target=1)
@@ -573,5 +592,5 @@ def get_data_loader(args):
 
 
 if(__name__ == "__main__"):
-    dataset = SimpleDataset(device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="3-3", max_depth=3, nontrivial_only=True, allow_negation=True, allow_conjunction=True)
+    dataset = SimpleDataset(device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="6-6", max_depth=3, nontrivial_only=True, allow_negation=True, allow_conjunction=True)
     dataset.print_info()
