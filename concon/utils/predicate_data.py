@@ -176,8 +176,9 @@ class Value(Predicate):
         self.name = name
         self.prop = prop
 
+    # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
-    # Outputs a truth value in {-1, 0, 1} based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    # Outputs an int.
     def check(self, candidate):
         v = candidate.get(self.prop)
         if(v is None): return 0
@@ -200,8 +201,9 @@ class Negation(Predicate):
         
         self.predicate = predicate # Predicate
 
+    # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
-    # Outputs a truth value in {-1, 0, 1} based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    # Outputs an int.
     def check(self, candidate):
         return -self.predicate.check(candidate)
     
@@ -220,8 +222,9 @@ class Conjunction(Predicate):
         self.pred1 = pred1
         self.pred2 = pred2
 
+    # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
-    # Outputs a truth value in {-1, 0, 1} based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
+    # Outputs an int.
     def check(self, candidate):
         return min(self.pred1.check(candidate), self.pred2.check(candidate))
     
