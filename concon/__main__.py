@@ -69,4 +69,4 @@ if(__name__ == "__main__"):
         from .predicate_signalling_game import main
         main(args, remaining_args)
     else:
-        print(f'I do not know what to do ("{args.do}")')
+        print(f'I do not know what to do ("{args.do}").')

@@ -81,15 +81,10 @@ def get_args(remaining_args=None):
     default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + socket.gethostname())
 
     group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
-    group.add_argument('--data_set', help='the path to the data set', default=default_data_set, type=pathlib.Path)
-    group.add_argument('--binary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
-    group.add_argument('--constrain_dim', help='restrict specific dimensions in dataset', nargs=5, choices=[1,2,3], default=None, type=int)
-    group.add_argument('--pair_images', '-pi', help='generates a new dataset by combining pairs of images', action='store_true')
+    group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
+    group.add_argument('--max-depth', help='the depth limit of the predicates considered', default=3, type=int)
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
-    group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
     group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty, random)', default='difficulty', choices=['hamming1', 'different', 'difficulty', 'random'])
-    group.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
-    group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=5, type=int)
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
@@ -105,8 +100,6 @@ def get_args(remaining_args=None):
     group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
     group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
     group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
-    group.add_argument('--no_log_imgs', help='do not log image samples', action='store_true')
-    group.add_argument('--log_img_every', default=10, type=int, help='how often (in epochs) to log image samples')
     # TODO: refactor logging: --logging_period should control the frequency of step reports when --display minimal
     group.add_argument('--logging_period', help='how often counts of logged variables are accumulated', type=int, default=10)
     # TODO: refactor logging: --quiet vs. --display quiet?
@@ -133,7 +126,6 @@ def get_args(remaining_args=None):
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
     group.add_argument('--population', help='population size', default=None, type=int)
-    group.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
     group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
@@ -145,34 +137,13 @@ def get_args(remaining_args=None):
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
 
-    group = arg_parser.add_argument_group(title='Conv', description='arguments relative to convolutional structure')
-    # group.add_argument('--img_channel', help='number of input channels in images', type=int, default=3)
-    group.add_argument('--img_size', help='Width/height of images', type=int, default=128)
-    group.add_argument('--decnn_channel_size', help="factor to determine number of channel features in deconvolutions (defaults to hidden size)", type=int, default=None)
-    group.add_argument('--cnn_channel_size', help="factor to determine number of channel features in convolutions (defaults to hidden size)", type=int, default=None)
-    group.add_argument('--local_batchnorm', help="indicates whether BatchNorme2D layers use global statistics (False) or not (True)", action="store_true")
-    group.add_argument('--use_legacy_convolutions', help="use old architectures for both CNN and DeCNN", action="store_true")
-    group.add_argument('--use_legacy_decnn', help="use old architecture for DeCNN", action="store_true")
-    group.add_argument('--use_legacy_cnn', help="use old architecture for CNN", action="store_true")
-    # group.add_argument('--conv_layers', help='number of convolution layers', type=int, default=8)
-    # group.add_argument('--filters', help='number of filters per convolution layers', type=int, default=32)
-    # group.add_argument('--kernel_size', help='size of convolution kernel', type=int, default=3)
-    # group.add_argument('--strides', help='stride at each convolution layer', type=int, nargs='+', default=[2, 2, 1, 2, 1, 2, 1, 2]) # the original paper suggests 2,1,1,2,1,2,1,2, but that doesn't match the expected output of 50, 1, 1
-    group.add_argument('--pretrain_CNNs', help='pretrain CNNs on specified task', type=str, choices=['category-wise', 'feature-wise', 'auto-encoder'])
-    group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining', type=float)
-    group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
-    group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
-    group.add_argument('--freeze_pretrained_CNNs', help='do not backpropagate gradient on pretrained CNNs', action='store_true')
-    group.add_argument('--detect_outliers', help='if pretraining, then after, the trained model analyses the dataset in order to detect problems', action='store_true')
-    group.add_argument('--autoencode_receiver_inputs', help='run all receiver image inputs through a pretrained autoencoder', action='store_true')
-
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
     
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
 
-    args = arg_parser.parse_args()
+    args = arg_parser.parse_args(remaining_args)
     if not args.quiet:
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)
