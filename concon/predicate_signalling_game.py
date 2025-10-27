@@ -57,11 +57,7 @@ import argparse
 import pathlib
 import pprint
 
-#this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
-
 import socket # for `gethostname`
-import torch # for device
-from datetime import datetime
 
 def get_args(remaining_args=None):
     arg_parser = argparse.ArgumentParser()
@@ -133,7 +129,6 @@ def get_args(remaining_args=None):
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
     
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
-
 
     args = arg_parser.parse_args(remaining_args)
     if not args.quiet:
