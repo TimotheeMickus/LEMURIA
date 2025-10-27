@@ -1,15 +1,11 @@
 #!/usr/bin/env python
 
 from datetime import datetime
-import sys
 
 import torch
-import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
-import tqdm
 
 from .utils.predicate_data import get_data_loader
-from .utils.misc import build_optimizer, get_default_fn, path_replace
+from .utils.misc import path_replace
 from .utils.logging import AutoLogger
 
 def main(global_args=None, remaining_args=None):
@@ -45,7 +41,7 @@ def do(args):
         # Runs the run.
         if(args.save_every > 0): model.save(run_models_dir / "model_e-1.pt")
 
-        print((f"[{datetime.now()}] training start…", flush=True)
+        print(f"[{datetime.now()}] training start…", flush=True)
 
         model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
         
@@ -58,10 +54,8 @@ def do(args):
 
 
 import argparse
-import os
 import pathlib
 import pprint
-import sys
 
 #this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
 
