@@ -7,10 +7,10 @@ import itertools
 import random
 
 class Batch():
-    def __init__(self, size, predicate, candidates):
+    def __init__(self, size, predicate, candidate):
        self.size = size # int
        self.predicate = predicate # list[Predicate]
-       self.candidates = candidates # list[list[Candidate]]
+       self.candidate = candidate # list[Candidate]
 
     def __eq__(self, other):
         if(not isinstance(other, Batch)): return NotImplemented
@@ -21,8 +21,8 @@ class Batch():
         if(self.predicate != other.predicate):
             print("Batch.__eq__//predicate")
             return False
-        if(self.candidates != other.candidates):
-            print("Batch.__eq__//candidates")
+        if(self.candidate != other.candidate):
+            print("Batch.__eq__//candidate")
             return False
 
         return True
@@ -324,11 +324,9 @@ class failureBasedDistribution():
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
 class Dataset():
-    def __init__(self, device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="3-4", max_depth=2, nontrivial_only=False, allow_negation=True, allow_conjunction=True, allow_indeterminate=False):
+    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False):
         self.device = device
         self.batch_size = batch_size
-        self.nb_candidates = nb_candidates
-        self.sampling_strategies = sampling_strategies
         self.allow_indeterminate = allow_indeterminate
 
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
@@ -343,18 +341,18 @@ class Dataset():
             self.values.extend(prop.values)
 
         # Generates predicates.
-        self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, allow_negation=allow_negation, allow_conjunction=allow_conjunction) # ndarray[Predicate]
+        self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
 
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int
     # Outputs a ndarray[Predicate]
-    def generateAllPredicates(self, max_depth, nontrivial_only, allow_negation, allow_conjunction):
+    def generateAllPredicates(self, max_depth, nontrivial_only, no_negation, no_conjunction):
         depth2predicates = [] # list[list[Predicate]]
         depth2predicates.append([value for value in self.values if (not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
         while(len(depth2predicates) < max_depth):
             predicates = list() # list[Predicate]
 
-            if(allow_negation):
+            if(not no_negation):
                 for predicate in depth2predicates[-1]:
                     pred = Negation(predicate=predicate)
 
@@ -363,7 +361,7 @@ class Dataset():
 
                     predicates.append(pred)
              
-            if(allow_conjunction):
+            if(not no_conjunction):
                 for pred1 in depth2predicates[-1]:
                     for pred2 in itertools.chain.from_iterable(depth2predicates):
                         pred = Conjunction(pred1=pred1, pred2=pred2)
@@ -386,29 +384,26 @@ class Dataset():
 
     # Generates a batch.
     # Outputs a Batch.
-    def get_batch(self, size=None, nb_candidates=None, data_type='any', sampling_strategies=None, allow_indeterminate=None):
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
-        sampling_strategies: list[string], indicates how the candidates are determined.
         """
         batch = []
         if(size is None): size = self.batch_size
-        if(nb_candidates is None): nb_candidates = self.nb_candidates
-        if(sampling_strategies is None): sampling_strategies = self.sampling_strategies
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
         for _ in range(size):
             # Selects a predicate.
             predicate = self.selectPredicate()
 
-            # Selects candidates.
-            candidates = [self.generateCandidate(allow_indeterminate=allow_indeterminate) for _ in range(nb_candidates)] # list[]
+            # Generates a candidate.
+            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate) # Candidate
 
-            batch.append((predicate, candidates))
+            batch.append((predicate, candidate))
 
-        predicate, candidates = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
+        predicate, candidate = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
 
-        return Batch(size=size, predicate=predicate, candidates=candidates)
+        return Batch(size=size, predicate=predicate, candidate=candidate)
 
     # Outputs a Predicate.
     def selectPredicate(self):
@@ -441,10 +436,7 @@ class Dataset():
         return size
 
 def get_data_loader(args):
-    sampling_strategies = args.sampling_strategies.split('/')
-
-    dataset = Dataset(args.same_img, evaluation_categories=args.evaluation_categories, data_set=args.data_set, display=args.display, noise=args.noise, device=args.device, batch_size=args.batch_size, sampling_strategies=sampling_strategies, binary=args.binary_dataset, constrain_dim=args.constrain_dim, args=args)
-
+    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction)
     dataset.print_info()
 
     return dataset
@@ -452,11 +444,11 @@ def get_data_loader(args):
 
 if(__name__ == "__main__"):
     # Creates a dataset.
-    dataset = Dataset(device='cpu', batch_size=128, nb_candidates=16, sampling_strategies=["random"], properties="10-10", max_depth=3, nontrivial_only=False, allow_negation=True, allow_conjunction=True)
+    dataset = Dataset(device='cpu', batch_size=128, properties="4-4", max_depth=3, nontrivial_only=False, no_negation=False, no_conjunction=False)
     dataset.print_info()
     
     # Estimates the probability that a random candidate satisfy a random predicate.
-    nb = 100000
+    nb = 10000
     for allow_indeterminate in [True, False]:
         counts = dict() # dict[int, int]
         for _ in range(nb):
@@ -465,4 +457,5 @@ if(__name__ == "__main__"):
             truth_value = predicate.check(candidate)
             counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1
         
+        print(f"Satisfaction probabilities (allow_indeterminate={allow_indeterminate}): ", end="")
         print({truth_value: (100 * c / nb) for (truth_value, c) in counts.items()})

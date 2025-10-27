@@ -17,10 +17,6 @@ def main(global_args=None, remaining_args=None):
     do(args)
 
 def do(args):
-    if(not args.data_set.is_dir()):
-        print((f"Directory '{args.data_set}' not found."), flush=True)
-        sys.exit()
-
     summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S')) # PosixPath
     models_dir = path_replace(args.models, '[summary]', summary_dir) # PosixPath
 
@@ -47,9 +43,9 @@ def do(args):
             torch.autograd.set_detect_anomaly(True)
 
         # Runs the run.
-        if(args.save_every > 0): model.save(run_models_dir / ("model_e%i.pt" % -1))
+        if(args.save_every > 0): model.save(run_models_dir / "model_e-1.pt")
 
-        print(("[%s] training start…" % datetime.now()), flush=True)
+        print((f"[{datetime.now()}] training start…", flush=True)
 
         model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
         
@@ -83,8 +79,10 @@ def get_args(remaining_args=None):
     group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
     group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
     group.add_argument('--max-depth', help='the depth limit of the predicates considered', default=3, type=int)
+    group.add_argument('--nontrivial_only', help='whether to use only predicates that are both satisfiable and falsifiable', action='store_true')
+    group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
+    group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
-    group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty, random)', default='difficulty', choices=['hamming1', 'different', 'difficulty', 'random'])
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
