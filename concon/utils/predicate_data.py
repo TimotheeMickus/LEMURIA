@@ -7,8 +7,10 @@ import itertools
 import random
 
 class Batch():
+    # TODO See TODO below. This class has to be changed to store tensors ready to be fed to the model.
     def __init__(self, size, predicate, candidate):
        self.size = size # int
+       
        self.predicate = predicate # list[Predicate]
        self.candidate = candidate # list[Candidate]
 
@@ -26,21 +28,6 @@ class Batch():
             return False
 
         return True
-
-    # Returns a vector of predicate indices (int).
-    def predicate_idx(self, stack=False):
-        idx = [0 for pred in self.predicate] # TODO
-        if(stack): return torch.stack(idx)
-        else: return idx
-    
-    # Returns a 2D-tensor of node type indices and a 3D-tensor of edge type indices.
-    def candidate_graph(self, stack=False):
-        node_idxes = [[0 for (prop, value) in c.prop2val.items()] for c in self.candidate] # TODO
-        edge_idxes = [[[0 for (p2, v2) in c.prop2val.items()] for (p1, v1) in c.prop2val.items()] for c in self.candidate] # TODO
-        
-        # TODO Don't forget padding.
-        if(stack): return (torch.stack(node_idxes), torch.stack(edge_idxes))
-        else: return (node_idxes, edge_idxes)
 
     # Used for debugging.
     # Returns (list[None|int], list[None|int], list[None|int]).
@@ -409,7 +396,7 @@ class Dataset():
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
         for _ in range(size):
             # Selects a predicate.
-            predicate = self.selectPredicate()
+            pred_idx, predicate = self.selectPredicate()
 
             # Generates a candidate.
             candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate) # Candidate
@@ -418,11 +405,14 @@ class Dataset():
 
         predicate, candidate = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
 
+        # TODO In fact, it would be better to store in the batch tensors ready to be fed to the model.
+        # So, the predicate indices instead of the predicates, and for the candidates, use graphTensorize here https://colab.research.google.com/drive/1C5iUSxX-MIJXIb4wfUzYBExRTF-OhsWn?usp=sharing
         return Batch(size=size, predicate=predicate, candidate=candidate)
 
-    # Outputs a Predicate.
+    # Outputs a (int, Predicate).
     def selectPredicate(self):
-        return np.random.choice(self.predicates)
+        idx = np.random.randint(0, len(self.predicates))
+        return (idx, self.predicates[idx])
 
     # allow_indeterminate: Bool
     # Outputs a Candidate.
@@ -435,6 +425,7 @@ class Dataset():
             prop2value[prop] = np.random.choice(prop.values) # All values are equiprobable.
         
         return Candidate(prop2value)
+
 
 def get_data_loader(args):
     dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction)
