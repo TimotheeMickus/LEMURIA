@@ -113,6 +113,7 @@ class Predicate():
     # candidate: Candidate
     # Outputs an int.
     def check(self, candidate):
+        # MG TODO I guess I should do this
         raise NotImplementedError
     
     # target: -1, 0 or 1
@@ -167,7 +168,8 @@ class Predicate():
         return False
 
     def __repr__(self):
-        return str(self)
+        return str(self) # MG TODO fix representation (this causes infinite recursion (repr calls str etc.))
+
 
 class Value(Predicate):
     # name: str
@@ -440,11 +442,11 @@ if(__name__ == "__main__"):
     dataset.print_info()
     
     # Estimates the probability that a random candidate satisfy a random predicate.
-    nb = 10000
+    nb = 10_000
     for allow_indeterminate in [True, False]:
         counts = dict() # dict[int, int]
         for _ in range(nb):
-            predicate = dataset.selectPredicate()
+            predicate = dataset.selectPredicate()[-1] # MG BUG_FIX: `predicate` is a tuple (idx, predicate@idx): select only predicate[-1]
             candidate = dataset.generateCandidate(allow_indeterminate=allow_indeterminate)
             truth_value = predicate.check(candidate)
             counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1
