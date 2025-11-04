@@ -11,16 +11,18 @@ import time
 
 from ..agents import Sender, Receiver, SenderReceiver
 from ..utils.misc import build_optimizer, compute_entropy_stats
-from ..utils import misc
+# from ..utils.predicate_data import 
+from ..utils import misc, predicate_data
 
 from ..eval import compute_correlation
 from ..eval import decision_tree
 
 from .game import Game
 
-# TODO This is currently a copy of AliceBob (well, I've already removed some obviously useless stuf), but should be changed to match the following description.
-# In this game, there is one sender (Alex) and one receiver (Beth).
-# They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: Alex is shown a predicate and produces a signal, Bob sees both the signal and an object, and produces a probability.
+# TODO This is currently a copy of AliceBob (well, I've already removed some obviously useless stuf), but should be changed to match the following description:
+#   In this game, there is one sender (Alex) and one receiver (Beth).
+#   They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
+#   Alex is shown a predicate and produces a signal, Bob sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
 class AlexBeth(Game):
     def __init__(self, args, logger, dataset, message_dump_dir):
@@ -93,7 +95,7 @@ class AlexBeth(Game):
         return batch.original_img(stack=True)
 
     # batch: Batch
-    def _bob_input(self, batch):
+    def _beth_input(self, batch):
         with torch.no_grad():
             ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
             ipts = self.receiver_preprocessor(ipts.flatten(0, 1)).view(*ipts.shape).detach()

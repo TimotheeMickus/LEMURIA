@@ -5,4 +5,5 @@ data/
 .venv/
 .vimrc
 .ipynb_checkpoints/
-.python_version
+.python-version
+notebooks/graph_enc.py
