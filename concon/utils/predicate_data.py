@@ -8,126 +8,116 @@ import random
 
 class Batch():
     # TODO See TODO below. This class has to be changed to store tensors ready to be fed to the model.
-    def __init__(self, size, predicate, candidate, store_tensor=False):
+    # MG: Done-ish
+    def __init__(self, size, predicate, predicate_idx, candidate, store_tensor=False):
         self.size = size # int
-        
         self.predicate = predicate # list[Predicate]
+        self.predicate_idx = predicate_idx # list[int]
         self.candidate = candidate # list[Candidate]
-        self.store_tensor = store_tensor
 
-        if self.store_tensor:
-            self.object_token='<obj>'
-            self.padding_token='<pad>'
-            self.selfedge_label='<self>'
-            self.noedge_label='<noedge>'
-            self.obj2feat_edge='obj2feat'
-            self.feat2obj_edge='feat2obj'
-            self.graphs = []
-            # DEBUG
-            # print("Appending candidates...")
-            # print(self.candidate)
-            for c in self.candidate:
-                graph = str(c).strip("{}").split(",")
-                graph = {g.split("-")[0]: g.split("-")[1] for g in graph}
-                self.graphs.append([graph])
+        self.object_token='<obj>'
+        self.padding_token='<pad>'
+        self.selfedge_label='<self>'
+        self.noedge_label='<noedge>'
+        self.obj2feat_edge='obj2feat'
+        self.feat2obj_edge='feat2obj'
 
-                # DEBUG
-                # print(graph)
+        self.graphs = None
+        self.node_labels_idx2sym = None
+        self.node_labels_sym2idx = None
+        self.edge_labels_idx2sym = None
+        self.edge_labels_sym2idx = None
 
-            # Create vocabulary of node labels
-            node_labels = set([self.object_token])
-            # DEBUG
-            # print(f"Creating node labels... {node_labels}")
-            for g in self.graphs:
-                for o in g: 
-                    # DEBUG
-                    # print(o, type(o))
-                    node_labels.update(set(o.items()))
-            (nl_i2s, nl_s2i) = self._vocabulary(node_labels, unknown=None)
-            nl_i2s.append(self.padding_token)
-            nl_s2i[self.padding_token] = len(nl_s2i)
-            # DEBUG
-            # print(f"node labels string to index: {nl_s2i}")
-            # Create vocabulary of edge labels
-            edge_labels = set([self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge])
-            (el_i2s, el_s2i) = self._vocabulary(edge_labels, unknown=None)
+    # Predicate encoding
+    def encode_predicates(self, mode='predicate', num_predicates=None):
+        assert mode in ['predicate', 'sparse', 'one-hot']
 
-            self.nl_i2s, self.nl_s2i, self.el_i2s, self.el_s2i = nl_i2s, nl_s2i, el_i2s, el_s2i
+        if(mode=='predicate'): return self.predicate
+        if(mode=='sparse'): return np.array(self.predicate_idx)
+        if mode=='one-hot':
+            assert num_predicates is not None, 'Must specify `num_predicates` for one-hot encoding.'
+            one_hot = np.eye(num_predicates)
+            return np.stack([one_hot[i] for i in self.predicate_idx], axis=0)
 
-            # DEBUG
-            # print(f"{len(nl_i2s)} node labels:\n{nl_i2s}")
-            # print(f"{len(el_i2s)} edge labels:\n{el_i2s}")
-            print("Example of item: ")
-            print(self.graphs[-1])
-            print(self._tensorize_graph(self.graphs[-1], nl_s2i, el_s2i, self.object_token, self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge, self.padding_token, padding_length=None))
-            self.graphs = self._tensorize_graphs(self.graphs, nl_s2i, el_s2i, self.object_token, self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge, self.padding_token)
-            
-    def _vocabulary(self, list_of_symbols, unknown='<unk>'):
+    # GRAPH TENSORIZATION HELPERS
+    def _vocabulary(self, symbols, unknown='<unk>'):
         '''Given a set of strings, returns mappings: index2string and string2index.'''
+        symbols = set(symbols)
         if unknown is not None:
-            list_of_symbols.add(unknown)
-        list_of_symbols = list(list_of_symbols)
-        return (list_of_symbols, {s: i for (i,s) in enumerate(list_of_symbols)})
+            symbols.add(unknown)
+        i2s = list(symbols)
+        s2i = {s:i for (i,s) in enumerate(i2s)}
+        return i2s, s2i
 
-    def _tensorize_graph(
-            self, graph, 
-            node_labels_sym2idx, edge_labels_sym2id, 
-            object_token, selfedge_label, noedge_label,
-            obj2feat_edge, feat2obj_edge,
-            padding_token, padding_length=None
-            ):
+    def _tensorize_graph(self, graph, node_labels_sym2idx, edge_labels_sym2id, padding_length=None):
         '''
         Given a graph expressed as a list of dictionaries and a set of node and edge labels,
-        returns 
+        returns node, edge indices and graph depth.
         '''
         # graph: list[dict[str, str]]
         graph_size = sum([(len(o) + 1) for o in graph])
-        length = padding_length if(padding_length is not None) else graph_size
+        length = padding_length if padding_length is not None else graph_size
 
-        node_idx = ([node_labels_sym2idx[padding_token]] * length) # list[int]
-        edge_idx = [([edge_labels_sym2id[noedge_label]] * length) for _ in range(length)] # list[list[int]]
+        node_idx = [node_labels_sym2idx[self.padding_token]] * length # list[int]
+        edge_idx = [[edge_labels_sym2id[self.noedge_label]] * length for _ in range(length)] # list[list[int]]
 
-        root_idx = 0
+        root_id = 0
         for o in graph:
-            node_idx[root_idx] = node_labels_sym2idx[object_token]
-            edge_idx[root_idx][root_idx] = edge_labels_sym2id[selfedge_label]
+            node_idx[root_id] = node_labels_sym2idx[self.object_token]
+            edge_idx[root_id][root_id] = edge_labels_sym2id[self.selfedge_label]
 
-            idx = root_idx + 1
+            i = root_id + 1
             for feature, value in o.items():
-                node_idx[idx] = node_labels_sym2idx[(feature, value)]
-                edge_idx[idx][idx] = edge_labels_sym2id[selfedge_label]
+                node_idx[i] = node_labels_sym2idx[(feature, value)]
+                edge_idx[i][i] = edge_labels_sym2id[self.selfedge_label]
 
-                edge_idx[root_idx][idx] = edge_labels_sym2id[obj2feat_edge]
-                edge_idx[idx][root_idx] = edge_labels_sym2id[feat2obj_edge]
-                idx += 1
+                edge_idx[root_id][i] = edge_labels_sym2id[self.obj2feat_edge]
+                edge_idx[i][root_id] = edge_labels_sym2id[self.feat2obj_edge]
+                i += 1
 
-            root_idx = idx
+            root_id = i
 
-        return (node_idx, edge_idx, graph_size)
-    
-    def _tensorize_graphs(
-            self, graphs, 
-            node_labels_sym2idx, edge_labels_sym2idx,
-            object_token, selfedge_label, noedge_label,
-            obj2feat_edge, feat2obj_edge,
-            padding_token
-            ):
-        padding_length = max([sum([(len(o)+1) for o in g]) for g in graphs])
-        node_idx   = []
-        edge_idx   = []
-        graph_size = []
+        return node_idx, edge_idx, graph_size
+     
+    def tensorize_candidates(self):
+        '''Converts Candidate objects into a graph dictionary.'''
+        if self.graphs is not None:
+            return self.graphs
         
-        for g in graphs:
-            a,b,c = self._tensorize_graph(
-                g, node_labels_sym2idx, edge_labels_sym2idx,
-                object_token, selfedge_label, noedge_label,
-                obj2feat_edge, feat2obj_edge, padding_token, padding_length
-                )
-            node_idx.append(a)
-            edge_idx.append(b)
-            graph_size.append(c)
+        graphs = []
+        for c in self.candidate:
+            graphs.append([{p.name: v.name.split('-', 1)[1] for p, v in c.prop2value.items() if v is not None}])
 
-        return (node_idx, edge_idx, graph_size)
+        # Build vocabularies
+        node_labels = {self.object_token}
+        for g in graphs:
+            for o in g:
+                node_labels.update((k,v) for k,v in o.items())
+
+        nl_i2s, nl_s2i = self._vocabulary(node_labels, unknown=None)
+        nl_i2s.append(self.padding_token)
+        nl_s2i[self.padding_token] = len(nl_s2i)
+
+        edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
+        el_i2s, el_s2i = self._vocabulary(edge_labels, unknown=None)
+
+        padding_length = max(sum(len(o) + 1 for o in g) for g in graphs)
+
+        node_idx = []
+        edge_idx = []
+        graph_sizes = []
+            
+        for g in graphs:
+            n,e,s = self._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
+            node_idx.append(n)
+            edge_idx.append(e)
+            graph_sizes.append(s)
+
+        self.graphs = (node_idx, edge_idx, graph_sizes)
+        self.node_labels_idx2sym, self.node_labels_sym2idx = nl_i2s, nl_s2i
+        self.edge_labels_idx2sym, self.edge_labels_sym2idx = el_i2s, el_s2i
+
+        return self.graphs
 
     def __eq__(self, other):
         if(not isinstance(other, Batch)): return NotImplemented
@@ -505,43 +495,27 @@ class Dataset():
 
     # Generates a batch.
     # Outputs a Batch.
-    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, pred_encoding='predicate'):
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
         """
-        assert pred_encoding in ['predicate', 'sparse', 'one-hot'], '`pred_encoding` must be \'predicate\', \'sparse\', or \'one-hot\''
         batch = []
         if(size is None): size = self.batch_size
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
-        # Zero-hot vectors for one-hot encoding
-        one_hot = np.eye(len(self.predicates))
 
         for _ in range(size):
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
-            # Encodes the predicate if `pred_encoding` set
-            if(pred_encoding == 'sparse'): predicate = pred_idx
-            if(pred_encoding == 'one-hot'): predicate = one_hot[pred_idx]
-
             # Generates a candidate.
             candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate) # Candidate
+            batch.append((pred_idx, predicate, candidate))
 
-            # MG TODO: this should be the O.H. vector but for now it helps me debug
-            batch.append((predicate, candidate))
-
-        pred_vectors, candidate = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
+        predicate_idx, pred_objects, candidates = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
         # TODO In fact, it would be better to store in the batch tensors ready to be fed to the model.
         # So, the predicate indices instead of the predicates, and for the candidates, use graphTensorize here https://colab.research.google.com/drive/1C5iUSxX-MIJXIb4wfUzYBExRTF-OhsWn?usp=sharing
         # MG: The `store_tensor` flag triggers candidate dictionary translation into tensors
-        return Batch(size=size, predicate=pred_vectors, candidate=candidate, store_tensor=True)
-    
-    def toOneHotPredicate(self, pred_idx):
-        pred_oh_vector = np.zeros(len(self.predicates))
-        pred_oh_vector[pred_idx] = 1
-        # DEBUG
-        # print(f"Predicate one-hot index: {pred_idx}, for {self.predicates[pred_idx]}")
-        return pred_oh_vector
+        return Batch(size=size, predicate=list(pred_objects), predicate_idx=list(predicate_idx), candidate=list(candidates))
 
     # Outputs a (int, Predicate).
     def selectPredicate(self):
@@ -567,43 +541,18 @@ def get_data_loader(args):
 
     return dataset
 
-def test_encoding(dataset, pred_encoding='sparse', trials=5000):
-    mismatch = 0
-
-    for _ in range(trials):
-        idx, pred = dataset.selectPredicate()
-        # Encode the predicate
-        if pred_encoding == 'sparse': enc = idx
-        elif pred_encoding == 'one_hot': enc = np.eye(len(dataset.predicates))[idx]
-        else: enc = pred
-    
-    # Decode back to predicate object
-    if isinstance(enc, Predicate): pred_dec = enc
-    elif isinstance(enc, (int, np.integer)): pred_dec = dataset.predicates[enc]
-    else: pred_dec = dataset.predicates[int(np.argmax(enc))]
-
-    # Generate candidate
-    cand = dataset.generateCandidate(allow_indeterminate=True)
-
-    # Compare truth values
-    if pred.check(cand) != pred_dec.check(cand): mismatch += 1
-
-    print(f"Mismatches in {pred_encoding}: {mismatch} / {trials}")
-
-
 if(__name__ == "__main__"):
     # Creates a dataset.
     dataset = Dataset(device='cpu', batch_size=128, properties="4-4", max_depth=3, nontrivial_only=False, no_negation=False, no_conjunction=False)
+    print("\nDataset info: ")
     dataset.print_info()
-
-    # MG TODO: Test idx/one-hot and tensor candidate form here
-    
     # Estimates the probability that a random candidate satisfy a random predicate.
+    print("\nSatisfaction probability test (logical)")
     nb = 10_000
     for allow_indeterminate in [True, False]:
         counts = dict() # dict[int, int]
         for _ in range(nb):
-            predicate = dataset.selectPredicate()[-1] # FYI BUG_FIX: `predicate` is a tuple (idx, predicate@idx): select only predicate[-1]
+            _, predicate = dataset.selectPredicate() # FYI BUG_FIX: `predicate` is a tuple (idx, predicate@idx): select only predicate[-1]
             candidate = dataset.generateCandidate(allow_indeterminate=allow_indeterminate)
             truth_value = predicate.check(candidate)
             counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1
@@ -611,6 +560,23 @@ if(__name__ == "__main__"):
         print(f"Satisfaction probabilities (allow_indeterminate={allow_indeterminate}): ", end="")
         print({truth_value: (100 * c / nb) for (truth_value, c) in counts.items()})
 
-    print("For encoding: ")
-    for p in ['predicate', 'sparse', 'one-hot']:
-        test_encoding(dataset, p)
+    print("\nEncoding correctness test: ")
+    batch = dataset.get_batch(size=256)
+    
+    # Sparse encoding should preserve indices
+    sparse = batch.encode_predicates('sparse')
+    assert np.all(sparse == np.array(batch.predicate_idx)), "Sparse encoding mismatch"
+    print("Sparse encoding OK")
+
+    # One-hot encoding should contain exactly one '1' per vector
+    onehot = batch.encode_predicates('one-hot', num_predicates=len(dataset.predicates))
+    assert onehot.shape == (batch.size, len(dataset.predicates))
+    assert np.all(onehot.sum(axis=1) == 1), "One-hot encoding invalid (row does not sum to 1)"
+    print("One-hot encoding OK")
+
+    # Tensorization test: component shapes must be consistent
+    node_idx, edge_idx, graph_sizes = batch.tensorize_candidates()
+    assert len(node_idx) == batch.size and len(edge_idx) == batch.size and len(graph_sizes) == batch.size
+    print("Graph tensorization OK")
+
+    print("\nAll tests passed")
