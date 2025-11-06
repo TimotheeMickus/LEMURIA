@@ -24,45 +24,46 @@ class Batch():
             self.feat2obj_edge='feat2obj'
             self.graphs = []
             # DEBUG
-            print("Appending candidates...")
-            print(self.candidate)
+            # print("Appending candidates...")
+            # print(self.candidate)
             for c in self.candidate:
                 graph = str(c).strip("{}").split(",")
                 graph = {g.split("-")[0]: g.split("-")[1] for g in graph}
                 self.graphs.append([graph])
 
                 # DEBUG
-                print(graph)
+                # print(graph)
 
             # Create vocabulary of node labels
             node_labels = set([self.object_token])
             # DEBUG
-            print(f"Creating node labels... {node_labels}")
+            # print(f"Creating node labels... {node_labels}")
             for g in self.graphs:
                 for o in g: 
                     # DEBUG
-                    print(o, type(o))
+                    # print(o, type(o))
                     node_labels.update(set(o.items()))
             (nl_i2s, nl_s2i) = self._vocabulary(node_labels, unknown=None)
             nl_i2s.append(self.padding_token)
             nl_s2i[self.padding_token] = len(nl_s2i)
+            # DEBUG
+            # print(f"node labels string to index: {nl_s2i}")
             # Create vocabulary of edge labels
             edge_labels = set([self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge])
             (el_i2s, el_s2i) = self._vocabulary(edge_labels, unknown=None)
 
-            # DEBUG
-            print(f"{len(nl_i2s)} node labels:\n{nl_i2s}")
-            print(f"{len(el_i2s)} edge labels:\n{el_i2s}")
+            self.nl_i2s, self.nl_s2i, self.el_i2s, self.el_s2i = nl_i2s, nl_s2i, el_i2s, el_s2i
 
+            # DEBUG
+            # print(f"{len(nl_i2s)} node labels:\n{nl_i2s}")
+            # print(f"{len(el_i2s)} edge labels:\n{el_i2s}")
+            print("Example of item: ")
             print(self.graphs[-1])
             print(self._tensorize_graph(self.graphs[-1], nl_s2i, el_s2i, self.object_token, self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge, self.padding_token, padding_length=None))
-            print()
-            print(self._tensorize_graphs(self.graphs, nl_s2i, el_s2i, self.object_token, self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge, self.padding_token))
+            self.graphs = self._tensorize_graphs(self.graphs, nl_s2i, el_s2i, self.object_token, self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge, self.padding_token)
             
     def _vocabulary(self, list_of_symbols, unknown='<unk>'):
-        '''
-        Given a set of strings, return idx2str and str2idx.
-        '''
+        '''Given a set of strings, returns mappings: index2string and string2index.'''
         if unknown is not None:
             list_of_symbols.add(unknown)
         list_of_symbols = list(list_of_symbols)
@@ -75,6 +76,10 @@ class Batch():
             obj2feat_edge, feat2obj_edge,
             padding_token, padding_length=None
             ):
+        '''
+        Given a graph expressed as a list of dictionaries and a set of node and edge labels,
+        returns 
+        '''
         # graph: list[dict[str, str]]
         graph_size = sum([(len(o) + 1) for o in graph])
         length = padding_length if(padding_length is not None) else graph_size
@@ -208,6 +213,8 @@ class Property():
     # values: list[Value]
     def __init__(self, name, values=list()):
         self.name = name
+        # This is a shared list across instances, should it be? consider:
+        # self.values = [] if values is None else list(values)
         self.values = values
 
     def __str__(self):
@@ -498,20 +505,24 @@ class Dataset():
 
     # Generates a batch.
     # Outputs a Batch.
-    def get_batch(self, size=None, data_type='any', allow_indeterminate=None):
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, pred_encoding='predicate'):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
         """
+        assert pred_encoding in ['predicate', 'sparse', 'one-hot'], '`pred_encoding` must be \'predicate\', \'sparse\', or \'one-hot\''
         batch = []
         if(size is None): size = self.batch_size
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
+        # Zero-hot vectors for one-hot encoding
+        one_hot = np.eye(len(self.predicates))
+
         for _ in range(size):
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
-            # Encodes the predicate as a one-hot vector
-            pred_oh_vector = self.toOneHotPredicate(pred_idx)
-                # Or simply, instead, passthrough the index
+            # Encodes the predicate if `pred_encoding` set
+            if(pred_encoding == 'sparse'): predicate = pred_idx
+            if(pred_encoding == 'one-hot'): predicate = one_hot[pred_idx]
 
             # Generates a candidate.
             candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate) # Candidate
@@ -528,14 +539,9 @@ class Dataset():
     def toOneHotPredicate(self, pred_idx):
         pred_oh_vector = np.zeros(len(self.predicates))
         pred_oh_vector[pred_idx] = 1
+        # DEBUG
+        # print(f"Predicate one-hot index: {pred_idx}, for {self.predicates[pred_idx]}")
         return pred_oh_vector
-    
-    def toTensorizedGraphCandidate(self, predicate):
-        graphs = str(predicate).split("-") # test
-        # MG TODO this is pathological.
-        # The graph representation should be an object, too.
-        print(graphs)
-        pass
 
     # Outputs a (int, Predicate).
     def selectPredicate(self):
@@ -561,6 +567,29 @@ def get_data_loader(args):
 
     return dataset
 
+def test_encoding(dataset, pred_encoding='sparse', trials=5000):
+    mismatch = 0
+
+    for _ in range(trials):
+        idx, pred = dataset.selectPredicate()
+        # Encode the predicate
+        if pred_encoding == 'sparse': enc = idx
+        elif pred_encoding == 'one_hot': enc = np.eye(len(dataset.predicates))[idx]
+        else: enc = pred
+    
+    # Decode back to predicate object
+    if isinstance(enc, Predicate): pred_dec = enc
+    elif isinstance(enc, (int, np.integer)): pred_dec = dataset.predicates[enc]
+    else: pred_dec = dataset.predicates[int(np.argmax(enc))]
+
+    # Generate candidate
+    cand = dataset.generateCandidate(allow_indeterminate=True)
+
+    # Compare truth values
+    if pred.check(cand) != pred_dec.check(cand): mismatch += 1
+
+    print(f"Mismatches in {pred_encoding}: {mismatch} / {trials}")
+
 
 if(__name__ == "__main__"):
     # Creates a dataset.
@@ -581,3 +610,7 @@ if(__name__ == "__main__"):
         
         print(f"Satisfaction probabilities (allow_indeterminate={allow_indeterminate}): ", end="")
         print({truth_value: (100 * c / nb) for (truth_value, c) in counts.items()})
+
+    print("For encoding: ")
+    for p in ['predicate', 'sparse', 'one-hot']:
+        test_encoding(dataset, p)
