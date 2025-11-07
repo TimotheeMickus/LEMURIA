@@ -29,7 +29,8 @@ class AlexBeth(Game):
         self.max_perf = 0.0
 
         self._logger = logger
-        self.base_alphabet_size = args.base_alphabet_size
+
+        self.base_alphabet_size = args.base_alphabet_size # Number of symbols without special ones (padding, EOS, etc.)
         self.max_len_msg = args.max_len
 
         self.use_expectation = args.use_expectation
@@ -39,8 +40,9 @@ class AlexBeth(Game):
         self.beta_receiver = args.beta_receiver
         self.penalty = args.penalty
 
-        self.shared = args.shared
+        self.shared = args.shared # Whether some parameters are shared between Alex and Beth.
         if(self.shared):
+            raise NotImplementedError
             senderReceiver = SenderReceiver.from_args(args)
 
             self._sender = senderReceiver.sender
