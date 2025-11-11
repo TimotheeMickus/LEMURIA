@@ -9,115 +9,47 @@ import random
 class Batch():
     # TODO See TODO below. This class has to be changed to store tensors ready to be fed to the model.
     # MG: Done-ish
-    def __init__(self, size, predicate, predicate_idx, candidate, store_tensor=False):
+    def __init__(self, size, predicate, predicate_idx, candidate):
         self.size = size # int
         self.predicate = predicate # list[Predicate]
         self.predicate_idx = predicate_idx # list[int]
         self.candidate = candidate # list[Candidate]
-
-        self.object_token='<obj>'
-        self.padding_token='<pad>'
-        self.selfedge_label='<self>'
-        self.noedge_label='<noedge>'
-        self.obj2feat_edge='obj2feat'
-        self.feat2obj_edge='feat2obj'
-
-        self.graphs = None
-        self.node_labels_idx2sym = None
-        self.node_labels_sym2idx = None
-        self.edge_labels_idx2sym = None
-        self.edge_labels_sym2idx = None
+        
+        self.node_idx = None
+        self.edge_idx = None
+        self.graph_sizes = None
 
     # Predicate encoding
     def encode_predicates(self, mode='predicate', num_predicates=None):
-        assert mode in ['predicate', 'sparse', 'one-hot']
-
+        '''May encode predicates as simply their indices (sparse one-hot encoding).'''
+        assert mode in ['predicate', 'sparse']
         if(mode=='predicate'): return self.predicate
         if(mode=='sparse'): return np.array(self.predicate_idx)
-        if mode=='one-hot':
-            assert num_predicates is not None, 'Must specify `num_predicates` for one-hot encoding.'
-            one_hot = np.eye(num_predicates)
-            return np.stack([one_hot[i] for i in self.predicate_idx], axis=0)
 
-    # GRAPH TENSORIZATION HELPERS
-    def _vocabulary(self, symbols, unknown='<unk>'):
-        '''Given a set of strings, returns mappings: index2string and string2index.'''
-        symbols = set(symbols)
-        if unknown is not None:
-            symbols.add(unknown)
-        i2s = list(symbols)
-        s2i = {s:i for (i,s) in enumerate(i2s)}
-        return i2s, s2i
+    # Tensorize this batch (using Dataset vocabulary)
+    def tensorize(self, dataset):
+        graphs = [[{p.name: v.name.split('-',1)[1] for p, v in c.prop2value.items() if v is not None}] for c in self.candidate]
 
-    def _tensorize_graph(self, graph, node_labels_sym2idx, edge_labels_sym2id, padding_length=None):
-        '''
-        Given a graph expressed as a list of dictionaries and a set of node and edge labels,
-        returns node, edge indices and graph depth.
-        '''
-        # graph: list[dict[str, str]]
-        graph_size = sum([(len(o) + 1) for o in graph])
-        length = padding_length if padding_length is not None else graph_size
-
-        node_idx = [node_labels_sym2idx[self.padding_token]] * length # list[int]
-        edge_idx = [[edge_labels_sym2id[self.noedge_label]] * length for _ in range(length)] # list[list[int]]
-
-        root_id = 0
-        for o in graph:
-            node_idx[root_id] = node_labels_sym2idx[self.object_token]
-            edge_idx[root_id][root_id] = edge_labels_sym2id[self.selfedge_label]
-
-            i = root_id + 1
-            for feature, value in o.items():
-                node_idx[i] = node_labels_sym2idx[(feature, value)]
-                edge_idx[i][i] = edge_labels_sym2id[self.selfedge_label]
-
-                edge_idx[root_id][i] = edge_labels_sym2id[self.obj2feat_edge]
-                edge_idx[i][root_id] = edge_labels_sym2id[self.feat2obj_edge]
-                i += 1
-
-            root_id = i
-
-        return node_idx, edge_idx, graph_size
-     
-    def tensorize_candidates(self):
-        '''Converts Candidate objects into a graph dictionary.'''
-        if self.graphs is not None:
-            return self.graphs
-        
-        graphs = []
-        for c in self.candidate:
-            graphs.append([{p.name: v.name.split('-', 1)[1] for p, v in c.prop2value.items() if v is not None}])
-
-        # Build vocabularies
-        node_labels = {self.object_token}
-        for g in graphs:
-            for o in g:
-                node_labels.update((k,v) for k,v in o.items())
-
-        nl_i2s, nl_s2i = self._vocabulary(node_labels, unknown=None)
-        nl_i2s.append(self.padding_token)
-        nl_s2i[self.padding_token] = len(nl_s2i)
-
-        edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
-        el_i2s, el_s2i = self._vocabulary(edge_labels, unknown=None)
-
-        padding_length = max(sum(len(o) + 1 for o in g) for g in graphs)
+        nl_s2i = dataset.node_s2i
+        el_s2i = dataset.edge_s2i
 
         node_idx = []
         edge_idx = []
         graph_sizes = []
-            
+
+        padding_length = max(sum(len(o) + 1 for o in g) for g in graphs) if graphs else 1
+
         for g in graphs:
-            n,e,s = self._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
+            n, e, s = dataset._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
             node_idx.append(n)
             edge_idx.append(e)
             graph_sizes.append(s)
 
-        self.graphs = (node_idx, edge_idx, graph_sizes)
-        self.node_labels_idx2sym, self.node_labels_sym2idx = nl_i2s, nl_s2i
-        self.edge_labels_idx2sym, self.edge_labels_sym2idx = el_i2s, el_s2i
+        self.node_idx = node_idx
+        self.edge_idx = edge_idx
+        self.graph_sizes = graph_sizes
 
-        return self.graphs
+        return self  # allow chaining
 
     def __eq__(self, other):
         if(not isinstance(other, Batch)): return NotImplemented
@@ -454,6 +386,29 @@ class Dataset():
         # Generates predicates.
         self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
 
+        # Stores predicates as tensors.
+        self.object_token='<obj>'
+        self.padding_token='<pad>'
+        self.selfedge_label='<self>'
+        self.noedge_label='<noedge>'
+        self.obj2feat_edge='obj2feat'
+        self.feat2obj_edge='feat2obj'
+
+        # Build a global node vocabulary based on all predicates
+        node_labels = {self.object_token}
+        for property in self.properties:
+            for value in property.values:
+                # Store ("Px", "vx") pairs as node labels for features
+                node_labels.add((property.name, value.name.split('-',1)[1]))
+
+        self.node_i2s, self.node_s2i = self._vocabulary(node_labels, unknown=None)
+        self.node_i2s.append(self.padding_token)
+        self.node_s2i[self.padding_token] = len(self.node_s2i)
+
+        # Global edge vocabulary
+        edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
+        self.edge_i2s, self.edge_s2i = self._vocabulary(edge_labels, unknown=None)
+
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int
     # Outputs a ndarray[Predicate]
@@ -533,6 +488,45 @@ class Dataset():
             prop2value[prop] = np.random.choice(prop.values) # All values are equiprobable.
         
         return Candidate(prop2value)
+    
+    def _vocabulary(self, symbols, unknown='<unk>'):
+        '''Given a set of strings, returns mappings: index2string and string2index.'''
+        symbols = set(symbols)
+        if unknown is not None:
+            symbols.add(unknown)
+        i2s = list(symbols)
+        s2i = {s:i for (i,s) in enumerate(i2s)}
+        return i2s, s2i
+
+    def _tensorize_graph(self, graph, node_labels_sym2idx, edge_labels_sym2id, padding_length=None):
+        '''
+        Given a graph expressed as a list of dictionaries and a set of node and edge labels,
+        returns node, edge indices and graph depth.
+        '''
+        # graph: list[dict[str, str]]
+        graph_size = sum([(len(o) + 1) for o in graph])
+        length = padding_length if padding_length is not None else graph_size
+
+        node_idx = [node_labels_sym2idx[self.padding_token]] * length # list[int]
+        edge_idx = [[edge_labels_sym2id[self.noedge_label]] * length for _ in range(length)] # list[list[int]]
+
+        root_id = 0
+        for o in graph:
+            node_idx[root_id] = node_labels_sym2idx[self.object_token]
+            edge_idx[root_id][root_id] = edge_labels_sym2id[self.selfedge_label]
+
+            i = root_id + 1
+            for feature, value in o.items():
+                node_idx[i] = node_labels_sym2idx[(feature, value)]
+                edge_idx[i][i] = edge_labels_sym2id[self.selfedge_label]
+
+                edge_idx[root_id][i] = edge_labels_sym2id[self.obj2feat_edge]
+                edge_idx[i][root_id] = edge_labels_sym2id[self.feat2obj_edge]
+                i += 1
+
+            root_id = i
+
+        return node_idx, edge_idx, graph_size
 
 
 def get_data_loader(args):
@@ -567,16 +561,14 @@ if(__name__ == "__main__"):
     sparse = batch.encode_predicates('sparse')
     assert np.all(sparse == np.array(batch.predicate_idx)), "Sparse encoding mismatch"
     print("Sparse encoding OK")
-
-    # One-hot encoding should contain exactly one '1' per vector
-    onehot = batch.encode_predicates('one-hot', num_predicates=len(dataset.predicates))
-    assert onehot.shape == (batch.size, len(dataset.predicates))
-    assert np.all(onehot.sum(axis=1) == 1), "One-hot encoding invalid (row does not sum to 1)"
-    print("One-hot encoding OK")
-
+    
     # Tensorization test: component shapes must be consistent
-    node_idx, edge_idx, graph_sizes = batch.tensorize_candidates()
-    assert len(node_idx) == batch.size and len(edge_idx) == batch.size and len(graph_sizes) == batch.size
+    batch.tensorize(dataset)
+    assert batch.node_idx is not None
+    assert batch.edge_idx is not None
+    assert batch.graph_sizes is not None
+    assert len(batch.node_idx) == batch.size
+    assert len(batch.edge_idx) == batch.size
     print("Graph tensorization OK")
 
     print("\nAll tests passed")
