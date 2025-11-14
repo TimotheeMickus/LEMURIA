@@ -168,34 +168,36 @@ class AlexBeth(Game):
 
     # Returns two tensors of shape (batch size).
     # asker_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
-    # img_scores: tensor of shape (batch size, nb img)
-    def compute_asker_rewards(self, asker_action, truth_logits, truth_targets):
+    # retriever_scores: TODO
+    # truth_targets: TODO
+    def compute_asker_rewards(self, asker_action, retriever_scores, truth_targets):
         """
         Returns reward and performance tensors (both shaped [batch size])
         based on the probability Beth assigns to the correct truth value.
         """
-        logits = truth_logits.squeeze(-1)
-        probs = torch.sigmoid(logits)
-        correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
-        perf = correct_prob.detach()
+        logits = retriever_scores.squeeze(-1) # Shape: 
+        probs = torch.sigmoid(logits) # Shape: 
+        correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs) # Shape: 
+        perf = correct_prob.detach() # Shape: 
 
         if(self.use_expectation):
-            rewards = perf.clone()
+            rewards = perf.clone() # The reward is the expectation of the retreiver guessing right. # Shape: 
         else:
-            rewards = torch.bernoulli(correct_prob).detach()
+            rewards = torch.bernoulli(correct_prob).detach() # We sample whether the retreiver is right according to the probability of the retreiver being right; the reward is 1 when the retreiver is right, 0 otherwise. # Shape: 
 
-        msg_lengths = asker_action[1].view(-1).float()
-        rewards += -1 * (msg_lengths >= self.max_len_msg)
+        msg_lengths = asker_action[1].view(-1).float() # Shape: 
+        rewards += -1 * (msg_lengths >= self.max_len_msg) # Penalty related to messages exceeding the length limit.
 
         if(self.penalty > 0.0):
-            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths))
-            rewards = rewards - length_penalties
+            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Shape: 
+            rewards = rewards - length_penalties # Shape: 
 
         return (rewards, perf)
 
     # Returns a scalar tensor and two tensors of shape (batch size).
+    # asker_outcome: TODO
     # retriever_scores: tensor of shape (batch size, nb img)
-    # contending_imgs: None or a list[int] containing the indices of the contending images
+    # truth_targets: TODO
     def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
         (rewards, perf) = self.compute_asker_rewards(asker_outcome.action, retriever_scores, truth_targets)
 
@@ -220,19 +222,19 @@ class AlexBeth(Game):
 
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
     # retriever_scores: tensor of shape (batch size, nb img)
-    # use_REINFORCE: if true, the REINFORCE loss is used, otherwise, the cross-entropy loss is used
-    # contending_imgs: None or a list[int] containing the indices of the contending images
+    # truth_targets: TODO
+    # return_entropy: bool
     def compute_retriever_loss(self, retriever_scores, truth_targets, return_entropy=False):
-        logits = retriever_scores.squeeze(-1)
-        probs = torch.sigmoid(logits)
+        logits = retriever_scores.squeeze(-1) # Shape: 
+        probs = torch.sigmoid(logits) # Shape: 
 
-        loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float())
+        loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float()) # TODO check that this is the right loss (probably not)
 
         eps = 1e-8
         entropy = (-(probs * torch.log(probs + eps) + (1.0 - probs) * torch.log(1.0 - probs + eps))).mean()
         loss -= (self.beta_retriever * entropy)
 
-        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach()
+        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: 
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
@@ -259,10 +261,10 @@ class AlexBeth(Game):
             # materialising every batch.
             total_items = 0
             total_loss = 0.0
-            total_accuracy = 0.0
+            total_accuracy = 0.0 # TODO Accuracy should be the average accuracy (computed from success~1, failure~0).
             total_entropy = 0.0
             total_msg_length = 0.0
-            total_perf = 0.0
+            total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
 
             iterator = range(nb_batch)
             if(self.autologger.display == 'tqdm'):
@@ -270,19 +272,16 @@ class AlexBeth(Game):
 
             for _ in iterator:
                 self.start_episode(train_episode=False)
-                # Predicate batches don't need extra sampling kwargs such as keep_category.
+                
                 batch = data_iterator.get_batch(size=batch_size, data_type='test')
 
                 asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-                truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device)
-
-                if(truth_targets.numel() == 0):
-                    continue
+                truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: TODO
 
                 # Beth outputs a logit per candidate; we interpret it as the log-odds
                 # that the predicate holds for the candidate.
-                logits = retriever_outcome.scores.squeeze(-1)
-                probs = torch.sigmoid(logits)
+                logits = retriever_outcome.scores.squeeze(-1) # Shape: TODO
+                probs = torch.sigmoid(logits) # Shape: TODO
 
                 # Scalar BCE averaged over the batch (used for logging only).
                 loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
@@ -304,9 +303,6 @@ class AlexBeth(Game):
                 total_msg_length += msg_length * batch_items
                 total_perf += perf * batch_items
 
-            if total_items == 0:
-                return
-
             # Normalise the accumulated sums and push them to TensorBoard / stdout.
             avg_accuracy = (total_accuracy / total_items)
             log('eval/loss', total_loss / total_items)
@@ -316,6 +312,7 @@ class AlexBeth(Game):
             log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
             if(avg_accuracy > self.max_perf):
                 self.max_perf = avg_accuracy
+            
             return
 
         # TODO above to run, the below is ignored for now
