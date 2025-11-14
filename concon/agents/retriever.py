@@ -61,6 +61,7 @@ class Retriever(Agent):
 
         # Scores the targets.
         scores = torch.bmm(encoded_candidates, encoded_message).squeeze(-1) # Shape: (batch size, num_candidates)
+        # TODO a sigmoid is probably missing here
         outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
 
         return outcome

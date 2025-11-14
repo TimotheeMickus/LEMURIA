@@ -103,8 +103,7 @@ class AlexBeth(Game):
             1.0 if predicate.check(candidate) == 1 else 0.0
             for predicate, candidate in zip(batch.predicate, batch.candidate)
         ]
-        if not targets:
-            return torch.empty(0, device=device)
+        
         return torch.tensor(targets, dtype=torch.float32, device=device)
     
     def agents_for_CNN_pretraining(self):
