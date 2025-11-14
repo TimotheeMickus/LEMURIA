@@ -26,6 +26,16 @@ def do(args):
 
         # Loads the data.
         data_loader = get_data_loader(args)
+        # TODO delete? just a fix
+        data_loader.nb_categories = len(data_loader.predicates)
+
+        # size of the predicate vocabulary
+        args.num_predicates = len(data_loader.predicates)
+
+        # For candidate encoder
+        args.node_vocab_size = len(data_loader.node_i2s)
+        args.node_padding_id = data_loader.node_s2i[data_loader.padding_token]
+        args.edge_vocab_size = len(data_loader.edge_i2s)
         
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
@@ -97,8 +107,8 @@ def get_args(remaining_args=None):
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
     group.add_argument('--penalty', help='coefficient for the length penalty of the messages', default=0.01, type=float)
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
-    group.add_argument('--beta_sender', help='sender entropy penalty coefficient', type=float, default=0.01)
-    group.add_argument('--beta_receiver', help='sender entropy penalty coefficient', type=float, default=0.001)
+    group.add_argument('--beta_asker', help='asker entropy penalty coefficient', type=float, default=0.01)
+    group.add_argument('--beta_retriever', help='retriever entropy penalty coefficient', type=float, default=0.001)
     group.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
     group.add_argument('--grad_clipping', help='threshold for gradient clipping', default=1, type=float)
     group.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)

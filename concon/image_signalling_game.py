@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
+import numpy as np
 
 from .games import AliceBob, AliceBobPopulation, AliceBobCharlie
 from .utils.image_data import get_data_loader, Batch

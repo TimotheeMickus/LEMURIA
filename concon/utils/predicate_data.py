@@ -450,10 +450,12 @@ class Dataset():
 
     # Generates a batch.
     # Outputs a Batch.
-    def get_batch(self, size=None, data_type='any', allow_indeterminate=None):
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, **kwargs):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
+
+        Additional kwargs are accepted for compatibility with image-oriented data iterators but ignored here.
         """
         batch = []
         if(size is None): size = self.batch_size

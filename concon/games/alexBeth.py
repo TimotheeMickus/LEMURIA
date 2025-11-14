@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import scipy
 import itertools as it
@@ -9,7 +10,7 @@ from collections import defaultdict
 import random
 import time
 
-from ..agents import Sender, Receiver, SenderReceiver
+from ..agents import Asker, Retriever, AskerRetriever
 from ..utils.misc import build_optimizer, compute_entropy_stats
 # from ..utils.predicate_data import 
 from ..utils import misc, predicate_data
@@ -19,16 +20,17 @@ from ..eval import decision_tree
 
 from .game import Game
 
-# TODO This is currently a copy of AliceBob (well, I've already removed some obviously useless stuf), but should be changed to match the following description:
-#   In this game, there is one sender (Alex) and one receiver (Beth).
+# TODO This is currently a copy of AlexBeth (well, I've already removed some obviously useless stuf), but should be changed to match the following description:
+#   In this game, there is one asker (Alex) and one retriever (Beth).
 #   They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
-#   Alex is shown a predicate and produces a signal, Bob sees both the signal and an object, and produces a probability.
+#   Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
 class AlexBeth(Game):
     def __init__(self, args, logger, dataset, message_dump_dir):
         self.max_perf = 0.0
 
         self._logger = logger
+        self._dataset = dataset
 
         self.base_alphabet_size = args.base_alphabet_size # Number of symbols without special ones (padding, EOS, etc.)
         self.max_len_msg = args.max_len
@@ -36,32 +38,32 @@ class AlexBeth(Game):
         self.use_expectation = args.use_expectation
         self.grad_scaling = (args.grad_scaling or 0)
         self.grad_clipping = (args.grad_clipping or 0)
-        self.beta_sender = args.beta_sender
-        self.beta_receiver = args.beta_receiver
+        self.beta_asker = args.beta_asker
+        self.beta_retriever = args.beta_retriever
         self.penalty = args.penalty
 
         self.shared = args.shared # Whether some parameters are shared between Alex and Beth.
         if(self.shared):
             raise NotImplementedError
-            senderReceiver = SenderReceiver.from_args(args)
+            askerRetriever = AskerRetriever.from_args(args)
 
-            self._sender = senderReceiver.sender
-            self._receiver = senderReceiver.receiver
+            self._asker = askerRetriever.asker
+            self._retriever = askerRetriever.retriever
 
-            parameters = senderReceiver.parameters()
+            parameters = askerRetriever.parameters()
         else:
-            self._sender = Sender.from_args(args)
-            self._receiver = Receiver.from_args(args)
+            self._asker = Asker.from_args(args)
+            self._retriever = Retriever.from_args(args)
 
-            parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
+            parameters = it.chain(self.asker.parameters(), self.retriever.parameters())
 
         self._optim = build_optimizer(parameters, args.learning_rate)
 
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
-            # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
-            self._sender_avg_reward = misc.Averager(size=12800)
-            self._receiver_avg_reward = misc.Averager(size=12800)
+            # Currently, the asker and retriever's rewards are the same, but we could imagine a setting in which they are different.
+            self._asker_avg_reward = misc.Averager(size=12800)
+            self._retriever_avg_reward = misc.Averager(size=12800)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
         
@@ -69,16 +71,16 @@ class AlexBeth(Game):
         self.message_dump_dir = message_dump_dir # str|None
 
     @property
-    def sender(self):
-        return self._sender
+    def asker(self):
+        return self._asker
 
     @property
-    def receiver(self):
-        return self._receiver
+    def retriever(self):
+        return self._retriever
 
     @property
     def all_agents(self):
-        return (self.sender, self.receiver)
+        return (self.asker, self.retriever)
 
     @property
     def current_agents(self):
@@ -91,150 +93,147 @@ class AlexBeth(Game):
     @property
     def autologger(self):
         return self._logger
+    
+    def _compute_truth_targets(self, batch, device):
+        """
+        Returns a float tensor of shape (batch size,) where 1.0 denotes that the
+        predicate holds for the candidate, and 0.0 otherwise.
+        """
+        targets = [
+            1.0 if predicate.check(candidate) == 1 else 0.0
+            for predicate, candidate in zip(batch.predicate, batch.candidate)
+        ]
+        if not targets:
+            return torch.empty(0, device=device)
+        return torch.tensor(targets, dtype=torch.float32, device=device)
+    
+    def agents_for_CNN_pretraining(self):
+        return []
 
     # batch: Batch
-    def _alice_input(self, batch):
-        return batch.original_img(stack=True)
+    def _alex_input(self, batch):
+        predicate_idx = batch.encode_predicates('sparse') # return list/np array of ints
+        device = next(self.asker.parameters()).device
+        return torch.tensor(predicate_idx, device=device, dtype=torch.long)
 
     # batch: Batch
     def _beth_input(self, batch):
-        with torch.no_grad():
-            ipts = torch.cat([batch.target_img(stack=True).unsqueeze(1), batch.base_distractors_img(stack=True)], dim=1)
-            ipts = self.receiver_preprocessor(ipts.flatten(0, 1)).view(*ipts.shape).detach()
-        return ipts
+        if batch.node_idx is None or batch.edge_idx is None or batch.graph_sizes is None:
+            batch.tensorize(self._dataset)
+        # self.retriever is nn.Module; PyTorch modules don’t expose a .device attribute. (that's why no self.retriever.device)
+        device = next(self.retriever.parameters()).device
+        node = torch.tensor(batch.node_idx, device=device, dtype=torch.long)
+        edge = torch.tensor(batch.edge_idx, device=device, dtype=torch.long)
+        sizes = torch.tensor(batch.graph_sizes, device=device, dtype=torch.long)
+        return {'node_idx': node, 'edge_idx': edge, 'graph_sizes': sizes}
 
     def __call__(self, batch):
         """
         Input:
             batch: Batch
         Output:
-            sender_outcome: sender.Outcome
-            receiver_outcome: receiver.Outcome
+            asker_outcome: asker.Outcome
+            retriever_outcome: retriever.Outcome
         """
-        return self.alice_to_bob(batch)
+        return self.alex_to_beth(batch)
 
-    def alice_to_bob(self, batch):
-        sender = self.sender
-        receiver = self.receiver
+    def alex_to_beth(self, batch):
+        asker = self.asker
+        retriever = self.retriever
 
-        sender_outcome = sender(self._alice_input(batch))
-        receiver_outcome = receiver(self._bob_input(batch), *sender_outcome.action)
+        asker_outcome = asker(self._alex_input(batch))
+        retriever_outcome = retriever(self._beth_input(batch), *asker_outcome.action)
 
-        return sender_outcome, receiver_outcome
+        return asker_outcome, retriever_outcome
 
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
         # TODO: change return signature to loss, {dict of things to log}
 
-        sender_outcome, receiver_outcome = self(batch)
+        asker_outcome, retriever_outcome = self(batch)
+        truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device)
 
-        # Alice's part
-        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
-        sender_entropy = sender_outcome.entropy.mean()
+        # Alex's part
+        (asker_loss, asker_perf, asker_rewards) = self.compute_asker_loss(asker_outcome, retriever_outcome.scores, truth_targets)
+        asker_entropy = asker_outcome.entropy.mean()
 
-        # Bob's part
-        (receiver_loss, _, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+        # Beth's part
+        (retriever_loss, _, retriever_entropy) = self.compute_retriever_loss(retriever_outcome.scores, truth_targets, return_entropy=True)
 
-        loss = sender_loss + receiver_loss
+        loss = asker_loss + retriever_loss
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
-        msg_length = sender_outcome.action[1].float().mean()
+        msg_length = asker_outcome.action[1].float().mean()
 
-        return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
+        return optimization, asker_rewards, asker_perf, msg_length, asker_entropy, retriever_entropy
 
     # Returns two tensors of shape (batch size).
-    # sender_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
+    # asker_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
     # img_scores: tensor of shape (batch size, nb img)
-    def compute_sender_rewards(self, sender_action, img_scores, target_idx):
+    def compute_asker_rewards(self, asker_action, truth_logits, truth_targets):
         """
-            returns the reward as well as the performance for each element of a batch
+        Returns reward and performance tensors (both shaped [batch size])
+        based on the probability Beth assigns to the correct truth value.
         """
-        # Generates a probability distribution from the scores and points at an image.
-        receiver_pointing = misc.pointing(img_scores)
+        logits = truth_logits.squeeze(-1)
+        probs = torch.sigmoid(logits)
+        correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
+        perf = correct_prob.detach()
 
-        perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
+        if(self.use_expectation):
+            rewards = perf.clone()
+        else:
+            rewards = torch.bernoulli(correct_prob).detach()
 
-        if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
-        else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
-
-        msg_lengths = sender_action[1].view(-1).float() # Shape: (batch size)
-
-        rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
+        msg_lengths = asker_action[1].view(-1).float()
+        rewards += -1 * (msg_lengths >= self.max_len_msg)
 
         if(self.penalty > 0.0):
-            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
-
-            rewards = (rewards - length_penalties) # Shape: (batch size)
+            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths))
+            rewards = rewards - length_penalties
 
         return (rewards, perf)
 
     # Returns a scalar tensor and two tensors of shape (batch size).
-    # receiver_scores: tensor of shape (batch size, nb img)
+    # retriever_scores: tensor of shape (batch size, nb img)
     # contending_imgs: None or a list[int] containing the indices of the contending images
-    def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contending_imgs=None):
-        if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
-        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
-
-        (rewards, perf) = self.compute_sender_rewards(sender_outcome.action, img_scores, target_idx) # Two tensors of shape (batch size).
+    def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
+        (rewards, perf) = self.compute_asker_rewards(asker_outcome.action, retriever_scores, truth_targets)
 
         loss = 0.0
 
         # REINFORCE loss
-        log_prob = sender_outcome.log_prob.sum(dim=1) # The per-episode sum of the log-probabilies of the selection actions (they all get the same reward). Shape: (batch size)
+        log_prob = asker_outcome.log_prob.sum(dim=1) # The per-episode sum of the log-probabilies of the selection actions (they all get the same reward). Shape: (batch size)
 
         if(self.use_baseline):
-            r_baseline = self._sender_avg_reward.get(default=0.0)
-            self._sender_avg_reward.update_batch(rewards.cpu().numpy())
+            r_baseline = self._asker_avg_reward.get(default=0.0)
+            self._asker_avg_reward.update_batch(rewards.cpu().numpy())
         else: r_baseline = 0.0
 
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
         loss += reinforce_loss
 
         # Entropy penalty
-        entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Could be normalised (divided) by (base_alphabet_size + 1).
+        entropy_loss = -(self.beta_asker * asker_outcome.entropy.mean()) # Could be normalised (divided) by (base_alphabet_size + 1).
         loss += entropy_loss
 
         return (loss, perf, rewards)
 
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
-    # receiver_scores: tensor of shape (batch size, nb img)
+    # retriever_scores: tensor of shape (batch size, nb img)
     # use_REINFORCE: if true, the REINFORCE loss is used, otherwise, the cross-entropy loss is used
     # contending_imgs: None or a list[int] containing the indices of the contending images
-    def compute_receiver_loss(self, receiver_scores, use_REINFORCE=False, target_idx=0, contending_imgs=None, return_entropy=False):
-        if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
-        else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
+    def compute_retriever_loss(self, retriever_scores, truth_targets, return_entropy=False):
+        logits = retriever_scores.squeeze(-1)
+        probs = torch.sigmoid(logits)
 
-        # Generates a probability distribution from the scores and points at an image.
-        receiver_pointing = misc.pointing(img_scores)
+        loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float())
 
-        perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
+        eps = 1e-8
+        entropy = (-(probs * torch.log(probs + eps) + (1.0 - probs) * torch.log(1.0 - probs + eps))).mean()
+        loss -= (self.beta_retriever * entropy)
 
-        entropy = receiver_pointing['dist'].entropy().mean() # Shape: ()
-
-        loss = 0.0
-
-        if(use_REINFORCE): # REINFORCE
-            log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected images. Shape: (batch size)
-
-            if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
-            else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
-
-            if(self.use_baseline):
-                r_baseline = self._receiver_avg_reward.get(default=0.0)
-                self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
-            else: r_baseline = 0.0
-
-            reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
-            loss += reinforce_loss
-        else: # Cross-entropy maximization
-            log_prob = receiver_pointing['dist'].log_prob(torch.tensor(target_idx, device=img_scores.device)) # The log-probabilities of the target images. Shape: (batch size)
-
-            cross_entropy_loss = -log_prob.mean() # Shape: ()
-            loss += cross_entropy_loss
-
-        # Entropy penalty
-        entropy_loss = -(self.beta_receiver * entropy) # Entropy penalty
-        loss += entropy_loss
+        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach()
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
@@ -246,6 +245,81 @@ class AlexBeth(Game):
             self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
+        # Predicate game does not provide image categories, so we run a lightweight
+        # evaluation loop that reuses the truth labels computed from predicates.
+        # Predicate datasets lack the image-category metadata relied upon by the legacy
+        # Alice·Bob evaluation. When that's the case we switch to a simpler evaluation
+        # that reuses the supervised truth labels we've already defined for training.
+        if(not hasattr(data_iterator, 'category_idx')):
+            # Use the dataset batch size but cap the number of batches to keep eval snappy.
+            batch_size = data_iterator.batch_size
+            max_batches = 128
+            nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
+
+            # Running sums so we can compute dataset-averaged metrics without
+            # materialising every batch.
+            total_items = 0
+            total_loss = 0.0
+            total_accuracy = 0.0
+            total_entropy = 0.0
+            total_msg_length = 0.0
+            total_perf = 0.0
+
+            iterator = range(nb_batch)
+            if(self.autologger.display == 'tqdm'):
+                iterator = tqdm.tqdm(iterator, desc='Eval.')
+
+            for _ in iterator:
+                self.start_episode(train_episode=False)
+                # Predicate batches don't need extra sampling kwargs such as keep_category.
+                batch = data_iterator.get_batch(size=batch_size, data_type='test')
+
+                asker_outcome, retriever_outcome = self.alex_to_beth(batch)
+                truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device)
+
+                if(truth_targets.numel() == 0):
+                    continue
+
+                # Beth outputs a logit per candidate; we interpret it as the log-odds
+                # that the predicate holds for the candidate.
+                logits = retriever_outcome.scores.squeeze(-1)
+                probs = torch.sigmoid(logits)
+
+                # Scalar BCE averaged over the batch (used for logging only).
+                loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
+                # Accuracy is the thresholded probability vs. the binary target.
+                preds = (probs >= 0.5).float()
+                accuracy = (preds == truth_targets).float().mean().item()
+                # `perf` measures how much probability mass Beth assigns to the correct truth value.
+                perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).mean().item()
+                # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions.
+                entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item()
+                # Average symbol count for Alex's message in this batch.
+                msg_length = asker_outcome.action[1].float().mean().item()
+
+                batch_items = truth_targets.numel()
+                total_items += batch_items
+                total_loss += loss * batch_items
+                total_accuracy += accuracy * batch_items
+                total_entropy += entropy * batch_items
+                total_msg_length += msg_length * batch_items
+                total_perf += perf * batch_items
+
+            if total_items == 0:
+                return
+
+            # Normalise the accumulated sums and push them to TensorBoard / stdout.
+            avg_accuracy = (total_accuracy / total_items)
+            log('eval/loss', total_loss / total_items)
+            log('eval/accuracy', avg_accuracy)
+            log('eval/perf', total_perf / total_items)
+            log('eval/retriever_entropy', total_entropy / total_items)
+            log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
+            if(avg_accuracy > self.max_perf):
+                self.max_perf = avg_accuracy
+            return
+
+        # TODO above to run, the below is ignored for now
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
 
@@ -266,33 +340,33 @@ class AlexBeth(Game):
         success_prob = [] # Probabilities
         scrambled_success_prob = [] # Probabilities
 
-        for batch_index in batch_numbers:
+        for _ in batch_numbers:
             self.start_episode(train_episode=False)
 
             batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
 
-            sender_outcome, receiver_outcome = self.alice_to_bob(batch)
+            asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
-            receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
-            success.append((receiver_pointing['action'] == 0).float())
-            success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
+            retriever_pointing = misc.pointing(retriever_outcome.scores, argmax=True)
+            success.append((retriever_pointing['action'] == 0).float())
+            success_prob.append(retriever_pointing['dist'].probs[:, 0]) # Probability of the target
 
             target_category = [data_iterator.category_idx(x.category) for x in batch.original]
             distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
-            failure = receiver_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
+            failure = retriever_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
             data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
 
             np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
             np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
-            scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
+            scrambled_messages = asker_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
             for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepares for scrambling
-                msg = sender_outcome.action[0][i]
-                msg_len = sender_outcome.action[1][i]
+                msg = asker_outcome.action[0][i]
+                msg_len = asker_outcome.action[1][i]
                 cat = datapoint.category
 
-                if((not self.correct_only) or (receiver_pointing['action'][i] == 0)):
+                if((not self.correct_only) or (retriever_pointing['action'][i] == 0)):
                     messages.append(msg.tolist()[:msg_len])
                     categories.append(cat)
                     input_ids.append(datapoint.idx)
@@ -300,9 +374,9 @@ class AlexBeth(Game):
                 l = msg_len.item()
                 scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
 
-            scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
-            scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
-            scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+            scrambled_retriever_outcome = self.retriever(self._beth_input(batch), message=scrambled_messages, length=asker_outcome.action[1])
+            scrambled_retriever_pointing = misc.pointing(scrambled_retriever_outcome.scores)
+            scrambled_success_prob.append(scrambled_retriever_pointing['dist'].probs[:, 0])
 
         if(self.message_dump_dir is not None):
             import csv
@@ -329,15 +403,15 @@ class AlexBeth(Game):
         n = (32 * data_iterator.nb_categories)
         n = min(max_datapoints, n)
         nb_batch = int(np.ceil(n / batch_size))
-        for batch_index in range(nb_batch):
+        for _ in range(nb_batch):
             self.start_episode(train_episode=False)
 
             batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from a different category.
 
-            sender_outcome, receiver_outcome = self.alice_to_bob(batch)
+            asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
-            receiver_pointing = misc.pointing(receiver_outcome.scores)
-            abstractness.append(receiver_pointing['dist'].probs[:, 1] * 2.0)
+            retriever_pointing = misc.pointing(retriever_outcome.scores)
+            abstractness.append(retriever_pointing['dist'].probs[:, 1] * 2.0)
 
         abstractness = torch.stack(abstractness)
         abstractness_rate = abstractness.mean().item()
@@ -427,10 +501,10 @@ class AlexBeth(Game):
 
                 batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], target_is_original=False, keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected uniformly from the original image's category.
 
-                sender_outcome, receiver_outcome = self.alice_to_bob(batch)
+                asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
-                receiver_pointing = misc.pointing(receiver_outcome.scores)
-                success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target.
+                retriever_pointing = misc.pointing(retriever_outcome.scores)
+                success_prob.append(retriever_pointing['dist'].probs[:, 0]) # Probability of the target.
 
             success_prob = torch.stack(success_prob)
             diff_tgt_c_e = success_prob.mean().item()
