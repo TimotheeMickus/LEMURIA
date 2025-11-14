@@ -33,6 +33,7 @@ class Retriever(Agent):
 
     # candidates: tensor of shape (TODO)
     # message: TODO
+    # length: TODO
     # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
     def forward(self, candidate_tensors, message, length, use_spigot=False):
         encoded_message = self.encode_message(message, length) # Shape (batch size, hidden size)
