@@ -108,7 +108,7 @@ class AlexBeth(Game):
         return torch.tensor(targets, dtype=torch.float32, device=device)
     
     def agents_for_CNN_pretraining(self):
-        return []
+        raise NotImplementedError # In fact, the method should not even exist (the superclass should be modified).
 
     # batch: Batch
     def _alex_input(self, batch):
