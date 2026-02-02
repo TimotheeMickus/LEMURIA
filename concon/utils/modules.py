@@ -196,7 +196,7 @@ class NoiseAdder(nn.Module):
 class CandidateAverager(nn.Module):
     """
     Temporary candidate encoder that averages embedded node ids.
-    Turns graph tensors ito a fixed-size vector per cadidate by embedding every node ID and averaging.
+    Turns graph tensors into a fixed-size vector per candidate by embedding every node ID and averaging.
     """
     def __init__(self, node_vocab_size, hidden_size, padding_id):
         super().__init__()
@@ -213,7 +213,10 @@ class CandidateAverager(nn.Module):
         summed = (emb * mask).sum(dim=2)
         counts = mask.sum(dim=2).clamp_min(1.0)
         return summed / counts  # (batch, num_candidates, hidden)
+    
 
+class PredicateGraphEncoder(nn.Module):
+    pass
 
 # output: torch.nn.Module
 # hidden_size: int

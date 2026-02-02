@@ -574,3 +574,5 @@ if(__name__ == "__main__"):
     print("Graph tensorization OK")
 
     print("\nAll tests passed")
+
+    print(batch)

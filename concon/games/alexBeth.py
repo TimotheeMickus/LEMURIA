@@ -232,7 +232,8 @@ class AlexBeth(Game):
 
         eps = 1e-8
         entropy = (-(probs * torch.log(probs + eps) + (1.0 - probs) * torch.log(1.0 - probs + eps))).mean()
-        loss -= (self.beta_retriever * entropy)
+        # entropy penalty (addition)
+        loss += (self.beta_retriever * entropy)
 
         perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: 
 
@@ -246,19 +247,16 @@ class AlexBeth(Game):
             self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
-        # Predicate game does not provide image categories, so we run a lightweight
-        # evaluation loop that reuses the truth labels computed from predicates.
-        # Predicate datasets lack the image-category metadata relied upon by the legacy
-        # Alice·Bob evaluation. When that's the case we switch to a simpler evaluation
-        # that reuses the supervised truth labels we've already defined for training.
+        # Predicate game does not provide image categories, so we run a lightweight evaluation loop that reuses the truth labels computed from predicates.
+        # Predicate datasets lack the image-category metadata relied upon by the legacy Alice-Bob evaluation. 
+        # When that's the case we switch to a simpler evaluation that reuses the supervised truth labels we've already defined for training.
         if(not hasattr(data_iterator, 'category_idx')):
             # Use the dataset batch size but cap the number of batches to keep eval snappy.
             batch_size = data_iterator.batch_size
             max_batches = 128
             nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
 
-            # Running sums so we can compute dataset-averaged metrics without
-            # materialising every batch.
+            # Running sums so we can compute dataset-averaged metrics without materialising every batch.
             total_items = 0
             total_loss = 0.0
             total_accuracy = 0.0 # TODO Accuracy should be the average accuracy (computed from success~1, failure~0).
@@ -278,8 +276,7 @@ class AlexBeth(Game):
                 asker_outcome, retriever_outcome = self.alex_to_beth(batch)
                 truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: TODO
 
-                # Beth outputs a logit per candidate; we interpret it as the log-odds
-                # that the predicate holds for the candidate.
+                # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
                 logits = retriever_outcome.scores.squeeze(-1) # Shape: TODO
                 probs = torch.sigmoid(logits) # Shape: TODO
 
