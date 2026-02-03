@@ -167,14 +167,14 @@ class AlexBeth(Game):
 
     # Returns two tensors of shape (batch size).
     # asker_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
-    # retriever_scores: pair (batch, num_candidates, 1) before squeeze
+    # retriever_scores: logits pair (batch, num_candidates)
     # truth_targets: (batch, num_candidates)
     def compute_asker_rewards(self, asker_action, retriever_scores, truth_targets):
         """
         Returns reward and performance tensors (both shaped [batch size]) 
         based on the probability Beth assigns to the correct truth value.
         """
-        logits = retriever_scores.squeeze(-1) # Shape: (batch, num_candidates)
+        logits = retriever_scores # Shape: (batch, num_candidates)
         probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
         correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs) # Shape: (batch, num_candidates)
         perf = correct_prob.mean(dim=1).detach() # Shape: (batch,)
@@ -220,11 +220,11 @@ class AlexBeth(Game):
         return (loss, perf, rewards)
 
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
-    # retriever_scores: tensor of shape (batch size, number of candidates)
+    # retriever_scores: logits pair tensor of shape (batch size, number of candidates)
     # truth_targets: tensor of shape (batch size, number of candidates)
     # return_entropy: bool
     def compute_retriever_loss(self, retriever_scores, truth_targets, return_entropy=False):
-        logits = retriever_scores.squeeze(-1) # Shape: (batch, num_candidates)
+        logits = retriever_scores # Shape: (batch, num_candidates)
         probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
 
         loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float())
@@ -279,8 +279,8 @@ class AlexBeth(Game):
                 truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: TODO
 
                 # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
-                logits = retriever_outcome.scores.squeeze(-1) # Shape: TODO
-                probs = torch.sigmoid(logits) # Shape: TODO
+                logits = retriever_outcome.scores # Shape: (batch, num_candidates)
+                probs = torch.sigmoid(logits) # Shape: same
 
                 # Scalar BCE averaged over the batch (used for logging only).
                 loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()

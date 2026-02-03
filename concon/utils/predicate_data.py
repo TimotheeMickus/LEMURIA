@@ -40,7 +40,7 @@ class Batch():
         graph_sizes = []
 
         # take the largest total node count across all graphs
-        padding_length = max(sum(len(o) + 1 for o in g) for g in graphs) if graphs else 1
+        padding_length = max(sum(len(o) + 1 for o in g) for item in graphs for g in item) if graphs else 1
 
         # This block tensorizes each candidate graph per batch item.
         # It collects node/edge indices and sizes into nested lists.
