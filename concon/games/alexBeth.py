@@ -403,9 +403,6 @@ class AlexBeth(Game):
             scrambled_success_prob.append(scrambled_retriever_pointing['dist'].probs[:, 0])
 
         if(self.message_dump_dir is not None):
-            import csv
-            import os
-
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
