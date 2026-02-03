@@ -330,7 +330,7 @@ class AlexBeth(Game):
             if(avg_accuracy > self.max_perf):
                 self.max_perf = avg_accuracy
 
-            # Dumps signals into file
+            # Dumps signals into file every epoch or on the last epoch, depending on the flag
             if self.message_dump_dir and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
                 filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
                 with open(filename, 'w') as ostr:

@@ -83,7 +83,10 @@ def get_args(remaining_args=None):
     group.add_argument('--nontrivial_only', help='whether to use only predicates that are both satisfiable and falsifiable', action='store_true')
     group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
     group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
+    group.add_argument('--allow_indeterminate', help='whether to allow indeterminate (neither true nor false) values in candidates', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
+    group.add_argument('--num_candidates', help='number of candidates per predicate instance', default=10, type=int)
+    group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='random')
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)

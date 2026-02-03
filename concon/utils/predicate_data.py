@@ -9,26 +9,28 @@ import random
 class Batch():
     # TODO See TODO below. This class has to be changed to store tensors ready to be fed to the model.
     # MG: Done-ish
-    def __init__(self, size, predicate, predicate_idx, candidate):
+    def __init__(self, size, predicate, predicate_idx, candidate, candidate_truth=None):
         self.size = size # int
         self.predicate = predicate # list[Predicate]
         self.predicate_idx = predicate_idx # list[int]
-        self.candidate = candidate # list[Candidate]
+        self.candidate = candidate # list[list[Candidate]]
+        self.candidate_truth = candidate_truth # list[list[int]], aligned with candidate
         
         self.node_idx = None
         self.edge_idx = None
         self.graph_sizes = None
 
     # Predicate encoding
-    def encode_predicates(self, mode='predicate', num_predicates=None):
-        '''May encode predicates as simply their indices (sparse one-hot encoding).'''
-        assert mode in ['predicate', 'sparse']
+    # May encode predicates as simply their indices (sparse one-hot encoding).
+    def encode_predicates(self, mode='predicate'):
+        assert mode in ['predicate', 'sparse'], 'Unrecognized mode.'
         if(mode=='predicate'): return self.predicate
         if(mode=='sparse'): return np.array(self.predicate_idx)
 
     # Tensorize this batch (using Dataset vocabulary)
     def tensorize(self, dataset):
-        graphs = [[{p.name: v.name.split('-',1)[1] for p, v in c.prop2value.items() if v is not None}] for c in self.candidate]
+        # convert nested candidates to graphs
+        graphs = [[self._candidate_to_graph(c) for c in candidate_list] for candidate_list in self.candidate]
 
         nl_s2i = dataset.node_s2i
         el_s2i = dataset.edge_s2i
@@ -37,19 +39,31 @@ class Batch():
         edge_idx = []
         graph_sizes = []
 
+        # take the largest total node count across all graphs
         padding_length = max(sum(len(o) + 1 for o in g) for g in graphs) if graphs else 1
 
-        for g in graphs:
-            n, e, s = dataset._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
-            node_idx.append(n)
-            edge_idx.append(e)
-            graph_sizes.append(s)
+        # This block tensorizes each candidate graph per batch item.
+        # It collects node/edge indices and sizes into nested lists.
+        for item in graphs:
+            item_nodes, item_edges, item_sizes = [], [], []
+            for g in item:
+                n, e, s = dataset._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
+                item_nodes.append(n)
+                item_edges.append(e)
+                item_sizes.append(s)
+            node_idx.append(item_nodes)
+            edge_idx.append(item_edges)
+            graph_sizes.append(item_sizes)
 
         self.node_idx = node_idx
         self.edge_idx = edge_idx
         self.graph_sizes = graph_sizes
 
         return self  # allow chaining
+    
+    # Transform a candidate into a graph dictionary
+    def _candidate_to_graph(self, c):
+        return [{p.name: v.name.split('-',1)[1] for p, v in c.prop2value.items() if v is not None}]
 
     def __eq__(self, other):
         if(not isinstance(other, Batch)): return NotImplemented
@@ -152,7 +166,6 @@ class Predicate():
     # candidate: Candidate
     # Outputs an int.
     def check(self, candidate):
-        # MG TODO I guess I should do this
         raise NotImplementedError
     
     # target: -1, 0 or 1
@@ -367,10 +380,12 @@ class failureBasedDistribution():
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
 class Dataset():
-    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False):
+    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False):
         self.device = device
         self.batch_size = batch_size
         self.allow_indeterminate = allow_indeterminate
+        self.num_candidates = num_candidates
+        self.candidate_sampling = candidate_sampling
 
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
         self.properties = list() # list[Property]
@@ -449,30 +464,43 @@ class Dataset():
         print(f"{len(self.predicates)} predicates ({self.predicates})")
 
     # Generates a batch.
-    # Outputs a Batch.
-    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, **kwargs):
+    # Outputs a Batch with candidate list(s) and aligned truth labels.
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, num_candidates=None, candidate_sampling=None, **kwargs):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
-
-        Additional kwargs are accepted for compatibility with image-oriented data iterators but ignored here.
+        Additional kwargs are accepted for compatibility with image data iterators but ignored here.
         """
         batch = []
         if(size is None): size = self.batch_size
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
+        if(num_candidates is None): num_candidates = self.num_candidates
+        if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
         for _ in range(size):
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
-            # Generates a candidate.
-            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate) # Candidate
-            batch.append((pred_idx, predicate, candidate))
 
-        predicate_idx, pred_objects, candidates = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
-        # TODO In fact, it would be better to store in the batch tensors ready to be fed to the model.
+            # Sample `num_candidates` candidates for the batch
+            candidates = []
+            truths = []
+            if candidate_sampling == 'balanced':
+                # At some point, it might be interesting to test against balanced distributions
+                raise NotImplementedError
+            else:
+                for _ in range(num_candidates):
+                    candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
+                    candidates.append(candidate)
+                    # cache predicate.check
+                    truths.append(1 if predicate.check(candidate) == 1 else 0)
+            batch.append((pred_idx, predicate, candidates, truths))
+
+        predicate_idx, pred_objects, candidates, truths = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
+
+        # In fact, it would be better to store in the batch tensors ready to be fed to the model.
         # So, the predicate indices instead of the predicates, and for the candidates, use graphTensorize here https://colab.research.google.com/drive/1C5iUSxX-MIJXIb4wfUzYBExRTF-OhsWn?usp=sharing
-        # MG: The `store_tensor` flag triggers candidate dictionary translation into tensors
-        return Batch(size=size, predicate=list(pred_objects), predicate_idx=list(predicate_idx), candidate=list(candidates))
+        # MG: my proposition is for now we tensorize lazily in AlexBeth._beth_input, fix later for efficiency
+        return Batch(size=size, predicate=list(pred_objects), predicate_idx=list(predicate_idx), candidate=list(candidates), candidate_truth=list(truths))
 
     # Outputs a (int, Predicate).
     def selectPredicate(self):
@@ -532,7 +560,7 @@ class Dataset():
 
 
 def get_data_loader(args):
-    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction)
+    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling)
     dataset.print_info()
 
     return dataset
