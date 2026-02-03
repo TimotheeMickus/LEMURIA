@@ -97,17 +97,13 @@ class AlexBeth(Game):
     def autologger(self):
         return self._logger
     
+    # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
     def _compute_truth_targets(self, batch, device):
         """
         Returns a float tensor of shape (batch size,) where 1.0 denotes that the
         predicate holds for the candidate, and 0.0 otherwise.
         """
-        targets = [
-            1.0 if predicate.check(candidate) == 1 else 0.0
-            for predicate, candidate in zip(batch.predicate, batch.candidate)
-        ]
-        
-        return torch.tensor(targets, dtype=torch.float32, device=device)
+        return torch.tensor(batch.candidate_truth, dtype=torch.float32, device=device)
     
     def agents_for_CNN_pretraining(self):
         raise NotImplementedError # In fact, the method should not even exist (the superclass should be modified).
@@ -171,34 +167,34 @@ class AlexBeth(Game):
 
     # Returns two tensors of shape (batch size).
     # asker_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
-    # retriever_scores: TODO
-    # truth_targets: TODO
+    # retriever_scores: pair (batch, num_candidates, 1) before squeeze
+    # truth_targets: (batch, num_candidates)
     def compute_asker_rewards(self, asker_action, retriever_scores, truth_targets):
         """
-        Returns reward and performance tensors (both shaped [batch size])
+        Returns reward and performance tensors (both shaped [batch size]) 
         based on the probability Beth assigns to the correct truth value.
         """
-        logits = retriever_scores.squeeze(-1) # Shape: 
-        probs = torch.sigmoid(logits) # Shape: 
-        correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs) # Shape: 
-        perf = correct_prob.detach() # Shape: 
+        logits = retriever_scores.squeeze(-1) # Shape: (batch, num_candidates)
+        probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
+        correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs) # Shape: (batch, num_candidates)
+        perf = correct_prob.mean(dim=1).detach() # Shape: (batch,)
 
         if(self.use_expectation):
-            rewards = perf.clone() # The reward is the expectation of the retreiver guessing right. # Shape: 
+            rewards = perf.clone() # Expected average accuracy of the retriever over the sequence. # Shape: (batch,)
         else:
-            rewards = torch.bernoulli(correct_prob).detach() # We sample whether the retreiver is right according to the probability of the retreiver being right; the reward is 1 when the retreiver is right, 0 otherwise. # Shape: 
+            rewards = torch.bernoulli(correct_prob).mean(dim=1).detach() # We sample whether the retreiver is right according to the probability of the retreiver being right; the reward is 1 when the retreiver is right, 0 otherwise. # Shape: (batch,)
 
-        msg_lengths = asker_action[1].view(-1).float() # Shape: 
+        msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,)
         rewards += -1 * (msg_lengths >= self.max_len_msg) # Penalty related to messages exceeding the length limit.
 
         if(self.penalty > 0.0):
-            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Shape: 
-            rewards = rewards - length_penalties # Shape: 
+            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Shape: (batch,)
+            rewards = rewards - length_penalties # Shape: (batch,)
 
         return (rewards, perf)
 
-    # Returns TODO
-    # asker_outcome: TODO
+    # Returns (loss, pref, rewards) where loss is scalar and perf/rewards are (batch,)
+    # asker_outcome: (log_prob of (batch, max_msg_len), entropy (batch, 1))
     # retriever_scores: tensor of shape (batch size, number of candidates)
     # truth_targets: tensor of shape (batch size, number of candidates)
     def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
@@ -228,8 +224,8 @@ class AlexBeth(Game):
     # truth_targets: tensor of shape (batch size, number of candidates)
     # return_entropy: bool
     def compute_retriever_loss(self, retriever_scores, truth_targets, return_entropy=False):
-        logits = retriever_scores.squeeze(-1) # Shape: TODO
-        probs = torch.sigmoid(logits) # Shape: TODO
+        logits = retriever_scores.squeeze(-1) # Shape: (batch, num_candidates)
+        probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
 
         loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float())
 
@@ -238,7 +234,7 @@ class AlexBeth(Game):
         # entropy penalty (addition)
         loss += (self.beta_retriever * entropy)
 
-        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: TODO
+        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: (batch, num_candidates)
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
