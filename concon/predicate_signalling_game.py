@@ -22,7 +22,7 @@ def do(args):
 
         run_summary_dir = summary_dir / str(run)
         run_models_dir = models_dir / str(run)
-        message_dump_dir = run_summary_dir if(args.dump_message) else None
+        message_dump_dir = run_summary_dir if(args.dump_message is not None) else None
 
         # Loads the data.
         data_loader = get_data_loader(args)
@@ -89,7 +89,7 @@ def get_args(remaining_args=None):
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
-    group.add_argument('--dump_message', help='whether to regularly save the messages in a file', action="store_true")
+    group.add_argument('--dump_message', help='dump messages: "last" (default) or "all"', choices=['last', 'all'], nargs='?', const='last', default=None)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --display tqdm should be inferred from the env

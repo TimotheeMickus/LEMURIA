@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import scipy
 import itertools as it
+import csv, os # for dumping signals
 
 import tqdm
 from collections import defaultdict
@@ -66,6 +67,8 @@ class AlexBeth(Game):
             self._retriever_avg_reward = misc.Averager(size=12800)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
+        self.dump_message_mode = getattr(args, "dump_message", None)
+        self.epochs = getattr(args, "epochs", None)
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -194,10 +197,10 @@ class AlexBeth(Game):
 
         return (rewards, perf)
 
-    # Returns a scalar tensor and two tensors of shape (batch size).
+    # Returns TODO
     # asker_outcome: TODO
-    # retriever_scores: tensor of shape (batch size, nb img)
-    # truth_targets: TODO
+    # retriever_scores: tensor of shape (batch size, number of candidates)
+    # truth_targets: tensor of shape (batch size, number of candidates)
     def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
         (rewards, perf) = self.compute_asker_rewards(asker_outcome.action, retriever_scores, truth_targets)
 
@@ -221,21 +224,21 @@ class AlexBeth(Game):
         return (loss, perf, rewards)
 
     # Returns the loss (a scalar tensor) and, if asked, also the average entropy of the pointing distributions (a scalar tensor).
-    # retriever_scores: tensor of shape (batch size, nb img)
-    # truth_targets: TODO
+    # retriever_scores: tensor of shape (batch size, number of candidates)
+    # truth_targets: tensor of shape (batch size, number of candidates)
     # return_entropy: bool
     def compute_retriever_loss(self, retriever_scores, truth_targets, return_entropy=False):
-        logits = retriever_scores.squeeze(-1) # Shape: 
-        probs = torch.sigmoid(logits) # Shape: 
+        logits = retriever_scores.squeeze(-1) # Shape: TODO
+        probs = torch.sigmoid(logits) # Shape: TODO
 
-        loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float()) # TODO check that this is the right loss (probably not)
+        loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float())
 
         eps = 1e-8
         entropy = (-(probs * torch.log(probs + eps) + (1.0 - probs) * torch.log(1.0 - probs + eps))).mean()
         # entropy penalty (addition)
         loss += (self.beta_retriever * entropy)
 
-        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: 
+        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: TODO
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
@@ -263,6 +266,9 @@ class AlexBeth(Game):
             total_entropy = 0.0
             total_msg_length = 0.0
             total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
+
+            messages = []
+            predicate_ids = []
 
             iterator = range(nb_batch)
             if(self.autologger.display == 'tqdm'):
@@ -300,6 +306,20 @@ class AlexBeth(Game):
                 total_msg_length += msg_length * batch_items
                 total_perf += perf * batch_items
 
+                # This block stores signals produced by the agents that are dumped at the end of eval
+                # If `correct_only` is True, only signals yielding non-random accuracy are stored
+                if(self.message_dump_dir is not None):
+                    batch_messages = asker_outcome.action[0].detach()
+                    batch_lens     = asker_outcome.action[1].detach()
+                    accuracy_per_item = (preds == truth_targets).float().mean(dim=1)
+                    for i in range(batch_messages.size(0)):
+                        if self.correct_only and (accuracy_per_item[i].item() < 0.5):
+                            continue # skip low accuracy items
+                        # truncate padding away from signals
+                        message = batch_messages[i].tolist()[:batch_lens[i].item()]
+                        messages.append(message)
+                        predicate_ids.append(int(batch.predicate_idx[i]))
+
             # Normalise the accumulated sums and push them to TensorBoard / stdout.
             avg_accuracy = (total_accuracy / total_items)
             log('eval/loss', total_loss / total_items)
@@ -309,8 +329,23 @@ class AlexBeth(Game):
             log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
             if(avg_accuracy > self.max_perf):
                 self.max_perf = avg_accuracy
+
+            # Dumps signals into file
+            if self.message_dump_dir and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
+                filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
+                with open(filename, 'w') as ostr:
+                    writer = csv.writer(ostr)
+                    _ = writer.writerow(['msg', 'pred_idx'])
+                    for msg, pred_idx in zip(messages, predicate_ids):
+                        msg = ' '.join(map(str, msg))
+                        row = [msg, pred_idx]
+                        _ = writer.writerow(row)
             
             return
+        
+        # ----------------------------
+        # hic incipit quod neglegitur
+        # ----------------------------
 
         # TODO above to run, the below is ignored for now
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
