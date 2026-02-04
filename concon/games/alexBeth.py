@@ -162,7 +162,15 @@ class AlexBeth(Game):
 
         msg_length = asker_outcome.action[1].float().mean()
 
-        return optimization, asker_rewards, asker_perf, msg_length, asker_entropy, retriever_entropy
+        metrics = {
+            "rewards": asker_rewards,
+            "successes": asker_perf,
+            "msg_length": msg_length,
+            "sender_entropy": asker_entropy,
+            "receiver_entropy": retriever_entropy,
+        }
+
+        return optimization, metrics
 
     # Returns two tensors of shape (batch size).
     # asker_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)

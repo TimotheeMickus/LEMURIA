@@ -204,7 +204,15 @@ class AutoLogger(object):
     def update(self, loss, *external_output, **supplementary_info):
         # TODO: the autologger needs some clean up for user simplicity. Ideally I'd love to have it in its own thread as well
 
-        rewards, successes, msg_length, sender_entropy, receiver_entropy, *external_output = external_output
+        if len(external_output) == 1 and isinstance(external_output[0], dict):
+            metrics = external_output[0]
+            rewards = metrics["rewards"]
+            successes = metrics["successes"]
+            msg_length = metrics["msg_length"]
+            sender_entropy = metrics["sender_entropy"]
+            receiver_entropy = metrics["receiver_entropy"]
+        else:
+            rewards, successes, msg_length, sender_entropy, receiver_entropy, *external_output = external_output
 
         # Computes the minimum length the messages can have in order to get perfect accuracy (approximation when the size of the alphabet >> 1)
         minimal_compression_len = np.log(self.data_loader.nb_categories) / np.log(self.base_alphabet_size + 1) # + 1 because EoM is taken into account

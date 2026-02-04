@@ -64,7 +64,7 @@ class Retriever(Agent):
             msg_spigot = None
 
         # Scores (logits) the targets.
-        scores = torch.bmm(encoded_candidates, encoded_message.unsqueeze(-1)).squeeze(-1) # Shape: (batch size, num_candidates)
+        scores = torch.bmm(encoded_candidates, encoded_message).squeeze(-1) # Shape: (batch size, num_candidates)
         outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
 
         return outcome
