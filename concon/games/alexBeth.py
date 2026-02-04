@@ -181,7 +181,7 @@ class AlexBeth(Game):
         if(self.use_expectation):
             rewards = perf.clone() # Expected average accuracy of the retriever over the sequence. # Shape: (batch,)
         else:
-            rewards = torch.bernoulli(correct_prob).mean(dim=1).detach() # We sample whether the retreiver is right according to the probability of the retreiver being right; the reward is 1 when the retreiver is right, 0 otherwise. # Shape: (batch,)
+            rewards = torch.bernoulli(correct_prob).mean(dim=1).detach() # We sample whether the retriever is right according to the probability of the retriever being right; the reward is 1 when the retriever is right, 0 otherwise. # Shape: (batch,)
 
         msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,)
         rewards += -1 * (msg_lengths >= self.max_len_msg) # Penalty related to messages exceeding the length limit.
@@ -245,7 +245,6 @@ class AlexBeth(Game):
             self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
-        # Predicate game does not provide image categories, so we run a lightweight evaluation loop that reuses the truth labels computed from predicates.
         # Predicate datasets lack the image-category metadata relied upon by the legacy Alice-Bob evaluation. 
         # When that's the case we switch to a simpler evaluation that reuses the supervised truth labels we've already defined for training.
         if(not hasattr(data_iterator, 'category_idx')):
@@ -257,7 +256,7 @@ class AlexBeth(Game):
             # Running sums so we can compute dataset-averaged metrics without materialising every batch.
             total_items = 0
             total_loss = 0.0
-            total_accuracy = 0.0 # TODO Accuracy should be the average accuracy (computed from success~1, failure~0).
+            total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
             total_entropy = 0.0
             total_msg_length = 0.0
             total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
@@ -275,17 +274,17 @@ class AlexBeth(Game):
                 batch = data_iterator.get_batch(size=batch_size, data_type='test')
 
                 asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-                truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: TODO
+                truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: (batch, n_candidates)
 
                 # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
                 logits = retriever_outcome.scores # Shape: (batch, num_candidates)
-                probs = torch.sigmoid(logits) # Shape: same
+                probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
 
                 # Scalar BCE averaged over the batch (used for logging only).
                 loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
                 # Accuracy is the thresholded probability vs. the binary target.
-                preds = (probs >= 0.5).float()
-                accuracy = (preds == truth_targets).float().mean().item()
+                preds = (probs >= 0.5).float() # Shape: (batch, num_candidates)
+                accuracy = (preds == truth_targets).float().mean().item() # per candidate (not predicate)
                 # `perf` measures how much probability mass Beth assigns to the correct truth value.
                 perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).mean().item()
                 # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions.
@@ -306,7 +305,7 @@ class AlexBeth(Game):
                 if(self.message_dump_dir is not None):
                     batch_messages = asker_outcome.action[0].detach()
                     batch_lens     = asker_outcome.action[1].detach()
-                    accuracy_per_item = (preds == truth_targets).float().mean(dim=1)
+                    accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
                     for i in range(batch_messages.size(0)):
                         if self.correct_only and (accuracy_per_item[i].item() < 0.5):
                             continue # skip low accuracy items
