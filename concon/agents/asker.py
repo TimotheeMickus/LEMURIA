@@ -12,8 +12,6 @@ Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 # Produces a message based on an predicate.
 class Asker(Agent):
     def __init__(self, predicate_encoder, message_decoder, args, has_shared_param):
-        # MG: See fix in `agent.py`, this is the same problem
-        # super(Agent, self).__init__()
         super().__init__()
         
         self.predicate_encoder = predicate_encoder # nn.Embedding(num_predicates, H)
@@ -53,7 +51,7 @@ class Asker(Agent):
             parameters.data = other_parameters[name].data
             parameters.requires_grad = other_parameters[name].requires_grad
 
-    # The two optional arguments are specified when creating a SenderReceiver.
+    # The two optional arguments are specified when creating an AskerRetriever.
     # predicate_encoder: torch.nn.Module
     # symbol_embeddings: torch.nn.Embedding
     @classmethod
@@ -62,6 +60,7 @@ class Asker(Agent):
         
         num_predicates = getattr(args, "num_predicates")
         if(predicate_encoder is None): predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
+        # this is essentially the signal generator
         message_decoder = MessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
         
         return cls(predicate_encoder, message_decoder, args, has_shared_param)

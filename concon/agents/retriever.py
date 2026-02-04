@@ -50,7 +50,6 @@ class Retriever(Agent):
             Output:
                 TODO
         """
-
         # Encodes the images.
         encoded_candidates = self.candidate_encoder(**candidate_tensors) # Shape: (batch_size, num_candidates, hidden_size)
 

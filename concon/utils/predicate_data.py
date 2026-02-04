@@ -80,6 +80,22 @@ class Batch():
 
         return True
 
+    def pretty_print(self, dataset, item_idx=0, candidate_idx=None):
+        """
+        Decode node indices for a batch item into human-readable labels.
+        If candidate_idx is None, prints all candidates for the item.
+        """
+        if(self.node_idx is None):
+            raise ValueError("Batch is not tensorized; call batch.tensorize(dataset) first.")
+
+        def decode_row(row):
+            return [dataset.node_i2s[i] for i in row]
+
+        nodes = self.node_idx[item_idx]
+        if(candidate_idx is not None):
+            return decode_row(nodes[candidate_idx])
+        return [decode_row(row) for row in nodes]
+
     # Used for debugging.
     # Returns (list[None|int], list[None|int], list[None|int]).
     #def indices(self):
@@ -379,6 +395,9 @@ class failureBasedDistribution():
 
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
+# Initializing a dataset creates properties and values for different predicates.
+# Then, it generates Predicates from their combinations (e.g. P0-v0, (¬(P0-v0)∧P1-v0)).
+# From these, builds a global vocabulary for graph nodes and edges used to tensorise candidates.
 class Dataset():
     def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False):
         self.device = device
@@ -400,6 +419,8 @@ class Dataset():
 
         # Generates predicates.
         self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
+        # naming convention inconsistent internally but compatible with modules
+        self.nb_categories = len(self.predicates) 
 
         # Stores predicates as tensors.
         self.object_token='<obj>'

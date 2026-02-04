@@ -12,7 +12,7 @@ class MultiHeadsClassifier:
         self.get_head_targets = get_head_targets
         self.device = device
 
-    def run_batch(self, batch): # Only the target images will be used
+    def run_batch(self, batch): # Only the target messages will be used
         self.optimizer.zero_grad()
 
         hits, losses = self.forward(batch)
@@ -25,7 +25,7 @@ class MultiHeadsClassifier:
 
         return hits, loss
 
-    def forward(self, batch): # Only the target images will be used
+    def forward(self, batch): # Only the target messages will be used
         batch_img = batch.target_img(stack=True)
         activation = self.image_encoder(batch_img)
         targets = batch.target_category(stack=True, f=self.get_head_targets).to(self.device)
@@ -45,13 +45,8 @@ class MessageEncoder(nn.Module):
     """
     Encodes a message of discrete symbols in a single vector.
     """
-    def __init__(self,
-        base_alphabet_size,
-        embedding_dim,
-        output_dim,
-        symbol_embeddings):
+    def __init__(self, base_alphabet_size, embedding_dim, output_dim, symbol_embeddings):
         super(MessageEncoder, self).__init__()
-
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
 
@@ -78,23 +73,24 @@ class MessageEncoder(nn.Module):
         if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=False)
         return cls(args.base_alphabet_size, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings)
 
-# Vector -> message
 class MessageDecoder(nn.Module):
-    def __init__(self,
-        base_alphabet_size,
-        embedding_dim,
-        output_dim,
-        max_msg_len,
-        symbol_embeddings,
-    ):
+    '''
+    This is a 1-layer LSTM that generates tokens autoregressively
+    The predicate embedding is projected into initial LSTM cell and hidden state
+    At each step:
+      embed the last symbol
+      run LSTM step
+      project to token logits (`action_space_proj`)
+      sample a token (training) or argmax (eval)
+      stop after producing EOS and pad rest
+    '''
+    def __init__(self, base_alphabet_size, embedding_dim, output_dim, max_msg_len, symbol_embeddings):
         super(MessageDecoder, self).__init__()
-
         self.symbol_embeddings = symbol_embeddings
-
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
-        # project encoded img onto cell
+        # project encoded message onto cell
         self.cell_proj = nn.Linear(embedding_dim, embedding_dim)
-        # project encoded img onto hidden
+        # project encoded message onto hidden
         self.hidden_proj = nn.Linear(embedding_dim, embedding_dim)
         # project lstm output onto action space
         self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size + 1)
@@ -124,7 +120,7 @@ class MessageDecoder(nn.Module):
 
         # Produces the messages
         # TODO Je serais d'avis à ne pas utiliser de EOS. Si l'action EOS est choisie, le message serait terminé sans qu'aucun symbol ne soit ajouté (ou plus techniquement, on ajoute un padding symbol). En fait, ça revient plus ou moins à fusionner le EOS et le padding symbol. Cela permettrait d'éviter d'avoir un symbol spécial apparaissant souvent mais pas toujours dans les "vrais" messages, ce qui peut compliquer l'analyse.
-        for i in range(self.max_msg_len):
+        for _ in range(self.max_msg_len):
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
@@ -195,7 +191,7 @@ class NoiseAdder(nn.Module):
     
 class CandidateAverager(nn.Module):
     """
-    Temporary candidate encoder that averages embedded node ids.
+    Rudimentary candidate encoder that averages embedded node ids.
     Turns graph tensors into a fixed-size vector per candidate by embedding every node ID and averaging.
     """
     def __init__(self, node_vocab_size, hidden_size, padding_id):
@@ -204,10 +200,15 @@ class CandidateAverager(nn.Module):
         self.padding_id = padding_id
 
     def forward(self, node_idx, **_):
-        # node_idx: (batch, num_candidates, max_nodes) or (batch, max_nodes)
-        if(node_idx.dim() == 2):
-            node_idx = node_idx.unsqueeze(1)
-
+        '''
+        Input: `node_idx` a tensor of (batch size, no. of candidates, max nodes) node IDs
+        for each candidate graph.
+        Output: One (B, C, H) vector per candidate where H = hidden size.
+        Example wih B=2, C=1, N=4, H=3.
+        node_idx = [[5, 7, 9, PAD], [2, 4, PAD, PAD]]
+        '''
+        print('inside CandidateAverager')
+        print(node_idx)
         emb = self.node_emb(node_idx)  # (batch, num_candidates, max_nodes, hidden)
         mask = (node_idx != self.padding_id).unsqueeze(-1)
         summed = (emb * mask).sum(dim=2)

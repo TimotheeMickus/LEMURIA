@@ -21,10 +21,9 @@ from ..eval import decision_tree
 
 from .game import Game
 
-# TODO This is currently a copy of AlexBeth (well, I've already removed some obviously useless stuf), but should be changed to match the following description:
-#   In this game, there is one asker (Alex) and one retriever (Beth).
-#   They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
-#   Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
+# In this game, there is one asker (Alex) and one retriever (Beth).
+# They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
+# Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
 class AlexBeth(Game):
     def __init__(self, args, logger, dataset, message_dump_dir):
@@ -123,6 +122,8 @@ class AlexBeth(Game):
         node = torch.tensor(batch.node_idx, device=device, dtype=torch.long)
         edge = torch.tensor(batch.edge_idx, device=device, dtype=torch.long)
         sizes = torch.tensor(batch.graph_sizes, device=device, dtype=torch.long)
+        # DEBUG
+        print({'node_idx': node, '\nedge_idx': edge, '\ngraph_sizes': sizes})
         return {'node_idx': node, 'edge_idx': edge, 'graph_sizes': sizes}
 
     def __call__(self, batch):

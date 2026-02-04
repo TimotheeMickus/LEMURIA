@@ -26,8 +26,6 @@ def do(args):
 
         # Loads the data.
         data_loader = get_data_loader(args)
-        # TODO delete? just a fix
-        data_loader.nb_categories = len(data_loader.predicates)
 
         # size of the predicate vocabulary
         args.num_predicates = len(data_loader.predicates)
