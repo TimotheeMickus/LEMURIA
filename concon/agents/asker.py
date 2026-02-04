@@ -15,8 +15,8 @@ class Asker(Agent):
         super().__init__()
         
         self.predicate_encoder = predicate_encoder # nn.Embedding(num_predicates, H)
-        self.message_decoder = message_decoder # TODO LSTM that produces the message (already in place I think?)
-        
+        self.message_decoder = message_decoder # LSTM that produces the signal
+
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
 
@@ -26,7 +26,7 @@ class Asker(Agent):
             Input:
                 `predicate_idx`, 1D tensor of predicate indices.
             Output:
-                `Outcome`, where `action` is the produced message.
+                `Outcome`, where `action` is the produced signal. (assigned as message, naming mismatch)
         """
         encoded_predicate = self.predicate_encoder(predicate_idx) # Shape: (number of predicate indices)
         outputs = self.message_decoder(encoded_predicate)

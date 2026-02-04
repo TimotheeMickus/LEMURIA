@@ -43,7 +43,7 @@ class MultiHeadsClassifier:
 # Message -> vector
 class MessageEncoder(nn.Module):
     """
-    Encodes a message of discrete symbols in a single vector.
+    Encodes a signal of discrete symbols in a single vector.
     """
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, symbol_embeddings):
         super(MessageEncoder, self).__init__()
@@ -54,8 +54,8 @@ class MessageEncoder(nn.Module):
         """
         Forward propagation.
         Input:
-            `message`, of shape [args.batch_size x <=MSG_LEN], message produced by sender
-            `length`, of shape [args.batch_size x 1], length of message produced by sender
+            `message`, of shape [args.batch_size x <=MSG_LEN], signal produced by sender
+            `length`, of shape [args.batch_size x 1], length of signal produced by sender
         Output:
             encoded message, of shape [args.batch_size x output_dim]
         """
