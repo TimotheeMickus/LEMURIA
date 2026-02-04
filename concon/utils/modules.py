@@ -204,11 +204,12 @@ class CandidateAverager(nn.Module):
         Input: `node_idx` a tensor of (batch size, no. of candidates, max nodes) node IDs
         for each candidate graph.
         Output: One (B, C, H) vector per candidate where H = hidden size.
-        Example wih B=2, C=1, N=4, H=3.
-        node_idx = [[5, 7, 9, PAD], [2, 4, PAD, PAD]]
+            For a candidate graph with node IDs (i1,...,in), 
+            the embedding matrix E maps each node ID to a vector in H.
+            For each node vector e = E[i] drop any padding nodes (mask=0) and sum the remaining vectors.
+            The output is the average, i.e. the sum over the number of non-padding nodes. 
+            (This is done element-wise.)
         '''
-        print('inside CandidateAverager')
-        print(node_idx)
         emb = self.node_emb(node_idx)  # (batch, num_candidates, max_nodes, hidden)
         mask = (node_idx != self.padding_id).unsqueeze(-1)
         summed = (emb * mask).sum(dim=2)
