@@ -77,7 +77,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
     group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
-    group.add_argument('--max-depth', help='the depth limit of the predicates considered', default=3, type=int)
+    group.add_argument('--max_depth', help='the depth limit of the predicates considered', default=3, type=int)
     group.add_argument('--nontrivial_only', help='whether to use only predicates that are both satisfiable and falsifiable', action='store_true')
     group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
     group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')

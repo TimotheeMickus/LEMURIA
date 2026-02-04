@@ -451,6 +451,19 @@ class Dataset():
     def generateAllPredicates(self, max_depth, nontrivial_only, no_negation, no_conjunction):
         depth2predicates = [] # list[list[Predicate]]
         depth2predicates.append([value for value in self.values if (not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
+
+        # Upper-bound estimate (ignores equivalence + nontrivial pruning)
+        V = len(self.values)
+        est_by_depth = [0] * max_depth
+        est_by_depth[0] = V
+        for d in range(1, max_depth):
+            prev = est_by_depth[d-1]
+            total_prev = sum(est_by_depth[:d])
+            neg = prev if not no_negation else 0
+            conj = prev * total_prev if not no_conjunction else 0
+            est_by_depth[d] = neg + conj
+        print("Upper-bound predicate counts by depth:", est_by_depth, "total:", sum(est_by_depth))
+
         while(len(depth2predicates) < max_depth):
             predicates = list() # list[Predicate]
 
@@ -474,6 +487,7 @@ class Dataset():
                         predicates.append(pred)
 
             depth2predicates.append(predicates)
+            print(f"Depth: {len(depth2predicates)}: {len(predicates)} predicates")
 
         return np.array(list(itertools.chain.from_iterable(depth2predicates))) # ndarray[Predicate]
 
@@ -507,7 +521,7 @@ class Dataset():
             truths = []
             if candidate_sampling == 'balanced':
                 # At some point, it might be interesting to test against balanced distributions
-                raise NotImplementedError
+                candidates, truths = self._sample_balanced_candidates(predicate, num_candidates, allow_indeterminate)
             else:
                 for _ in range(num_candidates):
                     candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
@@ -578,6 +592,53 @@ class Dataset():
             root_id = i
 
         return node_idx, edge_idx, graph_size
+    
+    # Sample candidates with balanced truth values so retriever cannot predict a "default" class.
+    # Here, we determine the number of candidates to sample for each truth-value,
+    # then we sample them through a helper if available, 
+    # if not we add random candidates to fill the quota.
+    def _sample_balanced_candidates(self, predicate, num_candidates, allow_indeterminate):
+        # Determine number of true/false.
+        num_true = num_candidates // 2
+        num_false = num_candidates - num_true
+
+        candidates = []
+        truths = []
+
+        # Fill positive and negative slots separately.
+        self._fill_target(predicate, 1, num_true, allow_indeterminate, candidates, truths)
+        self._fill_target(predicate, -1, num_false, allow_indeterminate, candidates, truths)
+
+        # If predicates don't have enough satisfying candidates, add random samples.
+        while len(candidates) < num_candidates:
+            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
+            candidates.append(candidate)
+            truths.append(1 if predicate.check(candidate) == 1 else 0)
+
+        return candidates, truths
+
+    # Append up to n candidates that satisfy or falsify (1/-1) the predicate.
+    # predicate.build() if available, then randomly sample until we hit n or a max attempt cap.
+    def _fill_target(self, predicate, target, n, allow_indeterminate, candidates, truths):
+        target_list = predicate.build(target=target)
+
+        count = 0
+        while count < n and target_list:
+            candidates.append(random.choice(target_list))
+            truths.append(1 if target == 1 else 0)
+            count += 1
+
+        attempts = 0
+        max_attempts = n * 50
+        while count < n and attempts < max_attempts:
+            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
+            if predicate.check(candidate) == target:
+                candidates.append(candidate)
+                truths.append(1 if target == 1 else 0)
+                count += 1
+            attempts += 1
+
+        return count
 
 
 def get_data_loader(args):
