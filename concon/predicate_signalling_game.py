@@ -129,6 +129,8 @@ def get_args(remaining_args=None):
     group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
+    group.add_argument('--blind_candidates', help='debug: retriever ignores candidate features (scores become constant across candidates)', action='store_true')
+    group.add_argument('--blind_message', help='debug: retriever ignores message embedding', action='store_true')
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
     group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')

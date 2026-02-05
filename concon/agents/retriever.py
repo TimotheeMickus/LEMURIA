@@ -23,6 +23,8 @@ class Retriever(Agent):
 
         self.candidate_encoder = candidate_encoder # currently embedding-based averaging encoder 
         self.message_encoder = message_encoder # RNN (LSTM) encoder
+        self.blind_candidates = getattr(args, "blind_candidates", False)
+        self.blind_message = getattr(args, "blind_message", False)
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
@@ -56,12 +58,16 @@ class Retriever(Agent):
         """
         # Encodes the candidates.
         encoded_candidates = self.candidate_encoder(**candidate_tensors) # Shape: (batch_size, num_candidates, hidden_size)
+        if self.blind_candidates:
+            encoded_candidates = torch.zeros_like(encoded_candidates)
 
         if(use_spigot):
             msg_spigot = misc.GradSpigot(encoded_message)
             encoded_message = msg_spigot.tensor # Shape: (batch size, hidden size)
         else:
             msg_spigot = None
+        if self.blind_message:
+            encoded_message = torch.zeros_like(encoded_message)
 
         # Scores (logits) the targets.
         scores = torch.bmm(encoded_candidates, encoded_message).squeeze(-1) # Shape: (batch size, num_candidates)
