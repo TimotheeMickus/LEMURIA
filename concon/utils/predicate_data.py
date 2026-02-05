@@ -615,10 +615,15 @@ class Dataset():
             candidates.append(candidate)
             truths.append(1 if predicate.check(candidate) == 1 else 0)
 
+        # Shuffle candidates to avoid strategies based on candidate positions.
+        combined = list(zip(candidates, truths))
+        random.shuffle(combined)
+        candidates, truths = zip(*combined)
+        
         return candidates, truths
 
     # Append up to n candidates that satisfy or falsify (1/-1) the predicate.
-    # predicate.build() if available, then randomly sample until we hit n or a max attempt cap.
+    # predicate.build() if available from generated set, then randomly sample until we hit n or a max attempt cap.
     def _fill_target(self, predicate, target, n, allow_indeterminate, candidates, truths):
         target_list = predicate.build(target=target)
 
