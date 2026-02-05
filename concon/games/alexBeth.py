@@ -57,8 +57,6 @@ class AlexBeth(Game):
 
             parameters = it.chain(self.asker.parameters(), self.retriever.parameters())
 
-        self._assert_finite_params()
-
         self._optim = build_optimizer(parameters, args.learning_rate)
 
         self.use_baseline = args.use_baseline
@@ -97,28 +95,6 @@ class AlexBeth(Game):
     @property
     def autologger(self):
         return self._logger
-
-    def _assert_finite_params(self):
-        bad = []
-        for prefix, module in (("asker", self.asker), ("retriever", self.retriever)):
-            for name, param in module.named_parameters():
-                if not torch.isfinite(param).all():
-                    bad.append((f"{prefix}.{name}", param))
-        if bad:
-            details = []
-            for name, param in bad:
-                nan_count = torch.isnan(param).sum().item()
-                inf_count = torch.isinf(param).sum().item()
-                finite_mask = torch.isfinite(param)
-                if finite_mask.any():
-                    finite_vals = param[finite_mask]
-                    min_val = finite_vals.min().item()
-                    max_val = finite_vals.max().item()
-                else:
-                    min_val = float("nan")
-                    max_val = float("nan")
-                details.append(f"{name}: nan={nan_count} inf={inf_count} min={min_val} max={max_val}")
-            raise ValueError("Non-finite parameters at init:\n" + "\n".join(details))
     
     # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
     def _compute_truth_targets(self, batch, device):
@@ -131,27 +107,11 @@ class AlexBeth(Game):
     def agents_for_CNN_pretraining(self):
         raise NotImplementedError # In fact, the method should not even exist (the superclass should be modified).
 
-    def start_epoch(self, data_iterator, summary_writer):
-        # Ensure parameters are still finite at the start of each epoch.
-        super().start_epoch(data_iterator, summary_writer)
-        self._assert_finite_params()
-
     # batch: Batch
     def _alex_input(self, batch):
         predicate_idx = batch.encode_predicates('sparse') # return list/np array of ints
         device = next(self.asker.parameters()).device
-        tensor_idx = torch.tensor(predicate_idx, device=device, dtype=torch.long)
-        if tensor_idx.numel() > 0:
-            min_idx = int(tensor_idx.min().item())
-            max_idx = int(tensor_idx.max().item())
-            if min_idx < 0 or max_idx >= self.asker.predicate_encoder.num_embeddings:
-                raise ValueError(
-                    f"_alex_input predicate_idx out of range: min={min_idx} max={max_idx} "
-                    f"(num_embeddings={self.asker.predicate_encoder.num_embeddings})"
-                )
-        if not torch.isfinite(tensor_idx).all():
-            raise ValueError("_alex_input predicate_idx contains non-finite values")
-        return tensor_idx
+        return torch.tensor(predicate_idx, device=device, dtype=torch.long)
 
     # batch: Batch
     def _beth_input(self, batch):

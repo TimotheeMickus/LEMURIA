@@ -47,8 +47,6 @@ def do(args):
         # Creates the model.
         model = AlexBeth(args, autologger, data_loader, message_dump_dir)
         model = model.to(args.device)
-        # Verify parameters after device transfer.
-        model._assert_finite_params()
 
         if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)
@@ -157,6 +155,8 @@ def get_args(remaining_args=None):
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
     args = arg_parser.parse_args(remaining_args)
+    if args.debug and not args.log_debug:
+        args.log_debug = True
     if not args.quiet:
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)
