@@ -399,12 +399,14 @@ class failureBasedDistribution():
 # Then, it generates Predicates from their combinations (e.g. P0-v0, (¬(P0-v0)∧P1-v0)).
 # From these, builds a global vocabulary for graph nodes and edges used to tensorise candidates.
 class Dataset():
-    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False):
+    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
         self.device = device
         self.batch_size = batch_size
         self.allow_indeterminate = allow_indeterminate
         self.num_candidates = num_candidates
         self.candidate_sampling = candidate_sampling
+        # Creates an overfitting dataset (memorisable)
+        self.overfit = overfit
 
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
         self.properties = list() # list[Property]
@@ -421,6 +423,8 @@ class Dataset():
         self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules
         self.nb_categories = len(self.predicates) 
+        # Overfit pool (fixed predicates + fixed candidates/truths)
+        self._overfit_items = None
 
         # Stores predicates as tensors.
         self.object_token='<obj>'
@@ -444,6 +448,9 @@ class Dataset():
         # Global edge vocabulary
         edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
         self.edge_i2s, self.edge_s2i = self._vocabulary(edge_labels, unknown=None)
+
+        if self.overfit:
+            self._init_overfit_pool()
 
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int
@@ -513,6 +520,9 @@ class Dataset():
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
         for _ in range(size):
+            if self.overfit:
+                pred_idx, predicate, candidates, truths = random.choice(self._overfit_items)
+                batch.append((pred_idx, predicate, list(candidates), list(truths)))
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
 
@@ -645,9 +655,30 @@ class Dataset():
 
         return count
 
+    # Build a fixed predicate pool with fixed candidates/truths for overfit tests.
+    def _init_overfit_pool(self):
+        # Pick a fixed pool of predicates.
+        pool_size = min(100, len(self.predicates))
+        # Randomly sample that many predicate indices (once).
+        pool_indices = random.sample(range(len(self.predicates)), k=pool_size)
+        items = []
+        for pred_idx in pool_indices:
+            predicate = self.predicates[pred_idx]
+            if self.candidate_sampling == 'balanced':
+                candidates, truths = self._sample_balanced_candidates(predicate, self.num_candidates, self.allow_indeterminate)
+            else:
+                candidates = []
+                truths = []
+                for _ in range(self.num_candidates):
+                    candidate = self.generateCandidate(allow_indeterminate=self.allow_indeterminate)
+                    candidates.append(candidate)
+                    truths.append(1 if predicate.check(candidate) == 1 else 0)
+            items.append((pred_idx, predicate, candidates, truths))
+        self._overfit_items = items
+
 
 def get_data_loader(args):
-    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling)
+    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
     dataset.print_info()
 
     return dataset
