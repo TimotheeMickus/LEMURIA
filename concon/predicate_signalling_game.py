@@ -36,8 +36,20 @@ def do(args):
         args.edge_vocab_size = len(data_loader.edge_i2s)
         if args.graph_d_model is None:
             args.graph_d_model = args.hidden_size
+
+        # Adjust graph defaults based on model size.
         if args.graph_d_hidden is None:
             args.graph_d_hidden = args.graph_d_model * 2
+        elif args.graph_d_hidden < args.graph_d_model and not args.quiet:
+            print(f"[warn] graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.", flush=True)
+
+        if args.graph_d_model % args.graph_num_heads != 0:
+            # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
+            max_heads = min(8, args.graph_d_model)
+            safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
+            if not args.quiet:
+                print(f"[warn] graph_num_heads ({args.graph_num_heads}) does not divide graph_d_model ({args.graph_d_model}); using {safe_heads}.", flush=True)
+            args.graph_num_heads = safe_heads
         
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
@@ -86,6 +98,7 @@ def get_args(remaining_args=None):
     group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
     group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
     group.add_argument('--allow_indeterminate', help='whether to allow indeterminate (neither true nor false) values in candidates', action='store_true')
+    group.add_argument('--overfit', help='use a fixed small predicate/candidate pool to test memorization', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--num_candidates', help='number of candidates per predicate instance', default=10, type=int)
     group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='random')
