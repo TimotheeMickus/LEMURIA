@@ -122,7 +122,7 @@ class AlexBeth(Game):
         node = torch.tensor(batch.node_idx, device=device, dtype=torch.long)
         edge = torch.tensor(batch.edge_idx, device=device, dtype=torch.long)
         sizes = torch.tensor(batch.graph_sizes, device=device, dtype=torch.long)
-        return {'node_idx': node, 'edge_idx': edge, 'graph_sizes': sizes}
+        return {'node_idx': node, 'edge_idx': edge, 'graph_size': sizes}
 
     def __call__(self, batch):
         """

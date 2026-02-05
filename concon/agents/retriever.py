@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .agent import Agent
-from ..utils.modules import MessageEncoder, CandidateAverager
+from ..utils.modules import MessageEncoder, CandidateAverager, PredicateGraphEncoder
 from ..utils import misc
 
 # Structure for outcomes
@@ -33,7 +33,7 @@ class Retriever(Agent):
     # candidates: dict with 
     #   - node_idx: (batch, n_candidates, max_nodes)
     #   - edge_idx: (batch, n_candidates, max_nodes, max_nodes)
-    #   - graph_sizes: (batch, n_candidates)
+    #   - graph_size: (batch, n_candidates)
     # message: (batch, max_msg_len) token IDs
     # length: (batch, 1) message lengths
     # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
@@ -44,7 +44,7 @@ class Retriever(Agent):
     # candidate_tensors: dict with 
     #   - node_idx: (batch, n_candidates, max_nodes)
     #   - edge_idx: (batch, n_candidates, max_nodes, max_nodes)
-    #   - graph_sizes: (batch, n_candidates)
+    #   - graph_size: (batch, n_candidates)
     # encoded_messages: tensor of shape (batch, hidden size)
     # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
     def aux_forward(self, candidate_tensors, encoded_message, use_spigot):
@@ -89,8 +89,24 @@ class Retriever(Agent):
         has_shared_param = (candidate_encoder is not None) or (symbol_embeddings is not None)
         
         if candidate_encoder is None:
-            # TODO in the future test PredicateGraphEncoder 
-            candidate_encoder = CandidateAverager(node_vocab_size=args.node_vocab_size, hidden_size=args.hidden_size, padding_id=args.node_padding_id)
+            if args.candidate_encoder == "averager":
+                candidate_encoder = CandidateAverager(
+                    node_vocab_size=args.node_vocab_size, 
+                    hidden_size=args.hidden_size, 
+                    padding_id=args.node_padding_id
+                )
+            elif args.candidate_encoder == "graph":
+                candidate_encoder = PredicateGraphEncoder(
+                    node_vocab_size=args.node_vocab_size,
+                    edge_vocab_size=args.edge_vocab_size,
+                    num_layers=args.graph_num_layers,
+                    d_model=args.graph_d_model,
+                    num_heads=args.graph_num_heads,
+                    d_hidden=args.graph_d_hidden,
+                    dropout=args.graph_dropout,
+                    use_norm=not args.graph_no_norm
+                )
+                
         message_encoder = MessageEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
         
         return cls(candidate_encoder, message_encoder, args, has_shared_param)
