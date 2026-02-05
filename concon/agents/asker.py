@@ -28,7 +28,23 @@ class Asker(Agent):
             Output:
                 `Outcome`, where `action` is the produced signal. (assigned as message, naming mismatch)
         """
+        if not torch.isfinite(self.predicate_encoder.weight).all():
+            bad_rows = (~torch.isfinite(self.predicate_encoder.weight)).any(dim=1)
+            bad_idxs = bad_rows.nonzero(as_tuple=False).view(-1)[:10].tolist()
+            raise ValueError(f"predicate_encoder has non-finite rows (showing up to 10): {bad_idxs}")
+        if predicate_idx.numel() > 0:
+            min_idx = int(predicate_idx.min().item())
+            max_idx = int(predicate_idx.max().item())
+            if min_idx < 0 or max_idx >= self.predicate_encoder.num_embeddings:
+                raise ValueError(
+                    f"predicate_idx out of range: min={min_idx} max={max_idx} "
+                    f"(num_embeddings={self.predicate_encoder.num_embeddings})"
+                )
         encoded_predicate = self.predicate_encoder(predicate_idx) # Shape: (number of predicate indices)
+        if not torch.isfinite(encoded_predicate).all():
+            bad_rows = (~torch.isfinite(encoded_predicate)).any(dim=1)
+            bad_pred_idxs = predicate_idx[bad_rows].tolist()[:10]
+            raise ValueError(f"encoded_predicate non-finite for predicate_idx (showing up to 10): {bad_pred_idxs}")
         outputs = self.message_decoder(encoded_predicate)
 
         outcome = Outcome(

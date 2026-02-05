@@ -47,6 +47,8 @@ def do(args):
         # Creates the model.
         model = AlexBeth(args, autologger, data_loader, message_dump_dir)
         model = model.to(args.device)
+        # Verify parameters after device transfer.
+        model._assert_finite_params()
 
         if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)

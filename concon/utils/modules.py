@@ -162,6 +162,15 @@ class MessageDecoder(nn.Module):
     # encoded: tensor of shape (batch size, encoding size)
     def forward(self, encoded):
         # Initialisation
+        if not torch.isfinite(encoded).all():
+            nan_count = torch.isnan(encoded).sum().item()
+            inf_count = torch.isinf(encoded).sum().item()
+            raise ValueError(f"MessageDecoder input contains non-finite values: nan={nan_count} inf={inf_count}")
+        if not torch.isfinite(self.symbol_embeddings.weight).all():
+            nan_count = torch.isnan(self.symbol_embeddings.weight).sum().item()
+            inf_count = torch.isinf(self.symbol_embeddings.weight).sum().item()
+            raise ValueError(f"MessageDecoder embeddings contain non-finite values: nan={nan_count} inf={inf_count}")
+
         last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
         cell = self.cell_proj(encoded).unsqueeze(0)
         hidden = self.hidden_proj(encoded).unsqueeze(0)
@@ -181,6 +190,10 @@ class MessageDecoder(nn.Module):
         for _ in range(self.max_msg_len):
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
+            if not torch.isfinite(output).all():
+                nan_count = torch.isnan(output).sum().item()
+                inf_count = torch.isinf(output).sum().item()
+                raise ValueError(f"MessageDecoder output contains non-finite values: nan={nan_count} inf={inf_count}")
             # Selects actions
             probs = F.softmax(output, dim=-1) # Shape: (batch size, (alphabet size + 1))
             dist = Categorical(probs)
