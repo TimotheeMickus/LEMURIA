@@ -149,7 +149,7 @@ def get_args(remaining_args=None):
     group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
-    group.add_argument('--candidate_encoder', help='candidate encoder type', choices=['averager', 'graph'], default='graph')
+    group.add_argument('--candidate_encoder', help='candidate encoder type', choices=['node_averager', 'graph_transformer'], default='node_averager')
     # Graph encoder parameters (used when --candidate_encoder=graph)
     group.add_argument('--graph_num_layers', help='number of graph transformer layers', type=int, default=2)
     group.add_argument('--graph_d_model', help='graph transformer model size (defaults to hidden_size)', type=int, default=None)
