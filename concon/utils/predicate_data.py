@@ -72,7 +72,6 @@ class Batch():
     # Transform a candidate into a graph dictionary,
     # one object with feature-value pairs, e.g. [{"P0": "v2", "P1", "v0"}].
     def _candidate_to_graph(self, c):
-        # TODO do not slit property-value pairs
         return [{p.name: v.name for p, v in c.prop2value.items() if v is not None}]
 
     def __eq__(self, other):

@@ -3,6 +3,5 @@ python -m concon --learning_rate  0.0001 --sampling_strategies different --const
 // With graph encoder and "simulating" (not really because of overfit) image game:
 python -m concon --do predicate_signalling_game --candidate_sampling balanced --properties 2-2-2-2-2 --max_depth 4 --use_baseline --batch_size 1048 --device cuda --steps_per_epoch 200 --epochs 10  --debug --no_negation --nontrivial_only --num_candidates 2 --candidate_encoder graph_transformer --min_depth 4 --learning_rate 0.0001 --hidden_size 48
 
-
 // With averager and unary predicates
 python -m concon --do predicate_signalling_game --candidate_sampling random --properties 2-2-2-2-2 --max_depth 1 --use_baseline --batch_size 1048 --device cuda --steps_per_epoch 200 --epochs 10  --debug --no_negation --nontrivial_only --num_candidates 2 --candidate_encoder node_averager --learning_rate 0.00005 --hidden_size 48
