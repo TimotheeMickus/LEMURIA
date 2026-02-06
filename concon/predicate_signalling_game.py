@@ -34,6 +34,22 @@ def do(args):
         args.node_vocab_size = len(data_loader.node_i2s)
         args.node_padding_id = data_loader.node_s2i[data_loader.padding_token]
         args.edge_vocab_size = len(data_loader.edge_i2s)
+        if args.graph_d_model is None:
+            args.graph_d_model = args.hidden_size
+
+        # Adjust graph defaults based on model size.
+        if args.graph_d_hidden is None:
+            args.graph_d_hidden = args.graph_d_model * 2
+        elif args.graph_d_hidden < args.graph_d_model and not args.quiet:
+            print(f"[warn] graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.", flush=True)
+
+        if args.graph_d_model % args.graph_num_heads != 0:
+            # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
+            max_heads = min(8, args.graph_d_model)
+            safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
+            if not args.quiet:
+                print(f"[warn] graph_num_heads ({args.graph_num_heads}) does not divide graph_d_model ({args.graph_d_model}); using {safe_heads}.", flush=True)
+            args.graph_num_heads = safe_heads
         
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
@@ -83,6 +99,7 @@ def get_args(remaining_args=None):
     group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
     group.add_argument('--allow_indeterminate', help='whether to allow indeterminate (neither true nor false) values in candidates', action='store_true')
     group.add_argument('--overfit', help='use a fixed small predicate/candidate pool to test memorization', action='store_true')
+    group.add_argument('--overfit', help='use a fixed small predicate/candidate pool to test memorization', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--num_candidates', help='number of candidates per predicate instance', default=10, type=int)
     group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='random')
@@ -129,6 +146,14 @@ def get_args(remaining_args=None):
     group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
+    group.add_argument('--candidate_encoder', help='candidate encoder type', choices=['averager', 'graph'], default='averager')
+    # Graph encoder parameters (used when --candidate_encoder=graph)
+    group.add_argument('--graph_num_layers', help='number of graph transformer layers', type=int, default=2)
+    group.add_argument('--graph_d_model', help='graph transformer model size (defaults to hidden_size)', type=int, default=None)
+    group.add_argument('--graph_num_heads', help='number of attention heads', type=int, default=4)
+    group.add_argument('--graph_d_hidden', help='graph transformer feed-forward size (defaults to 2*graph_d_model)', type=int, default=None)
+    group.add_argument('--graph_dropout', help='graph transformer dropout', type=float, default=0.1)
+    group.add_argument('--graph_no_norm', help='disable layer norm in graph encoder', action='store_true')
     group.add_argument('--blind_candidates', help='debug: retriever ignores candidate features (scores become constant across candidates)', action='store_true')
     group.add_argument('--blind_message', help='debug: retriever ignores message embedding', action='store_true')
 
@@ -146,6 +171,8 @@ def get_args(remaining_args=None):
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
     args = arg_parser.parse_args(remaining_args)
+    if args.debug and not args.log_debug:
+        args.log_debug = True
     if not args.quiet:
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)

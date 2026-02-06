@@ -30,16 +30,18 @@ class Batch():
     # Tensorize this batch (using Dataset vocabulary)
     def tensorize(self, dataset):
         # convert nested candidates to graphs
+        # graphs: list[batch] of list[num_candidates] of graph objects (list[dict])
         graphs = [[self._candidate_to_graph(c) for c in candidate_list] for candidate_list in self.candidate]
 
         nl_s2i = dataset.node_s2i
         el_s2i = dataset.edge_s2i
 
-        node_idx = []
-        edge_idx = []
-        graph_sizes = []
+        node_idx = []    # (batch, num_candidates, max_nodes)
+        edge_idx = []    # (batch, num_candidates, max_nodes, max_nodes)
+        graph_sizes = [] # (batch, num_candidates)
 
         # take the largest total node count across all graphs
+        # padding_length: max_nodes (int)
         padding_length = max(sum(len(o) + 1 for o in g) for item in graphs for g in item) if graphs else 1
 
         # This block tensorizes each candidate graph per batch item.
@@ -47,6 +49,9 @@ class Batch():
         for item in graphs:
             item_nodes, item_edges, item_sizes = [], [], []
             for g in item:
+                # n: (max_nodes,) node indices
+                # e: (max_nodes, max_nodes) edge indices
+                # s: graph size (number of nodes before padding)
                 n, e, s = dataset._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
                 item_nodes.append(n)
                 item_edges.append(e)
@@ -55,13 +60,18 @@ class Batch():
             edge_idx.append(item_edges)
             graph_sizes.append(item_sizes)
 
+        # nested lists
+        # node_idx: list[batch][num_candidates][max_nodes]
+        # edge_idx: list[batch][num_candidates][max_nodes][max_nodes]
+        # graph_sizes: list[batch][num_candidates]
         self.node_idx = node_idx
         self.edge_idx = edge_idx
         self.graph_sizes = graph_sizes
 
         return self  # allow chaining
     
-    # Transform a candidate into a graph dictionary
+    # Transform a candidate into a graph dictionary,
+    # one object with feature-value pairs, e.g. [{"P0": "v2", "P1", "v0"}].
     def _candidate_to_graph(self, c):
         return [{p.name: v.name.split('-',1)[1] for p, v in c.prop2value.items() if v is not None}]
 
@@ -605,8 +615,8 @@ class Dataset():
     
     # Sample candidates with balanced truth values so retriever cannot predict a "default" class.
     # Here, we determine the number of candidates to sample for each truth-value,
-    # then we sample them through a helper if available, 
-    # if not we add random candidates to fill the quota.
+    # then we sample them through a helper if available, if not we add random candidates to fill the quota.
+    # We shuffle candidates to avoid behaviours related to position.
     def _sample_balanced_candidates(self, predicate, num_candidates, allow_indeterminate):
         # Determine number of true/false.
         num_true = num_candidates // 2
@@ -629,11 +639,12 @@ class Dataset():
         combined = list(zip(candidates, truths))
         random.shuffle(combined)
         candidates, truths = zip(*combined)
-        
+
         return candidates, truths
 
     # Append up to n candidates that satisfy or falsify (1/-1) the predicate.
     # predicate.build() if available from generated set, then randomly sample until we hit n or a max attempt cap.
+    # Candidate list is updated in place.
     def _fill_target(self, predicate, target, n, allow_indeterminate, candidates, truths):
         target_list = predicate.build(target=target)
 
