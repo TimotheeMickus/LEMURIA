@@ -72,7 +72,6 @@ class Retriever(Agent):
 
         # Scores (logits) the targets.
         scores = torch.bmm(encoded_candidates, encoded_message).squeeze(-1) # Shape: (batch size, num_candidates)
-        print('in retriever\n', scores) # DEBUG
         outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
 
         return outcome

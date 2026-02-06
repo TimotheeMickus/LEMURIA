@@ -138,9 +138,6 @@ class AlexBeth(Game):
         asker = self.asker
         retriever = self.retriever
 
-        print('in alex_to_beth\n', batch) # DEBUG
-        batch.tensorize(self._dataset) # DEBUG
-        print(batch.pretty_print(self._dataset)) # DEBUG
         asker_outcome = asker(self._alex_input(batch))
         retriever_outcome = retriever(self._beth_input(batch), *asker_outcome.action)
 

@@ -245,11 +245,13 @@ class MultiHeadAttention(nn.Module):
         # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_head) # [batch size, num heads, num nodes, num nodes]
         if(e is not None): scores = scores + e # [batch size, num heads, num nodes, num nodes]
-        if(attn_mask is not None):
-            # Use a large negative value instead of -inf to avoid NaNs when all positions are masked.
-            scores = scores.masked_fill((attn_mask == False), float('-inf'))
+        
+        if(attn_mask is not None): scores = scores.masked_fill((attn_mask == False), float('-inf'))
+        
         probs = torch.softmax(scores, dim=-1) # [batch size, num heads, num nodes, num nodes]
+        if(attn_mask is not None): probs = probs.masked_fill((attn_mask == False), 0.0)
         #print(probs) # DEBUG
+
         return torch.matmul(probs, v) # [batch size, num heads, num nodes, d_head]
 
     def forward(self, node_emb, edge_emb, attn_mask):
@@ -370,13 +372,9 @@ class GraphTransformerEncoder(nn.Module):
         else: node_mask = None
 
         node_emb = self.node_embedding(node_idx) # [batch size, num nodes, d_model]
-        print('in graphenc 1\n', node_idx) # DEBUG
-        print('in graphenc 1\n', node_emb) # DEBUG
         node_emb = self.dropout(node_emb) # [batch size, num nodes, d_model]
-        print('in graphenc 3\n', node_emb) # DEBUG
 
         edge_emb = self.edge_embedding(edge_idx) # [batch size, num nodes, num nodes, d_model]
-        print('still\n', edge_emb) # DEBUG
 
         for layer in self.layers:
             node_emb = layer(node_emb=node_emb, edge_emb=self.dropout(edge_emb), node_mask=node_mask, attn_mask=attn_mask) # [batch size, num nodes, d_model]
@@ -418,9 +416,6 @@ class CandidateGraphEncoder(nn.Module):
 
             pooled = node_emb.sum(dim=1) # [batch size * num_candidates, d_model]
             pooled = pooled / flat_graph_size.unsqueeze(-1) # [batch size * num_candidates, d_model]
-        print('node_emb', node_emb, '\n\n\n') # DEBUG
-        print('output of the cqndidqte grqp encoder', pooled.view(batch_size, num_candidates, -1), '\n\n\n') # DEBUG
-        input()  # DEBUG
         return pooled.view(batch_size, num_candidates, -1) # [batch, num_candidates, d_model]
 
 
