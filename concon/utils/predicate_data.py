@@ -73,7 +73,8 @@ class Batch():
     # Transform a candidate into a graph dictionary,
     # one object with feature-value pairs, e.g. [{"P0": "v2", "P1", "v0"}].
     def _candidate_to_graph(self, c):
-        return [{p.name: v.name.split('-',1)[1] for p, v in c.prop2value.items() if v is not None}]
+        # TODO do not slit property-value pairs
+        return [{p.name: v.name for p, v in c.prop2value.items() if v is not None}]
 
     def __eq__(self, other):
         if(not isinstance(other, Batch)): return NotImplemented
@@ -449,7 +450,7 @@ class Dataset():
         for property in self.properties:
             for value in property.values:
                 # Store ("Px", "vx") pairs as node labels for features
-                node_labels.add((property.name, value.name.split('-',1)[1]))
+                node_labels.add((property.name, value.name))
 
         self.node_i2s, self.node_s2i = self._vocabulary(node_labels, unknown=None)
         self.node_i2s.append(self.padding_token)
