@@ -215,7 +215,7 @@ class CandidateAverager(nn.Module):
         emb = self.node_emb(node_idx)  # (batch, num_candidates, max_nodes, hidden)
         mask = (node_idx != self.padding_id).unsqueeze(-1)
         summed = (emb * mask).sum(dim=2)
-        counts = mask.sum(dim=2).clamp_min(1.0)
+        counts = mask.sum(dim=2) #.clamp_min(1.0)
         return summed / counts  # (batch, num_candidates, hidden)
     
     
@@ -301,8 +301,8 @@ class GraphTransformerEncoderLayer(nn.Module):
         # node_mask: None | boolean tensor of shape [batch size, num nodes], indicates for each node whether it is an actual node (True) or not (False)
         # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
 
-        # Masks padding nodes. This is useful to avoid problems in the attention layer.
-        if(node_mask is not None): node_emb = node_emb.masked_fill((node_mask == False).unsqueeze(-1), 0.0) # [batch size, num nodes, d_model]
+        # Masks padding nodes. This is useful (or not?) to avoid problems in the attention layer.
+        #if(node_mask is not None): node_emb = node_emb.masked_fill((node_mask == False).unsqueeze(-1), 0.0) # [batch size, num nodes, d_model]
 
         # Self-attention
         attn_output = self.self_attn(node_emb=node_emb, edge_emb=edge_emb, attn_mask=attn_mask) # [batch size, num nodes, d_model]
@@ -320,7 +320,7 @@ class GraphTransformerEncoderLayer(nn.Module):
         y = x + self.dropout(ff_output) # [batch size, num nodes, d_model]
         if(self.norm2 is not None): y = self.norm2(y) # [batch size, num nodes, d_model]
 
-        # Masks padding nodes. This is useful to avoid problems in possible subsequent attention layers.
+        # Masks padding nodes. This is useful (or not?) to avoid problems in possible subsequent attention layers.
         #if(node_mask is not None): y = y.masked_fill((node_mask == False).unsqueeze(-1), 0.0) # [batch size, num nodes, d_model]
 
         return y # [batch size, num nodes, d_model]

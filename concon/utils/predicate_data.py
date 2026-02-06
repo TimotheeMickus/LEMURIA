@@ -412,7 +412,7 @@ class failureBasedDistribution():
 # Then, it generates Predicates from their combinations (e.g. P0-v0, (¬(P0-v0)∧P1-v0)).
 # From these, builds a global vocabulary for graph nodes and edges used to tensorise candidates.
 class Dataset():
-    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
+    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
         self.device = device
         self.batch_size = batch_size
         self.allow_indeterminate = allow_indeterminate
@@ -433,7 +433,7 @@ class Dataset():
             self.values.extend(prop.values)
 
         # Generates predicates.
-        self.predicates = self.generateAllPredicates(max_depth=max_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
+        self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules
         self.nb_categories = len(self.predicates) 
         # Overfit pool (fixed predicates + fixed candidates/truths)
@@ -466,9 +466,10 @@ class Dataset():
             self._init_overfit_pool()
 
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
-    # max_depth: int
+    # max_depth: int (a single node is of depth one)
+    # min_depth: int
     # Outputs a ndarray[Predicate]
-    def generateAllPredicates(self, max_depth, nontrivial_only, no_negation, no_conjunction):
+    def generateAllPredicates(self, max_depth, min_depth, nontrivial_only, no_negation, no_conjunction):
         depth2predicates = [] # list[list[Predicate]]
         depth2predicates.append([value for value in self.values if (not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
 
@@ -482,7 +483,7 @@ class Dataset():
             neg = prev if not no_negation else 0
             conj = prev * total_prev if not no_conjunction else 0
             est_by_depth[d] = neg + conj
-        print("Upper-bound predicate counts by depth:", est_by_depth, "total:", sum(est_by_depth))
+        print("Upper-bound predicate counts by depth (pre-filter):", est_by_depth, "total:", sum(est_by_depth))
 
         while(len(depth2predicates) < max_depth):
             predicates = list() # list[Predicate]
@@ -509,7 +510,7 @@ class Dataset():
             depth2predicates.append(predicates)
             print(f"Depth: {len(depth2predicates)}: {len(predicates)} predicates")
 
-        return np.array(list(itertools.chain.from_iterable(depth2predicates))) # ndarray[Predicate]
+        return np.array(list(itertools.chain.from_iterable(depth2predicates[min_depth-1:]))) # ndarray[Predicate]
 
     def print_info(self):
         print(f"{len(self.properties)} properties:")
@@ -694,7 +695,7 @@ class Dataset():
 
 
 def get_data_loader(args):
-    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
+    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, min_depth=args.min_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
     dataset.print_info()
 
     return dataset

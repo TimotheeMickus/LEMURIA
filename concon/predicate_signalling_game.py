@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import torch
+import json
 
 from .games import AlexBeth
 from .utils.predicate_data import get_data_loader
@@ -55,7 +56,9 @@ def do(args):
 
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
-        
+        # Save hyperparameters
+        with open(run_summary_dir / "hparams.json", "w") as f:
+            json.dump(vars(args), f, indent=2, default=str)
         # Creates the model.
         model = AlexBeth(args, autologger, data_loader, message_dump_dir)
         model = model.to(args.device)
@@ -94,6 +97,7 @@ def get_args(remaining_args=None):
     group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
     group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
     group.add_argument('--max_depth', help='the depth limit of the predicates considered', default=3, type=int)
+    group.add_argument('--min_depth', help='minimum predicate depth to include', type=int, default=1)
     group.add_argument('--nontrivial_only', help='whether to use only predicates that are both satisfiable and falsifiable', action='store_true')
     group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
     group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
