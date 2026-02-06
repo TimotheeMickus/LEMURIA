@@ -42,15 +42,16 @@ def do(args):
         if args.graph_d_hidden is None:
             args.graph_d_hidden = args.graph_d_model * 2
         elif args.graph_d_hidden < args.graph_d_model and not args.quiet:
-            print(f"[warn] graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.", flush=True)
+            raise ValueError(f"graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.")
 
         if args.graph_d_model % args.graph_num_heads != 0:
-            # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
-            max_heads = min(8, args.graph_d_model)
-            safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
-            if not args.quiet:
-                print(f"[warn] graph_num_heads ({args.graph_num_heads}) does not divide graph_d_model ({args.graph_d_model}); using {safe_heads}.", flush=True)
-            args.graph_num_heads = safe_heads
+            raise ValueError(f"graph_d_model ({args.graph_d_model}) % graph_num_heads ({args.graph_num_heads}) must == 0.")
+            # # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
+            # max_heads = min(8, args.graph_d_model)
+            # safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
+            # if not args.quiet:
+            #     print(f"[warn] graph_num_heads ({args.graph_num_heads}) does not divide graph_d_model ({args.graph_d_model}); using {safe_heads}.", flush=True)
+            # args.graph_num_heads = safe_heads
         
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
