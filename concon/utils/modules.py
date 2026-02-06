@@ -72,11 +72,6 @@ class MultiHeadAttention(nn.Module):
             # Use a large negative value instead of -inf to avoid NaNs when all positions are masked.
             scores = scores.masked_fill((attn_mask == False), float('-inf'))
         probs = torch.softmax(scores, dim=-1) # [batch size, num heads, num nodes, num nodes]
-        if(attn_mask is not None):
-            probs = probs * attn_mask.float()
-            denom = probs.sum(dim=-1, keepdim=True)
-            # If a row has no valid entries (or contains NaNs), force it to zeros.
-            probs = torch.where(denom > 0, probs / denom.clamp_min(1e-9), torch.zeros_like(probs))
         #print(probs) # DEBUG
         return torch.matmul(probs, v) # [batch size, num heads, num nodes, d_head]
 

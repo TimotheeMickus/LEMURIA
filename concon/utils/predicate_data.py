@@ -623,18 +623,19 @@ class Dataset():
         num_true = num_candidates // 2
         num_false = num_candidates - num_true
 
-        candidates = []
-        truths = []
+        candidates = [] # list[Candidate]
+        truths = [] # list[int]
 
-        # Fill positive and negative slots separately.
+        # Adds up to num_true candidates satisfying the predicate, selected from predicate.build(1). Same for negative candidates.
+        # (modify candidates and truths in place)
         self._fill_target(predicate, 1, num_true, allow_indeterminate, candidates, truths)
         self._fill_target(predicate, -1, num_false, allow_indeterminate, candidates, truths)
 
-        # If predicates don't have enough satisfying candidates, add random samples.
+        # If not enough candidates have been generated, this adds random samples.
         while len(candidates) < num_candidates:
             candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
             candidates.append(candidate)
-            truths.append(1 if predicate.check(candidate) == 1 else 0)
+            truths.append(predicate.check(candidate))
 
         # Shuffle candidates to avoid strategies based on candidate positions.
         combined = list(zip(candidates, truths))
@@ -645,9 +646,9 @@ class Dataset():
 
     # Append up to n candidates that satisfy or falsify (1/-1) the predicate.
     # predicate.build() if available from generated set, then randomly sample until we hit n or a max attempt cap.
-    # Candidate list is updated in place.
+    # Candidate/truth list is updated in place.
     def _fill_target(self, predicate, target, n, allow_indeterminate, candidates, truths):
-        target_list = predicate.build(target=target)
+        target_list = predicate.build(target=target) # list[Candidate]
 
         count = 0
         while count < n and target_list:
@@ -655,6 +656,7 @@ class Dataset():
             truths.append(1 if target == 1 else 0)
             count += 1
 
+        # TODO in fqct, there is a better way of doing this, by extending candidates returned by predicate.build.
         attempts = 0
         max_attempts = n * 50
         while count < n and attempts < max_attempts:
@@ -672,8 +674,8 @@ class Dataset():
         # Pick a fixed pool of predicates.
         pool_size = min(100, len(self.predicates))
         # Randomly sample that many predicate indices (once).
-        pool_indices = random.sample(range(len(self.predicates)), k=pool_size)
-        items = []
+        pool_indices = random.sample(range(len(self.predicates)), k=pool_size) # list[int]
+        items = [] # list[(int, Predicate, list[Candidate], list[int])]
         for pred_idx in pool_indices:
             predicate = self.predicates[pred_idx]
             if self.candidate_sampling == 'balanced':

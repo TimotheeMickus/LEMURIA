@@ -145,8 +145,6 @@ class AlexBeth(Game):
 
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
-        # TODO: change return signature to loss, {dict of things to log}
-
         asker_outcome, retriever_outcome = self(batch)
         truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device)
 
@@ -158,6 +156,8 @@ class AlexBeth(Game):
         (retriever_loss, _, retriever_entropy) = self.compute_retriever_loss(retriever_outcome.scores, truth_targets, return_entropy=True)
 
         loss = asker_loss + retriever_loss
+        if self.debug and torch.isnan(loss):
+            print(f"[warn] loss is {loss}")
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
         msg_length = asker_outcome.action[1].float().mean()
