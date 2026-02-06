@@ -183,7 +183,7 @@ class Property():
         return self.name
 
 
-# A predicate is equivalent to a first-order logic formula.
+# A predicate is equivalent to a propositional logic formula.
 class Predicate():
     def __init__(self):
         self._build_cache = dict() # dict[int, list[Candidate]]
