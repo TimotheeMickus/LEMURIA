@@ -102,7 +102,7 @@ class Retriever(Agent):
                     hidden_size=args.hidden_size, 
                     padding_id=args.node_padding_id
                 )
-            elif args.candidate_encoder == "graph":
+            elif args.candidate_encoder == "graph_transformer":
                 candidate_encoder = CandidateGraphEncoder(
                     node_vocab_size=args.node_vocab_size,
                     edge_vocab_size=args.edge_vocab_size,
