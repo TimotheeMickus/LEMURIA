@@ -191,7 +191,7 @@ class NoiseAdder(nn.Module):
     def from_args(cls, args):
         return cls()
     
-class CandidateAverager(nn.Module):
+class CandidateNodeAverager(nn.Module):
     """
     Rudimentary candidate encoder that averages embedded node ids.
     Turns graph tensors into a fixed-size vector per candidate by embedding every node ID and averaging.

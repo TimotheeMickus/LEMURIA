@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .agent import Agent
-from ..utils.modules import MessageEncoder, CandidateAverager, CandidateGraphEncoder
+from ..utils.modules import MessageEncoder, CandidateNodeAverager, CandidateGraphEncoder
 from ..utils import misc
 
 # Structure for outcomes
@@ -97,7 +97,7 @@ class Retriever(Agent):
         
         if candidate_encoder is None:
             if args.candidate_encoder == "averager":
-                candidate_encoder = CandidateAverager(
+                candidate_encoder = CandidateNodeAverager(
                     node_vocab_size=args.node_vocab_size, 
                     hidden_size=args.hidden_size, 
                     padding_id=args.node_padding_id
