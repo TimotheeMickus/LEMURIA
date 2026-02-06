@@ -96,7 +96,7 @@ class Retriever(Agent):
         has_shared_param = (candidate_encoder is not None) or (symbol_embeddings is not None)
         
         if candidate_encoder is None:
-            if args.candidate_encoder == "averager":
+            if args.candidate_encoder == "node_averager":
                 candidate_encoder = CandidateNodeAverager(
                     node_vocab_size=args.node_vocab_size, 
                     hidden_size=args.hidden_size, 
