@@ -58,7 +58,7 @@ class AlexBeth(Game):
             parameters = it.chain(self.asker.parameters(), self.retriever.parameters())
 
         self._optim = build_optimizer(parameters, args.learning_rate)
-
+        
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
             # Currently, the asker and retriever's rewards are the same, but we could imagine a setting in which they are different.
@@ -138,6 +138,9 @@ class AlexBeth(Game):
         asker = self.asker
         retriever = self.retriever
 
+        print('in alex_to_beth\n', batch) # DEBUG
+        batch.tensorize(self._dataset) # DEBUG
+        print(batch.pretty_print(self._dataset)) # DEBUG
         asker_outcome = asker(self._alex_input(batch))
         retriever_outcome = retriever(self._beth_input(batch), *asker_outcome.action)
 

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .agent import Agent
-from ..utils.modules import MessageEncoder, CandidateAverager, PredicateGraphEncoder
+from ..utils.modules import MessageEncoder, CandidateAverager, CandidateGraphEncoder
 from ..utils import misc
 
 # Structure for outcomes
@@ -57,6 +57,7 @@ class Retriever(Agent):
             - msg_spigot: GradSpigot or None
         """
         # Encodes the candidates.
+        # TODO explicitate
         encoded_candidates = self.candidate_encoder(**candidate_tensors) # Shape: (batch_size, num_candidates, hidden_size)
         if self.blind_candidates:
             encoded_candidates = torch.zeros_like(encoded_candidates)
@@ -71,6 +72,7 @@ class Retriever(Agent):
 
         # Scores (logits) the targets.
         scores = torch.bmm(encoded_candidates, encoded_message).squeeze(-1) # Shape: (batch size, num_candidates)
+        print('in retriever\n', scores) # DEBUG
         outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
 
         return outcome
@@ -102,7 +104,7 @@ class Retriever(Agent):
                     padding_id=args.node_padding_id
                 )
             elif args.candidate_encoder == "graph":
-                candidate_encoder = PredicateGraphEncoder(
+                candidate_encoder = CandidateGraphEncoder(
                     node_vocab_size=args.node_vocab_size,
                     edge_vocab_size=args.edge_vocab_size,
                     num_layers=args.graph_num_layers,

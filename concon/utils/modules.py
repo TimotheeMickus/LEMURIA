@@ -42,63 +42,6 @@ class MultiHeadsClassifier:
 
         return hits, losses # Lists with one element per head
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads):
-        # d_model: Int
-        # num_heads: Int
-
-        super().__init__()
-
-        assert d_model % num_heads == 0
-        self.d_head = d_model // num_heads # output dim of each head
-        self.num_heads = num_heads
-
-        self.q_linear = nn.Linear(d_model, d_model)
-        self.k_linear = nn.Linear(d_model, d_model)
-        self.v_linear = nn.Linear(d_model, d_model)
-        self.e_linear = nn.Linear(d_model, self.num_heads)
-
-        self.out_linear = nn.Linear(d_model, d_model)
-
-    def attention(self, q, k, v, e, attn_mask):
-        # q: tensor of shape [batch size, num heads, num nodes, d_head]
-        # k: tensor of shape [batch size, num heads, num nodes, d_head]
-        # v: tensor of shape [batch size, num heads, num nodes, d_head]
-        # e: None | tensor of shape [batch size, num heads, num nodes, num nodes]
-        # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_head) # [batch size, num heads, num nodes, num nodes]
-        if(e is not None): scores = scores + e # [batch size, num heads, num nodes, num nodes]
-        if(attn_mask is not None):
-            # Use a large negative value instead of -inf to avoid NaNs when all positions are masked.
-            scores = scores.masked_fill((attn_mask == False), float('-inf'))
-        probs = torch.softmax(scores, dim=-1) # [batch size, num heads, num nodes, num nodes]
-        #print(probs) # DEBUG
-        return torch.matmul(probs, v) # [batch size, num heads, num nodes, d_head]
-
-    def forward(self, node_emb, edge_emb, attn_mask):
-        # node_emb: tensor of shape [batch size, num nodes, d_model]
-        # edge_emb: None | tensor of shape [batch size, num nodes, num nodes, d_model]
-        # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
-
-        batch_size = node_emb.size(0)
-        num_nodes = node_emb.size(1)
-
-        # Computes queries, keys and values.
-        q = self.q_linear(node_emb).view(batch_size, num_nodes, self.num_heads, self.d_head).transpose(1, 2) # [batch size, num heads, num nodes, d_head]
-        k = self.k_linear(node_emb).view(batch_size, num_nodes, self.num_heads, self.d_head).transpose(1, 2) # [batch size, num heads, num nodes, d_head]
-        v = self.v_linear(node_emb).view(batch_size, num_nodes, self.num_heads, self.d_head).transpose(1, 2) # [batch size, num heads, num nodes, d_head]
-
-        # Computes edge scores. (Each head cares differently about different types of edge, but without taking the nodes involved into account.)
-        if(edge_emb is not None): e = self.e_linear(edge_emb).permute(0, 3, 1, 2) # [batch size, num heads, num nodes, num nodes]
-        else: e = None
-
-        # Applies attention.
-        vectors = self.attention(q, k, v, e, attn_mask) # [batch size, num heads, num nodes, d_head]
-        #print(vectors) # DEBUG
-        # Concatenates the output of all heads.
-        concat = vectors.transpose(1, 2).reshape(batch_size, num_nodes, (self.num_heads * self.d_head)) # [batch size, num nodes, d_model]
-        # Applies the final linear projection.
-        return self.out_linear(concat) # [batch size, num nodes, d_model]
 
 # Message -> vector
 class MessageEncoder(nn.Module):
@@ -275,76 +218,64 @@ class CandidateAverager(nn.Module):
         counts = mask.sum(dim=2).clamp_min(1.0)
         return summed / counts  # (batch, num_candidates, hidden)
     
+    
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        # d_model: Int
+        # num_heads: Int
 
-class PredicateGraphEncoder(nn.Module):
-    def __init__(self, node_vocab_size, edge_vocab_size, num_layers, d_model, num_heads, d_hidden, dropout, use_norm=True):
         super().__init__()
-        self.node_embedding = nn.Embedding(node_vocab_size, d_model)
-        self.edge_embedding = nn.Embedding(edge_vocab_size, d_model)
-        self.layers = nn.ModuleList([GraphTransformerEncoderLayer(d_model, num_heads, d_hidden, dropout, use_norm) for _ in range(num_layers)])
-        self.dropout = nn.Dropout(dropout)
 
-    def num_heads(self):
-        return self.layers[0].num_heads()
+        assert d_model % num_heads == 0
+        self.d_head = d_model // num_heads # output dim of each head
+        self.num_heads = num_heads
 
-    def forward(self, node_idx, edge_idx, graph_size=None, attn_mask=None):
-        '''
-        Input:
-            node_idx: (B, C, N) node IDs for each candidate graph
-            edge_idx: (B, C, N, N) edge label IDs
-            graph_size: None | (B, C) number of valid nodes per graph
-            attn_mask: None | (B*C, H, N, N) attention mask for the transformer heads
-        Output:
-            (B, C, D) candidate embeddings, where D = d_model.
+        self.q_linear = nn.Linear(d_model, d_model)
+        self.k_linear = nn.Linear(d_model, d_model)
+        self.v_linear = nn.Linear(d_model, d_model)
+        self.e_linear = nn.Linear(d_model, self.num_heads)
 
-        The encoder embeds nodes and edges, applies L graph-transformer layers,
-        then pools node embeddings within each graph (masked mean) to yield one vector per candidate.
-        '''
-        # node_idx: (batch, num_candidates, num_nodes)
-        # edge_idx: (batch, num_candidates, num_nodes, num_nodes)
-        # graph_size: None | (batch, num_candidates) number of valid nodes per graph
-        # attn_mask: None | (batch*num_candidates, num_heads, num_nodes, num_nodes)
+        self.out_linear = nn.Linear(d_model, d_model)
 
-        batch_size = node_idx.size(0)
-        num_candidates = node_idx.size(1)
-        num_nodes = node_idx.size(2)
+    def attention(self, q, k, v, e, attn_mask):
+        # q: tensor of shape [batch size, num heads, num nodes, d_head]
+        # k: tensor of shape [batch size, num heads, num nodes, d_head]
+        # v: tensor of shape [batch size, num heads, num nodes, d_head]
+        # e: None | tensor of shape [batch size, num heads, num nodes, num nodes]
+        # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_head) # [batch size, num heads, num nodes, num nodes]
+        if(e is not None): scores = scores + e # [batch size, num heads, num nodes, num nodes]
+        if(attn_mask is not None):
+            # Use a large negative value instead of -inf to avoid NaNs when all positions are masked.
+            scores = scores.masked_fill((attn_mask == False), float('-inf'))
+        probs = torch.softmax(scores, dim=-1) # [batch size, num heads, num nodes, num nodes]
+        #print(probs) # DEBUG
+        return torch.matmul(probs, v) # [batch size, num heads, num nodes, d_head]
 
-        flat_node_idx = node_idx.view(batch_size * num_candidates, num_nodes)
-        flat_edge_idx = edge_idx.view(batch_size * num_candidates, num_nodes, num_nodes)
-        flat_graph_size = graph_size.view(-1) if graph_size is not None else None
+    def forward(self, node_emb, edge_emb, attn_mask):
+        # node_emb: tensor of shape [batch size, num nodes, d_model]
+        # edge_emb: None | tensor of shape [batch size, num nodes, num nodes, d_model]
+        # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
 
-        if(flat_graph_size is not None):
-          # Creates a boolean mask indicating where are the actual nodes. (True ~ actual node)
-          node_mask = torch.arange(num_nodes, device=flat_node_idx.device)[None, :] < flat_graph_size[:, None] # [batch size, num nodes]
+        batch_size = node_emb.size(0)
+        num_nodes = node_emb.size(1)
 
-          # Creates a boolean mask indicating that padding nodes cannot attend to or be attended by any node. (True ~ attention allowed)
-          row_idx = torch.arange(num_nodes, device=flat_node_idx.device).view(1, -1, 1) # [1, num nodes, 1]
-          col_idx = torch.arange(num_nodes, device=flat_node_idx.device).view(1, 1, -1) # [1, 1, num nodes]
-          gs = flat_graph_size.view(-1, 1, 1) # [batch size, 1, 1]
-          tmp_mask = (row_idx < gs) & (col_idx < gs) # [batch size, num nodes, num nodes]
-          tmp_mask = tmp_mask.unsqueeze(1).expand(flat_node_idx.size(0), self.num_heads(), num_nodes, num_nodes) # [batch size, num heads, num nodes, num nodes]
+        # Computes queries, keys and values.
+        q = self.q_linear(node_emb).view(batch_size, num_nodes, self.num_heads, self.d_head).transpose(1, 2) # [batch size, num heads, num nodes, d_head]
+        k = self.k_linear(node_emb).view(batch_size, num_nodes, self.num_heads, self.d_head).transpose(1, 2) # [batch size, num heads, num nodes, d_head]
+        v = self.v_linear(node_emb).view(batch_size, num_nodes, self.num_heads, self.d_head).transpose(1, 2) # [batch size, num heads, num nodes, d_head]
 
-          if(attn_mask is None): attn_mask = tmp_mask # [batch size, num heads, num nodes, num nodes]
-          else: attn_mask = attn_mask & tmp_mask # [batch size, num heads, num nodes, num nodes]
-        else: node_mask = None
+        # Computes edge scores. (Each head cares differently about different types of edge, but without taking the nodes involved into account.)
+        if(edge_emb is not None): e = self.e_linear(edge_emb).permute(0, 3, 1, 2) # [batch size, num heads, num nodes, num nodes]
+        else: e = None
 
-        node_emb = self.node_embedding(flat_node_idx) # [batch size, num nodes, d_model]
-        node_emb = self.dropout(node_emb) # [batch size, num nodes, d_model]
-
-        edge_emb = self.edge_embedding(flat_edge_idx) # [batch size, num nodes, num nodes, d_model]
-
-        for layer in self.layers:
-            node_emb = layer(node_emb=node_emb, edge_emb=self.dropout(edge_emb), node_mask=node_mask, attn_mask=attn_mask) # [batch size, num nodes, d_model]
-
-        if node_mask is None:
-            pooled = node_emb.mean(dim=1)
-        else:
-            mask = node_mask.float().unsqueeze(-1)
-            summed = (node_emb * mask).sum(dim=1)
-            counts = mask.sum(dim=1).clamp_min(1.0)
-            pooled = summed / counts
-
-        return pooled.view(batch_size, num_candidates, -1) # (batch, num_candidates, d_model)
+        # Applies attention.
+        vectors = self.attention(q, k, v, e, attn_mask) # [batch size, num heads, num nodes, d_head]
+        #print(vectors) # DEBUG
+        # Concatenates the output of all heads.
+        concat = vectors.transpose(1, 2).reshape(batch_size, num_nodes, (self.num_heads * self.d_head)) # [batch size, num nodes, d_model]
+        # Applies the final linear projection.
+        return self.out_linear(concat) # [batch size, num nodes, d_model]
 
 
 class GraphTransformerEncoderLayer(nn.Module):
@@ -374,6 +305,8 @@ class GraphTransformerEncoderLayer(nn.Module):
         # Self-attention
         attn_output = self.self_attn(node_emb=node_emb, edge_emb=edge_emb, attn_mask=attn_mask) # [batch size, num nodes, d_model]
 
+        # if(node_mask is not None): attn_output = attn_output.masked_fill((node_mask == False).unsqueeze(-1), 0.0) # [batch size, num nodes, d_model] # DEBUG
+
         # Dropout + residual connection + normalisation
         x = node_emb + self.dropout(attn_output) # [batch size, num nodes, d_model]
         if(self.norm1 is not None): x = self.norm1(x) # [batch size, num nodes, d_model]
@@ -389,6 +322,106 @@ class GraphTransformerEncoderLayer(nn.Module):
         #if(node_mask is not None): y = y.masked_fill((node_mask == False).unsqueeze(-1), 0.0) # [batch size, num nodes, d_model]
 
         return y # [batch size, num nodes, d_model]
+
+
+class GraphTransformerEncoder(nn.Module):
+    def __init__(self, node_vocab_size, edge_vocab_size, num_layers, d_model, num_heads, d_hidden, dropout, use_norm=True):
+        super().__init__()
+        self.node_embedding = nn.Embedding(node_vocab_size, d_model)
+        self.edge_embedding = nn.Embedding(edge_vocab_size, d_model)
+        self.layers = nn.ModuleList([GraphTransformerEncoderLayer(d_model, num_heads, d_hidden, dropout, use_norm) for _ in range(num_layers)])
+        self.dropout = nn.Dropout(dropout)
+
+    def num_heads(self):
+        return self.layers[0].num_heads()
+
+    def forward(self, node_idx, edge_idx, graph_size=None, attn_mask=None):
+        '''
+        Input:
+            node_idx: (B, N) node IDs for each node
+            edge_idx: (B, N, N) edge label IDs
+            graph_size: None | (B,) number of valid nodes per graph
+            attn_mask: None | (B, H, N, N) attention mask for the transformer heads
+        Output:
+            (B, N, D) candidate embeddings, where D = d_model.
+
+        The encoder embeds nodes and edges, applies L graph-transformer layers, yields one vector per node.
+        '''
+        # node_idx: tensor of shape [batch size, num nodes]
+        # edge_idx: tensor of shape [batch size, num nodes, num nodes]
+        # graph_size: None | int tensor of shape [batch size]
+        # attn_mask: None | boolean tensor of shape [batch size, num heads, num nodes, num nodes], indicates for each head and each pair of nodes whether the first can attend to the second (True) or not (False)
+        batch_size = node_idx.size(0)
+        num_nodes = node_idx.size(1)
+
+        if(graph_size is not None):
+          # Creates a boolean mask indicating where are the actual nodes. (True ~ actual node)
+          node_mask = torch.arange(num_nodes, device=node_idx.device)[None, :] < graph_size[:, None] # [batch size, num nodes]
+
+          # Creates a boolean mask indicating that padding nodes cannot attend to or be attended by any node. (True ~ attention allowed)
+          row_idx = torch.arange(num_nodes, device=node_idx.device).view(1, -1, 1) # [1, num nodes, 1]
+          col_idx = torch.arange(num_nodes, device=node_idx.device).view(1, 1, -1) # [1, 1, num nodes]
+          graph_size = graph_size.view(-1, 1, 1) # [batch size, 1, 1]
+          tmp_mask = (row_idx < graph_size) & (col_idx < graph_size) # [batch size, num nodes, num nodes]
+          tmp_mask = tmp_mask.unsqueeze(1).expand(batch_size, self.num_heads(), num_nodes, num_nodes) # [batch size, num heads, num nodes, num nodes]
+
+          if(attn_mask is None): attn_mask = tmp_mask # [batch size, num heads, num nodes, num nodes]
+          else: attn_mask = attn_mask & tmp_mask # [batch size, num heads, num nodes, num nodes]
+        else: node_mask = None
+
+        node_emb = self.node_embedding(node_idx) # [batch size, num nodes, d_model]
+        print('in graphenc 1\n', node_idx) # DEBUG
+        print('in graphenc 1\n', node_emb) # DEBUG
+        node_emb = self.dropout(node_emb) # [batch size, num nodes, d_model]
+        print('in graphenc 3\n', node_emb) # DEBUG
+
+        edge_emb = self.edge_embedding(edge_idx) # [batch size, num nodes, num nodes, d_model]
+        print('still\n', edge_emb) # DEBUG
+
+        for layer in self.layers:
+            node_emb = layer(node_emb=node_emb, edge_emb=self.dropout(edge_emb), node_mask=node_mask, attn_mask=attn_mask) # [batch size, num nodes, d_model]
+            
+        return node_emb # [batch size, num nodes, d_model]
+    
+
+class CandidateGraphEncoder(nn.Module):
+    def __init__(self, node_vocab_size, edge_vocab_size, num_layers, d_model, num_heads, d_hidden, dropout, use_norm=True):
+        super().__init__()
+        self.graph_encoder = GraphTransformerEncoder(node_vocab_size, edge_vocab_size, num_layers, d_model, num_heads, d_hidden, dropout, use_norm)
+
+    def forward(self, node_idx, edge_idx, graph_size=None):
+        '''
+        Input:
+            node_idx: (B, C, N) node IDs for each candidate graph
+            edge_idx: (B, C, N, N) edge label IDs
+            graph_size: None | (B, C) number of valid nodes per graph
+        Output:
+            (B, C, D) 
+        '''
+        # Flattens the batch and candidate dimensions.
+        batch_size = node_idx.size(0)
+        num_candidates = node_idx.size(1)
+        num_nodes = node_idx.size(2)
+
+        flat_node_idx = node_idx.view(batch_size * num_candidates, num_nodes) # [batch size * num_candidates, num_nodes]
+        flat_edge_idx = edge_idx.view(batch_size * num_candidates, num_nodes, num_nodes) # [batch size * num_candidates, num_nodes, num_nodes]
+        flat_graph_size = graph_size.view(-1) if graph_size is not None else None # [batch size * num_candidates] | None
+
+        node_emb = self.graph_encoder(flat_node_idx, flat_edge_idx, flat_graph_size, attn_mask=None) # [batch size * num_candidates, num nodes, d_model]
+
+        if graph_size is None:
+            pooled = node_emb.mean(dim=1) # [batch size * num_candidates, d_model]
+        else:
+            # Creates a boolean mask indicating where are the actual nodes. (True ~ actual node)
+            node_mask = torch.arange(num_nodes, device=flat_node_idx.device)[None, :] < flat_graph_size[:, None] # [batch size * num_candidates, num nodes]
+            node_emb = node_emb.masked_fill((node_mask == False).unsqueeze(-1), 0.0) # [batch size * num_candidates, num nodes, d_model]
+
+            pooled = node_emb.sum(dim=1) # [batch size * num_candidates, d_model]
+            pooled = pooled / flat_graph_size.unsqueeze(-1) # [batch size * num_candidates, d_model]
+        print('node_emb', node_emb, '\n\n\n') # DEBUG
+        print('output of the cqndidqte grqp encoder', pooled.view(batch_size, num_candidates, -1), '\n\n\n') # DEBUG
+        input()  # DEBUG
+        return pooled.view(batch_size, num_candidates, -1) # [batch, num_candidates, d_model]
 
 
 # output: torch.nn.Module

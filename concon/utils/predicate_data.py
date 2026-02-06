@@ -7,8 +7,6 @@ import itertools
 import random
 
 class Batch():
-    # TODO See TODO below. This class has to be changed to store tensors ready to be fed to the model.
-    # MG: Done-ish
     def __init__(self, size, predicate, predicate_idx, candidate, candidate_truth=None):
         self.size = size # int
         self.predicate = predicate # list[Predicate]
@@ -16,6 +14,7 @@ class Batch():
         self.candidate = candidate # list[list[Candidate]]
         self.candidate_truth = candidate_truth # list[list[int]], aligned with candidate
         
+        # These are defined when `tensorize()` is called.
         self.node_idx = None
         self.edge_idx = None
         self.graph_sizes = None
@@ -90,8 +89,11 @@ class Batch():
             return False
 
         return True
+    
+    def __str__(self):
+        return f"Batch(size={self.size}, predicate={self.predicate}, predicate_idx={self.predicate_idx}, candidate={self.candidate}, candidate_truth={self.candidate_truth})"
 
-    def pretty_print(self, dataset, item_idx=0, candidate_idx=None):
+    def pretty_print(self, dataset):
         """
         Decode node indices for a batch item into human-readable labels.
         If candidate_idx is None, prints all candidates for the item.
@@ -99,13 +101,14 @@ class Batch():
         if(self.node_idx is None):
             raise ValueError("Batch is not tensorized; call batch.tensorize(dataset) first.")
 
-        def decode_row(row):
-            return [dataset.node_i2s[i] for i in row]
+        def decode_row(d, row):
+            return [d[i] for i in row]
 
-        nodes = self.node_idx[item_idx]
-        if(candidate_idx is not None):
-            return decode_row(nodes[candidate_idx])
-        return [decode_row(row) for row in nodes]
+        return [(
+            [decode_row(dataset.node_i2s, row) for row in self.node_idx[item_idx]],
+            [decode_row(dataset.edge_i2s, row) for mtx in self.edge_idx[item_idx] for row in mtx],
+            self.graph_sizes[item_idx],
+        ) for item_idx in range(self.size)]
 
     # Used for debugging.
     # Returns (list[None|int], list[None|int], list[None|int]).
@@ -247,8 +250,7 @@ class Predicate():
         return False
 
     def __repr__(self):
-        return str(self) # MG TODO fix representation (this causes infinite recursion (repr calls str etc.))
-
+        return str(self)
 
 class Value(Predicate):
     # name: str
