@@ -119,10 +119,11 @@ class AlexBeth(Game):
             batch.tensorize(self._dataset)
         # self.retriever is nn.Module; PyTorch modules don’t expose a .device attribute. (that's why no self.retriever.device)
         device = next(self.retriever.parameters()).device
-        node = torch.tensor(batch.node_idx, device=device, dtype=torch.long)
-        edge = torch.tensor(batch.edge_idx, device=device, dtype=torch.long)
-        sizes = torch.tensor(batch.graph_sizes, device=device, dtype=torch.long)
-        return {'node_idx': node, 'edge_idx': edge, 'graph_size': sizes}
+        return {
+            'node_idx': batch.node_idx.to(device, non_blocking=True), 
+            'edge_idx': batch.edge_idx.to(device, non_blocking=True), 
+            'graph_size': batch.graph_sizes.to(device, non_blocking=True)
+        }
 
     def __call__(self, batch):
         """

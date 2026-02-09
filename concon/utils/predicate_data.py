@@ -1,8 +1,5 @@
 import numpy as np
-
-import sys
-import os
-from collections import namedtuple, defaultdict
+import torch
 import itertools
 import random
 
@@ -63,9 +60,9 @@ class Batch():
         # node_idx: list[batch][num_candidates][max_nodes]
         # edge_idx: list[batch][num_candidates][max_nodes][max_nodes]
         # graph_sizes: list[batch][num_candidates]
-        self.node_idx = node_idx
-        self.edge_idx = edge_idx
-        self.graph_sizes = graph_sizes
+        self.node_idx = torch.tensor(node_idx, dtype=torch.long)
+        self.edge_idx = torch.tensor(edge_idx, dtype=torch.long)
+        self.graph_sizes = torch.tensor(graph_sizes, dtype=torch.long)
 
         return self  # allow chaining
     
