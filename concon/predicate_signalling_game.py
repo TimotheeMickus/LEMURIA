@@ -55,6 +55,17 @@ def do(args):
         
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
+        # Replace autologger with Weights and Biases if set.
+        wandb_run = None
+        if args.wandb:
+            import wandb
+            wandb_run = wandb.init(project=args.wandb_project, config=vars(args))
+            old_autologger = autologger._write
+            def _write_and_wandb(name, value, epoch_index, direct=False):
+                old_autologger(name, value, epoch_index, direct=direct)
+                wandb.log({name: value, "epoch": epoch_index})
+            autologger._write = _write_and_wandb
+
         if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
         # Save hyperparameters
@@ -80,6 +91,8 @@ def do(args):
             print("This runs has failed.")
             filename = run_summary_dir / "FAILURE"
             open(filename, 'a').close()
+        if wandb_run is not None:
+            wandb_run.finish()
 
 
 import argparse
@@ -173,6 +186,10 @@ def get_args(remaining_args=None):
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
     
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
+
+    group = arg_parser.add_argument_group(title='WandB', description='arguments relative to Weights & Biases logging')
+    group.add_argument('--wandb', help='enable Weights & Biases logging', action='store_true')
+    group.add_argument('--wandb_project', help='W&B project name', default='lemuria', type=str)
 
     args = arg_parser.parse_args(remaining_args)
     if args.debug and not args.log_debug:

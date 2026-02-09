@@ -9,3 +9,5 @@ data/
 notebooks/graph_enc.py
 .vscode/settings.json
 changelog.txt
+wandb/
+runs/
