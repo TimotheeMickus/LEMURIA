@@ -83,6 +83,18 @@ def do(args):
         print(f"[{datetime.now()}] training start…", flush=True)
 
         model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
+        if args.keep_training:
+            while model.max_perf < 1.0:
+                user_input = input(f"Current accuracy: {model.max_perf:.6f}.\nAdd epochs?: ").strip()
+                try:
+                    extra_epochs = int(user_input)
+                except ValueError:
+                    print("Please enter an integer.")
+                    continue
+                if extra_epochs <= 0:
+                    break
+                model.epochs = extra_epochs
+                model.train_agents(extra_epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
         
         # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
         performance_threshold = 0.6
@@ -178,6 +190,7 @@ def get_args(remaining_args=None):
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
     group.add_argument('--runs', help='number of runs', default=1, type=int)
+    group.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
 
