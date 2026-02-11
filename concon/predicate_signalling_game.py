@@ -8,7 +8,7 @@ import json
 from .games import AlexBeth
 from .utils.predicate_data import get_data_loader
 from .utils.misc import path_replace
-from .utils.logging import AutoLogger
+from .utils.logging import AutoLogger, build_run_name, setup_wandb_logging, finish_wandb_logging
 
 def main(global_args=None, remaining_args=None):
     args = get_args(remaining_args)
@@ -21,8 +21,9 @@ def do(args):
     for run in range(args.runs):
         print(f'Run {run}', flush=True)
 
-        run_summary_dir = summary_dir / str(run)
-        run_models_dir = models_dir / str(run)
+        run_name = build_run_name(args, run)
+        run_summary_dir = summary_dir / run_name
+        run_models_dir = models_dir / run_name
         message_dump_dir = run_summary_dir if(args.dump_message is not None) else None
 
         # Loads the data.
@@ -35,17 +36,18 @@ def do(args):
         args.node_vocab_size = len(data_loader.node_i2s)
         args.node_padding_id = data_loader.node_s2i[data_loader.padding_token]
         args.edge_vocab_size = len(data_loader.edge_i2s)
-        if args.graph_d_model is None:
-            args.graph_d_model = args.hidden_size
+        if args.candidate_encoder == 'graph_transformer':
+            if args.graph_d_model is None:
+                args.graph_d_model = args.hidden_size
 
-        # Adjust graph defaults based on model size.
-        if args.graph_d_hidden is None:
-            args.graph_d_hidden = args.graph_d_model * 2
-        elif args.graph_d_hidden < args.graph_d_model and not args.quiet:
-            raise ValueError(f"graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.")
+            # Adjust graph defaults based on model size.
+            if args.graph_d_hidden is None:
+                args.graph_d_hidden = args.graph_d_model * 2
+            elif args.graph_d_hidden < args.graph_d_model and not args.quiet:
+                raise ValueError(f"graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.")
 
-        if args.graph_d_model % args.graph_num_heads != 0:
-            raise ValueError(f"graph_d_model ({args.graph_d_model}) % graph_num_heads ({args.graph_num_heads}) must == 0.")
+            if args.graph_d_model % args.graph_num_heads != 0:
+                raise ValueError(f"graph_d_model ({args.graph_d_model}) % graph_num_heads ({args.graph_num_heads}) must == 0.")
             # # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
             # max_heads = min(8, args.graph_d_model)
             # safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
@@ -55,22 +57,19 @@ def do(args):
         
         autologger = AutoLogger(base_alphabet_size=args.base_alphabet_size, data_loader=data_loader, display=args.display, steps_per_epoch=args.steps_per_epoch, log_debug=args.log_debug, log_lang_progress=args.log_lang_progress, log_entropy=args.log_entropy, device=args.device, no_summary=args.no_summary, summary_dir=run_summary_dir, default_period=args.logging_period,) # The `data_loader` is needed because the number of categories is sometimes used.
 
-        # Replace autologger with Weights and Biases if set.
-        wandb_run = None
-        if args.wandb:
-            import wandb
-            wandb_run = wandb.init(project=args.wandb_project, config=vars(args))
-            old_autologger = autologger._write
-            def _write_and_wandb(name, value, epoch_index, direct=False):
-                old_autologger(name, value, epoch_index, direct=direct)
-                wandb.log({name: value, "epoch": epoch_index})
-            autologger._write = _write_and_wandb
+        wandb_run = setup_wandb_logging(
+            autologger=autologger,
+            enabled=args.wandb,
+            project=args.wandb_project,
+            run_name=run_name,
+            args=args,
+        )
 
-        if(not args.no_summary): run_summary_dir.mkdir(parents=True, exist_ok=True)
+        if(not args.no_summary):
+            run_summary_dir.mkdir(parents=True, exist_ok=True)
+            with open(run_summary_dir / "hparams.json", "w") as f:
+                json.dump(vars(args), f, indent=2, default=str)
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
-        # Save hyperparameters
-        with open(run_summary_dir / "hparams.json", "w") as f:
-            json.dump(vars(args), f, indent=2, default=str)
         # Creates the model.
         model = AlexBeth(args, autologger, data_loader, message_dump_dir)
         model = model.to(args.device)
@@ -89,10 +88,10 @@ def do(args):
         performance_threshold = 0.6
         if(model.max_perf < performance_threshold):
             print("This runs has failed.")
-            filename = run_summary_dir / "FAILURE"
-            open(filename, 'a').close()
-        if wandb_run is not None:
-            wandb_run.finish()
+            if(not args.no_summary):
+                filename = run_summary_dir / "FAILURE"
+                open(filename, 'a').close()
+        finish_wandb_logging(wandb_run)
 
 
 import argparse

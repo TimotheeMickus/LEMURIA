@@ -8,6 +8,75 @@ import tqdm
 
 from .misc import compute_entropy
 
+
+def _sanitize_run_part(value):
+    text = str(value).strip().replace(" ", "")
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.="
+    return "".join(c if c in allowed else "-" for c in text)
+
+
+def build_run_name(args, run_index):
+    parts = [
+        f"props={_sanitize_run_part(args.properties)}",
+        f"d={args.min_depth}-{args.max_depth}",
+        f"cand={args.num_candidates}",
+        f"bs={args.batch_size}",
+        f"enc={_sanitize_run_part(args.candidate_encoder)}",
+        f"alpha={args.base_alphabet_size}",
+        f"mlen={args.max_len}",
+        f"lr={args.learning_rate}",
+        f"ba={args.beta_asker}",
+        f"br={args.beta_retriever}",
+        f"pen={args.penalty}",
+        f"ep={args.epochs}",
+        f"spe={args.steps_per_epoch}",
+        f"gc={args.grad_clipping}",
+        f"cs={_sanitize_run_part(args.candidate_sampling)}",
+    ]
+    if args.candidate_encoder == "graph_transformer":
+        parts.extend(
+            [
+                f"gdm={args.graph_d_model}",
+                f"gh={args.graph_num_heads}",
+                f"gdh={args.graph_d_hidden}",
+                f"gl={args.graph_num_layers}",
+            ]
+        )
+    parts.append(f"run={run_index}")
+    return "__".join(parts)
+
+
+def _wandb_config_from_args(args):
+    config = {}
+    for key, value in vars(args).items():
+        if isinstance(value, torch.device):
+            config[key] = str(value)
+        else:
+            config[key] = value
+    return config
+
+
+def setup_wandb_logging(autologger, enabled, project, run_name, args):
+    if not enabled:
+        return None
+
+    import wandb
+
+    wandb_run = wandb.init(project=project, name=run_name, config=_wandb_config_from_args(args))
+    write_to_summary = autologger._write
+
+    def _write_and_wandb(name, value, epoch_index, direct=False):
+        write_to_summary(name, value, epoch_index, direct=direct)
+        wandb.log({name: value, "epoch": epoch_index})
+
+    autologger._write = _write_and_wandb
+    return wandb_run
+
+
+def finish_wandb_logging(wandb_run):
+    if wandb_run is not None:
+        wandb_run.finish()
+
 class AverageSummaryWriter:
     def __init__(self, writer=None, log_dir=None, default_period=1, specific_periods={}, prefix=None):
         if(writer is None): writer = SummaryWriter(log_dir)
