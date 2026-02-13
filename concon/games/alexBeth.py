@@ -269,6 +269,11 @@ class AlexBeth(Game):
         total_entropy = 0.0
         total_msg_length = 0.0
         total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
+        # Communication-efficiency split by truth label.
+        total_verify_ce = 0.0 # verify: predicate true for candidate
+        total_falsify_ce = 0.0 # falsify: predicate false for candidate.
+        total_verify_items = 0 # denominators for ratios
+        total_falsify_items = 0
 
         # Shared cache for message dump + language-level eval metrics.
         eval_cache = None
@@ -316,6 +321,18 @@ class AlexBeth(Game):
             total_msg_length += msg_length * batch_items
             total_perf += perf * batch_items
 
+            # Split all candidate decisions into verify/falsify subsets.
+            verify_mask = (truth_targets > 0.5)
+            falsify_mask = ~verify_mask
+            if verify_mask.any():
+                # c.e._verify: average P(true) on true instances.
+                total_verify_ce += probs[verify_mask].sum().item()
+                total_verify_items += int(verify_mask.sum().item())
+            if falsify_mask.any():
+                # c.e._falsify: average P(false)=1-P(true) on false instances.
+                total_falsify_ce += (1.0 - probs[falsify_mask]).sum().item()
+                total_falsify_items += int(falsify_mask.sum().item())
+
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
             if eval_cache is not None:
@@ -338,6 +355,10 @@ class AlexBeth(Game):
         log('eval/loss', total_loss / total_items)
         log('eval/accuracy', avg_accuracy)
         log('eval/perf', total_perf / total_items)
+        if total_verify_items > 0: log('eval/c.e._verify', total_verify_ce / total_verify_items)
+        elif self.autologger.display != 'minimal': print('eval/c.e._verify\tno verify items')
+        if total_falsify_items > 0: log('eval/c.e._falsify', total_falsify_ce / total_falsify_items)
+        elif self.autologger.display != 'minimal': print('eval/c.e._falsify\tno falsify items')
         log('eval/retriever_entropy', total_entropy / total_items)
         log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
