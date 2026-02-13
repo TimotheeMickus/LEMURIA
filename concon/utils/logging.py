@@ -65,10 +65,13 @@ def setup_wandb_logging(autologger, enabled, project, run_name, args):
     wandb_run = wandb.init(project=project, name=run_name, config=_wandb_config_from_args(args))
     write_to_summary = autologger._write
 
-    def _write_and_wandb(name, value, epoch_index, direct=False):
-        write_to_summary(name, value, epoch_index, direct=direct)
-        wandb.log({name: value, "epoch": epoch_index})
-
+    def _write_and_wandb(name, value, step, direct=False):
+        write_to_summary(name, value, step, direct=direct)
+        # Train logs pass an iteration-like step, while eval logs pass an epoch index with direct=True.
+        # Convert eval steps to the scale so both curves share one WandB x-axis.
+        if direct: wandb_step = (int(step) + 1) * int(getattr(args, "steps_per_epoch", 1))
+        else: wandb_step = int(step)
+        wandb.log({name: value}, step=wandb_step)
     autologger._write = _write_and_wandb
     return wandb_run
 
@@ -297,7 +300,7 @@ class AutoLogger(object):
         if self.summary_writer is not None:
             avg_reward = rewards.mean().item() # average reward of the batch
             avg_success = successes.mean().item() # average success of the batch
-            number_ex_seen = supplementary_info['index'] * supplementary_info['batch'].size
+            number_ex_seen = supplementary_info['index']
             self._state['number_ex_seen'] = number_ex_seen
 
             self._write('train/reward', avg_reward, number_ex_seen)

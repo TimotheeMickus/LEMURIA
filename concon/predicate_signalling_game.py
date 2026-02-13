@@ -82,7 +82,8 @@ def do(args):
 
         print(f"[{datetime.now()}] training start…", flush=True)
 
-        model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
+        total_trained_epochs = args.epochs
+        model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every, start_epoch_index=0)
         if args.keep_training:
             while model.max_perf < 1.0:
                 user_input = input(f"Current accuracy: {model.max_perf:.6f}.\nAdd epochs?: ").strip()
@@ -93,8 +94,9 @@ def do(args):
                     continue
                 if extra_epochs <= 0:
                     break
-                model.epochs = extra_epochs
-                model.train_agents(extra_epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every)
+                total_trained_epochs += extra_epochs
+                model.epochs = total_trained_epochs
+                model.train_agents(extra_epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every, start_epoch_index=(total_trained_epochs - extra_epochs))
         
         # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
         performance_threshold = 0.6

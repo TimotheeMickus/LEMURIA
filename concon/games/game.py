@@ -358,11 +358,11 @@ class Game(metaclass=ABCMeta):
         """
         pass
 
-    def train_agents(self, epochs, steps_per_epoch, data_loader, run_models_dir=None, save_every=0):
+    def train_agents(self, epochs, steps_per_epoch, data_loader, run_models_dir=None, save_every=0, start_epoch_index=0):
         """
         Trains all agents over a given number of epochs.
         """
-        for epoch_index in range(epochs):
+        for epoch_index in range(start_epoch_index, start_epoch_index + epochs):
             timepoint_0 = time.time()
 
             # Training phase.
