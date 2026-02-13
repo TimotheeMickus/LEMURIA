@@ -254,101 +254,98 @@ class AlexBeth(Game):
             self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
-        # Predicate datasets lack the image-category metadata relied upon by the legacy Alice-Bob evaluation. 
-        # When that's the case we switch to a simpler evaluation that reuses the supervised truth labels we've already defined for training.
-        if(not hasattr(data_loader, 'category_idx')):
-            # Use the dataset batch size but cap the number of batches to keep eval fast.
-            batch_size = data_loader.batch_size
-            max_batches = 128
-            nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
+        # Use the dataset batch size but cap the number of batches to keep eval fast.
+        batch_size = data_loader.batch_size
+        max_batches = 128
+        nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
 
-            # Running sums so we can compute dataset-averaged metrics without materialising every batch.
-            total_items = 0
-            total_loss = 0.0
-            total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
-            total_entropy = 0.0
-            total_msg_length = 0.0
-            total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
+        # Running sums so we can compute dataset-averaged metrics without materialising every batch.
+        total_items = 0
+        total_loss = 0.0
+        total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
+        total_entropy = 0.0
+        total_msg_length = 0.0
+        total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
 
-            messages = []
-            predicate_ids = []
-            predicate_texts = []
-            candidate_texts = []
+        messages = []
+        predicate_ids = []
+        predicate_texts = []
+        candidate_texts = []
 
-            iterator = range(nb_batch)
-            if(self.autologger.display == 'tqdm'):
-                iterator = tqdm.tqdm(iterator, desc='Eval.')
+        iterator = range(nb_batch)
+        if(self.autologger.display == 'tqdm'):
+            iterator = tqdm.tqdm(iterator, desc='Eval.')
 
-            for _ in iterator:
-                self.start_episode(train_episode=False)
-                
-                batch = data_loader.get_batch(size=batch_size, data_type='test')
-
-                asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-                truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: (batch, n_candidates)
-
-                # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
-                logits = retriever_outcome.scores # Shape: (batch, num_candidates)
-                probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
-
-                # Scalar BCE averaged over the batch (used for logging only).
-                loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
-                # Accuracy is the thresholded probability vs. the binary target.
-                preds = (probs >= 0.5).float() # Shape: (batch, num_candidates)
-                accuracy = (preds == truth_targets).float().mean().item() # per candidate (not predicate)
-                # `perf` measures how much probability mass Beth assigns to the correct truth value.
-                perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).mean().item()
-                # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions.
-                entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item()
-                # Average symbol count for Alex's message in this batch.
-                msg_length = asker_outcome.action[1].float().mean().item()
-
-                batch_items = truth_targets.numel()
-                total_items += batch_items
-                total_loss += loss * batch_items
-                total_accuracy += accuracy * batch_items
-                total_entropy += entropy * batch_items
-                total_msg_length += msg_length * batch_items
-                total_perf += perf * batch_items
-
-                # This block stores signals produced by the agents that are dumped at the end of eval
-                # If `correct_only` is True, only signals yielding non-random accuracy are stored
-                if(self.message_dump_dir is not None):
-                    batch_messages = asker_outcome.action[0].detach()
-                    batch_lens     = asker_outcome.action[1].detach()
-                    accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
-                    for i in range(batch_messages.size(0)):
-                        if self.correct_only and not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)):
-                            # not: (accuracy_per_item[i].item() < 0.5):
-                            continue # skip low accuracy items
-                        # truncate padding away from signals
-                        message = batch_messages[i].tolist()[:batch_lens[i].item()]
-                        messages.append(message)
-                        predicate_ids.append(int(batch.predicate_idx[i]))
-                        predicate_texts.append(str(batch.predicate[i]))
-                        candidate_texts.append(" || ".join(str(c) for c in batch.candidate[i]))
-
-            # Normalise the accumulated sums and push them to TensorBoard / stdout.
-            avg_accuracy = (total_accuracy / total_items)
-            log('eval/loss', total_loss / total_items)
-            log('eval/accuracy', avg_accuracy)
-            log('eval/perf', total_perf / total_items)
-            log('eval/retriever_entropy', total_entropy / total_items)
-            log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
-            if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
-
-            # Dumps signals into file every epoch or on the last epoch, depending on the flag
-            if self.message_dump_dir and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
-                filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
-                with open(filename, 'w') as ostr:
-                    writer = csv.writer(ostr)
-                    _ = writer.writerow(['msg', 'pred_idx', 'pred_str', 'candidates'])
-                    for msg, pred_idx, pred_text, cand_text in zip(messages, predicate_ids, predicate_texts, candidate_texts):
-                        msg = ' '.join(map(str, msg))
-                        row = [msg, pred_idx, pred_text, cand_text]
-                        _ = writer.writerow(row)
+        for _ in iterator:
+            self.start_episode(train_episode=False)
             
-            return
+            batch = data_loader.get_batch(size=batch_size, data_type='test')
+
+            asker_outcome, retriever_outcome = self.alex_to_beth(batch)
+            truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: (batch, n_candidates)
+
+            # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
+            logits = retriever_outcome.scores # Shape: (batch, num_candidates)
+            probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
+
+            # Scalar BCE averaged over the batch (used for logging only).
+            loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
+            # Accuracy is the thresholded probability vs. the binary target.
+            preds = (probs >= 0.5).float() # Shape: (batch, num_candidates)
+            accuracy = (preds == truth_targets).float().mean().item() # per candidate (not predicate)
+            # `perf` measures how much probability mass Beth assigns to the correct truth value.
+            perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).mean().item()
+            # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions.
+            entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item()
+            # Average symbol count for Alex's message in this batch.
+            msg_length = asker_outcome.action[1].float().mean().item()
+
+            batch_items = truth_targets.numel()
+            total_items += batch_items
+            total_loss += loss * batch_items
+            total_accuracy += accuracy * batch_items
+            total_entropy += entropy * batch_items
+            total_msg_length += msg_length * batch_items
+            total_perf += perf * batch_items
+
+            # This block stores signals produced by the agents that are dumped at the end of eval
+            # If `correct_only` is True, only signals yielding non-random accuracy are stored
+            if(self.message_dump_dir is not None):
+                batch_messages = asker_outcome.action[0].detach()
+                batch_lens     = asker_outcome.action[1].detach()
+                accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
+                for i in range(batch_messages.size(0)):
+                    if self.correct_only and not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)):
+                        # not: (accuracy_per_item[i].item() < 0.5):
+                        continue # skip low accuracy items
+                    # truncate padding away from signals
+                    message = batch_messages[i].tolist()[:batch_lens[i].item()]
+                    messages.append(message)
+                    predicate_ids.append(int(batch.predicate_idx[i]))
+                    predicate_texts.append(str(batch.predicate[i]))
+                    candidate_texts.append(" || ".join(str(c) for c in batch.candidate[i]))
+
+        # Normalise the accumulated sums and push them to TensorBoard / stdout.
+        avg_accuracy = (total_accuracy / total_items)
+        log('eval/loss', total_loss / total_items)
+        log('eval/accuracy', avg_accuracy)
+        log('eval/perf', total_perf / total_items)
+        log('eval/retriever_entropy', total_entropy / total_items)
+        log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
+        if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
+
+        # Dumps signals into file every epoch or on the last epoch, depending on the flag
+        if self.message_dump_dir and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
+            filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
+            with open(filename, 'w') as ostr:
+                writer = csv.writer(ostr)
+                _ = writer.writerow(['msg', 'pred_idx', 'pred_str', 'candidates'])
+                for msg, pred_idx, pred_text, cand_text in zip(messages, predicate_ids, predicate_texts, candidate_texts):
+                    msg = ' '.join(map(str, msg))
+                    row = [msg, pred_idx, pred_text, cand_text]
+                    _ = writer.writerow(row)
+        
+        return
         
         # ----------------------------
         # hic incipit quod neglegitur
