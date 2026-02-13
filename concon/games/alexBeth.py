@@ -318,7 +318,8 @@ class AlexBeth(Game):
                     batch_lens     = asker_outcome.action[1].detach()
                     accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
                     for i in range(batch_messages.size(0)):
-                        if self.correct_only and (accuracy_per_item[i].item() < 0.5):
+                        if self.correct_only and not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)):
+                            # not: (accuracy_per_item[i].item() < 0.5):
                             continue # skip low accuracy items
                         # truncate padding away from signals
                         message = batch_messages[i].tolist()[:batch_lens[i].item()]
@@ -334,8 +335,7 @@ class AlexBeth(Game):
             log('eval/perf', total_perf / total_items)
             log('eval/retriever_entropy', total_entropy / total_items)
             log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
-            if(avg_accuracy > self.max_perf):
-                self.max_perf = avg_accuracy
+            if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
 
             # Dumps signals into file every epoch or on the last epoch, depending on the flag
             if self.message_dump_dir and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
