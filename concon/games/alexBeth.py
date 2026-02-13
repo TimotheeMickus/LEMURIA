@@ -398,6 +398,30 @@ class AlexBeth(Game):
         if self.run_fancy_lang_eval and perf_baseline > 0.0: scrambling_ratio = perf_scrambled / perf_baseline
         log('eval/scrambling-resistance', scrambling_ratio)
 
+        if self.run_fancy_lang_eval and eval_cache is not None and len(eval_cache["messages"]) > 1:
+            # Topographic similarity: correlation between message distances and predicate identity distances.
+            sample_size = 1024
+            sample = list(zip(eval_cache["messages"], eval_cache["predicate_ids"]))
+            random.shuffle(sample)
+            sample = sample[:sample_size]
+
+            unique_messages = set()
+            unique_predicates = set()
+            for m, pid in sample:
+                unique_messages.add(tuple(m))
+                unique_predicates.add(int(pid))
+                if len(unique_messages) > 1 and len(unique_predicates) > 1:
+                    break
+
+            if len(unique_messages) > 1 and len(unique_predicates) > 1:
+                sample_messages = [tuple(m) for (m, _) in sample]
+                # Keep a sequence-like meaning so default Hamming distance works.
+                sample_meanings = [(int(pid),) for (_, pid) in sample]
+                topo_corr, *_ = compute_correlation.mantel(sample_messages, sample_meanings, correl_only=True)
+                log('eval/topographic_similarity', topo_corr)
+            elif self.autologger.display != 'minimal':
+                print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
+
         #                            #
         # -------------------------- #
 
