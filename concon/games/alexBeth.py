@@ -269,11 +269,14 @@ class AlexBeth(Game):
         total_entropy = 0.0
         total_msg_length = 0.0
         total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
-        # Communication-efficiency split by truth label.
+        # Communication-efficiency split by truth label (model can be ex. good at positives and bad at negatives).
         total_verify_ce = 0.0 # verify: predicate true for candidate
         total_falsify_ce = 0.0 # falsify: predicate false for candidate.
         total_verify_items = 0 # denominators for ratios
         total_falsify_items = 0
+        # Scrambling resistance is (performance after scrambling / original performance).
+        perf_scrambled = 0.0
+        perf_baseline = 0.0
 
         # Shared cache for message dump + language-level eval metrics.
         eval_cache = None
@@ -321,7 +324,7 @@ class AlexBeth(Game):
             total_msg_length += msg_length * batch_items
             total_perf += perf * batch_items
 
-            # Split all candidate decisions into verify/falsify subsets.
+            # Split candidate decisions into verify/falsify subsets.
             verify_mask = (truth_targets > 0.5)
             falsify_mask = ~verify_mask
             if verify_mask.any():
@@ -333,11 +336,33 @@ class AlexBeth(Game):
                 total_falsify_ce += (1.0 - probs[falsify_mask]).sum().item()
                 total_falsify_items += int(falsify_mask.sum().item())
 
+            # Scramble the symbol order inside signals and recompute correctness probs on these.
+            # Then we check how much original performance is kept.
+            # If retention is high, semantics likely rely less on order/composition.
+            if self.run_fancy_lang_eval:
+                batch_messages = asker_outcome.action[0].detach().clone()
+                batch_lens = asker_outcome.action[1].detach().clone()
+                scrambled_messages = batch_messages
+                for i in range(scrambled_messages.size(0)):
+                    msg_len = int(batch_lens[i].item())
+                    if msg_len > 1:
+                        scrambled_messages[i, :msg_len] = scrambled_messages[i, :msg_len][torch.randperm(msg_len)]
+
+                scrambled_outcome = self.retriever(self._beth_input(batch), message=scrambled_messages, length=batch_lens)
+                scrambled_probs = torch.sigmoid(scrambled_outcome.scores)
+
+                correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
+                scrambled_correct_prob = torch.where(truth_targets > 0.5, scrambled_probs, 1.0 - scrambled_probs)
+
+                # Limit at min(original, scrambled) so scrambling does not increase score.
+                perf_scrambled += torch.minimum(correct_prob, scrambled_correct_prob).sum().item()
+                perf_baseline += correct_prob.sum().item()
+
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
             if eval_cache is not None:
-                batch_messages = asker_outcome.action[0].detach()
-                batch_lens     = asker_outcome.action[1].detach()
+                batch_messages = asker_outcome.action[0].detach().clone()
+                batch_lens = asker_outcome.action[1].detach().clone()
                 accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
                 for i in range(batch_messages.size(0)):
                     if self.correct_only and not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)):
@@ -350,18 +375,31 @@ class AlexBeth(Game):
                     eval_cache["predicate_texts"].append(str(batch.predicate[i]))
                     eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
 
+        # --- logging and stdout --- #
+        #                            #
         # Normalise the accumulated sums and push them to TensorBoard / stdout.
         avg_accuracy = (total_accuracy / total_items)
         log('eval/loss', total_loss / total_items)
         log('eval/accuracy', avg_accuracy)
         log('eval/perf', total_perf / total_items)
-        if total_verify_items > 0: log('eval/c.e._verify', total_verify_ce / total_verify_items)
-        elif self.autologger.display != 'minimal': print('eval/c.e._verify\tno verify items')
-        if total_falsify_items > 0: log('eval/c.e._falsify', total_falsify_ce / total_falsify_items)
-        elif self.autologger.display != 'minimal': print('eval/c.e._falsify\tno falsify items')
         log('eval/retriever_entropy', total_entropy / total_items)
         log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
+
+        # Fancy metrics
+        verify_ratio = 0
+        falsify_ratio = 0
+        if total_verify_items > 0: verify_ratio = total_verify_ce / total_verify_items
+        if total_falsify_items > 0: falsify_ratio = total_falsify_ce / total_falsify_items
+        log('eval/c.e._verify', verify_ratio)
+        log('eval/c.e._falsify', falsify_ratio)
+
+        scrambling_ratio = 0
+        if self.run_fancy_lang_eval and perf_baseline > 0.0: scrambling_ratio = perf_scrambled / perf_baseline
+        log('eval/scrambling-resistance', scrambling_ratio)
+
+        #                            #
+        # -------------------------- #
 
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
         if self.message_dump_dir and eval_cache is not None and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
