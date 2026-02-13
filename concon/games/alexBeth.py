@@ -65,9 +65,12 @@ class AlexBeth(Game):
             self._asker_avg_reward = misc.Averager(size=12800)
             self._retriever_avg_reward = misc.Averager(size=12800)
 
+        # Trigger fancy language eval whenever messages are dumped.
+        self.run_fancy_lang_eval = bool(getattr(args, "dump_message", None))
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
-        self.dump_message_mode = getattr(args, "dump_message", None)
         self.epochs = getattr(args, "epochs", None)
+        # Negation-specific metrics should only run when negation exists.
+        self.no_negation = getattr(args, "no_negation", False)
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -267,10 +270,15 @@ class AlexBeth(Game):
         total_msg_length = 0.0
         total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
 
-        messages = []
-        predicate_ids = []
-        predicate_texts = []
-        candidate_texts = []
+        # Shared cache for message dump + language-level eval metrics.
+        eval_cache = None
+        if self.run_fancy_lang_eval:
+            eval_cache = {
+                "messages": [],
+                "predicate_ids": [],
+                "predicate_texts": [],
+                "candidate_texts": []
+            }
 
         iterator = range(nb_batch)
         if(self.autologger.display == 'tqdm'):
@@ -308,9 +316,9 @@ class AlexBeth(Game):
             total_msg_length += msg_length * batch_items
             total_perf += perf * batch_items
 
-            # This block stores signals produced by the agents that are dumped at the end of eval
-            # If `correct_only` is True, only signals yielding non-random accuracy are stored
-            if(self.message_dump_dir is not None):
+            # Cache signals once so dump and fancy eval can reuse them.
+            # If `correct_only` is True, only correct items are cached.
+            if eval_cache is not None:
                 batch_messages = asker_outcome.action[0].detach()
                 batch_lens     = asker_outcome.action[1].detach()
                 accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
@@ -320,10 +328,10 @@ class AlexBeth(Game):
                         continue # skip low accuracy items
                     # truncate padding away from signals
                     message = batch_messages[i].tolist()[:batch_lens[i].item()]
-                    messages.append(message)
-                    predicate_ids.append(int(batch.predicate_idx[i]))
-                    predicate_texts.append(str(batch.predicate[i]))
-                    candidate_texts.append(" || ".join(str(c) for c in batch.candidate[i]))
+                    eval_cache["messages"].append(message)
+                    eval_cache["predicate_ids"].append(int(batch.predicate_idx[i]))
+                    eval_cache["predicate_texts"].append(str(batch.predicate[i]))
+                    eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
 
         # Normalise the accumulated sums and push them to TensorBoard / stdout.
         avg_accuracy = (total_accuracy / total_items)
@@ -335,12 +343,17 @@ class AlexBeth(Game):
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
 
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
-        if self.message_dump_dir and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
+        if self.message_dump_dir and eval_cache is not None and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
                 _ = writer.writerow(['msg', 'pred_idx', 'pred_str', 'candidates'])
-                for msg, pred_idx, pred_text, cand_text in zip(messages, predicate_ids, predicate_texts, candidate_texts):
+                for msg, pred_idx, pred_text, cand_text in zip(
+                    eval_cache["messages"],
+                    eval_cache["predicate_ids"],
+                    eval_cache["predicate_texts"],
+                    eval_cache["candidate_texts"],
+                ):
                     msg = ' '.join(map(str, msg))
                     row = [msg, pred_idx, pred_text, cand_text]
                     _ = writer.writerow(row)
