@@ -272,6 +272,8 @@ class AlexBeth(Game):
 
             messages = []
             predicate_ids = []
+            predicate_texts = []
+            candidate_texts = []
 
             iterator = range(nb_batch)
             if(self.autologger.display == 'tqdm'):
@@ -322,6 +324,8 @@ class AlexBeth(Game):
                         message = batch_messages[i].tolist()[:batch_lens[i].item()]
                         messages.append(message)
                         predicate_ids.append(int(batch.predicate_idx[i]))
+                        predicate_texts.append(str(batch.predicate[i]))
+                        candidate_texts.append(" || ".join(str(c) for c in batch.candidate[i]))
 
             # Normalise the accumulated sums and push them to TensorBoard / stdout.
             avg_accuracy = (total_accuracy / total_items)
@@ -338,10 +342,10 @@ class AlexBeth(Game):
                 filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
                 with open(filename, 'w') as ostr:
                     writer = csv.writer(ostr)
-                    _ = writer.writerow(['msg', 'pred_idx'])
-                    for msg, pred_idx in zip(messages, predicate_ids):
+                    _ = writer.writerow(['msg', 'pred_idx', 'pred_str', 'candidates'])
+                    for msg, pred_idx, pred_text, cand_text in zip(messages, predicate_ids, predicate_texts, candidate_texts):
                         msg = ' '.join(map(str, msg))
-                        row = [msg, pred_idx]
+                        row = [msg, pred_idx, pred_text, cand_text]
                         _ = writer.writerow(row)
             
             return
