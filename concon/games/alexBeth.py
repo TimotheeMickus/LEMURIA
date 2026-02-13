@@ -249,16 +249,16 @@ class AlexBeth(Game):
 
     # Called at the end of each training epoch.
     @torch.no_grad()
-    def evaluate(self, data_iterator, epoch_index):
+    def evaluate(self, data_loader, epoch_index):
         def log(name, value):
             self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
         # Predicate datasets lack the image-category metadata relied upon by the legacy Alice-Bob evaluation. 
         # When that's the case we switch to a simpler evaluation that reuses the supervised truth labels we've already defined for training.
-        if(not hasattr(data_iterator, 'category_idx')):
-            # Use the dataset batch size but cap the number of batches to keep eval snappy.
-            batch_size = data_iterator.batch_size
+        if(not hasattr(data_loader, 'category_idx')):
+            # Use the dataset batch size but cap the number of batches to keep eval fast.
+            batch_size = data_loader.batch_size
             max_batches = 128
             nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
 
@@ -282,7 +282,7 @@ class AlexBeth(Game):
             for _ in iterator:
                 self.start_episode(train_episode=False)
                 
-                batch = data_iterator.get_batch(size=batch_size, data_type='test')
+                batch = data_loader.get_batch(size=batch_size, data_type='test')
 
                 asker_outcome, retriever_outcome = self.alex_to_beth(batch)
                 truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: (batch, n_candidates)
@@ -355,14 +355,14 @@ class AlexBeth(Game):
         # ----------------------------
 
         # TODO above to run, the below is ignored for now
-        counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
-        failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
+        counts_matrix = np.zeros((data_loader.nb_categories, data_loader.nb_categories))
+        failure_matrix = np.zeros((data_loader.nb_categories, data_loader.nb_categories))
 
         # We try to visit each pair of categories on average 8 times.
         batch_size = 256
         max_datapoints = 32768 # (2^15)
-        n = (8 * (data_iterator.nb_categories**2))
-        #n = data_iterator.size(data_type='test', no_evaluation=False)
+        n = (8 * (data_loader.nb_categories**2))
+        #n = data_loader.size(data_type='test', no_evaluation=False)
         n = min(max_datapoints, n)
         nb_batch = int(np.ceil(n / batch_size))
 
@@ -378,7 +378,7 @@ class AlexBeth(Game):
         for _ in batch_numbers:
             self.start_episode(train_episode=False)
 
-            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
+            batch = data_loader.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
@@ -386,11 +386,11 @@ class AlexBeth(Game):
             success.append((retriever_pointing['action'] == 0).float())
             success_prob.append(retriever_pointing['dist'].probs[:, 0]) # Probability of the target
 
-            target_category = [data_iterator.category_idx(x.category) for x in batch.original]
-            distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
+            target_category = [data_loader.category_idx(x.category) for x in batch.original]
+            distractor_category = [data_loader.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
 
             failure = retriever_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
-            data_iterator.failure_based_distribution.update(target_category, distractor_category, failure)
+            data_loader.failure_based_distribution.update(target_category, distractor_category, failure)
 
             np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
             np.add.at(failure_matrix, (target_category, distractor_category), failure)
@@ -432,13 +432,13 @@ class AlexBeth(Game):
         # Here, we try to see how much the messages describe the categories and not the particular images
         # To do so, we use the original image as target, and an image of the same category as distractor
         abstractness = []
-        n = (32 * data_iterator.nb_categories)
+        n = (32 * data_loader.nb_categories)
         n = min(max_datapoints, n)
         nb_batch = int(np.ceil(n / batch_size))
         for _ in range(nb_batch):
             self.start_episode(train_episode=False)
 
-            batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from a different category.
+            batch = data_loader.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from a different category.
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
@@ -475,10 +475,10 @@ class AlexBeth(Game):
         # Computes the communication efficiency when the images are selected from all categories.
         c_e = 1 - (failure_matrix.sum() / counts_matrix.sum())
         log(f'eval/{name_c_e}', c_e)
-        if(not data_iterator.same_img): main_perf = c_e
+        if(not data_loader.same_img): main_perf = c_e
 
-        train_categories = data_iterator.training_categories_idx
-        eval_categories = data_iterator.evaluation_categories_idx
+        train_categories = data_loader.training_categories_idx
+        eval_categories = data_loader.evaluation_categories_idx
         if(len(eval_categories) > 0):
             # Computes the communication efficiency when both the target and the distractor are selected from training categories.
             failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
@@ -523,15 +523,15 @@ class AlexBeth(Game):
             log(f'eval/{name_dgen_c_e}', dgen_c_e)
 
         # If the "same_img" option is used, the communication efficiency is also computed without this feature.
-        if(data_iterator.same_img):
+        if(data_loader.same_img):
             success_prob = []
-            n = (32 * data_iterator.nb_categories)
+            n = (32 * data_loader.nb_categories)
             n = min(max_datapoints, n)
             nb_batch = int(np.ceil(n / batch_size))
             for batch_index in range(nb_batch):
                 self.start_episode(train_episode=False)
 
-                batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], target_is_original=False, keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected uniformly from the original image's category.
+                batch = data_loader.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], target_is_original=False, keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected uniformly from the original image's category.
 
                 asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
@@ -623,7 +623,7 @@ class AlexBeth(Game):
         # Decision tree stuff
         alphabet_size = (self.base_alphabet_size + 1)
         gram_size = 1 # Max size of n-grams to consider
-        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_iterator.concepts, gram_size)
+        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_loader.concepts, gram_size)
         (full_tree, full_tree_accuracy) = tmp['full_tree']
         conceptual_trees = tmp['conceptual_trees']
 
@@ -633,7 +633,7 @@ class AlexBeth(Game):
         log('decision_tree/full_depth', depth)
 
         for i, (tree, accuracy) in conceptual_trees:
-            name = data_iterator.concept_names[i]
+            name = data_loader.concept_names[i]
 
             n_leaves, depth = tree.get_n_leaves(), tree.get_depth()
             log(('decision_tree/%s_accuracy' % name), accuracy)
@@ -655,5 +655,5 @@ class AlexBeth(Game):
             tree_depth_ratio = (full_tree.get_depth() / sum_conceptual_depth)
             log('decision_tree/depth_ratio', tree_depth_ratio)
     
-    def test_visualize(self, data_iterator, learning_rate):
+    def test_visualize(self, data_loader, learning_rate):
         print("No visualisation defined.")
