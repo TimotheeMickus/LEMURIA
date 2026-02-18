@@ -65,12 +65,14 @@ class AlexBeth(Game):
             self._asker_avg_reward = misc.Averager(size=12800)
             self._retriever_avg_reward = misc.Averager(size=12800)
 
+        self.dump_message_mode = getattr(args, "dump_message", None)
         # Trigger fancy language eval whenever messages are dumped.
-        self.run_fancy_lang_eval = bool(getattr(args, "dump_message", None))
+        self.run_fancy_lang_eval = bool(self.dump_message_mode)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
         self.epochs = getattr(args, "epochs", None)
         # Negation-specific metrics should only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
+        self._negation_partner_idx = self._build_negation_partner_map()
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -98,6 +100,22 @@ class AlexBeth(Game):
     @property
     def autologger(self):
         return self._logger
+
+    def _build_negation_partner_map(self):
+        # Maps predicate index -> index of its explicit negation (when both exist).
+        partner = {}
+        predicates = getattr(self._dataset, "predicates", None)
+        if predicates is None:
+            return partner
+
+        pred2idx = {pred: i for i, pred in enumerate(predicates)}
+        for i, pred in enumerate(predicates):
+            if isinstance(pred, predicate_data.Negation):
+                j = pred2idx.get(pred.predicate)
+                if j is not None:
+                    partner[i] = j
+                    partner[j] = i
+        return partner
     
     # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
     def _compute_truth_targets(self, batch, device):
@@ -277,6 +295,9 @@ class AlexBeth(Game):
         # Scrambling resistance is (performance after scrambling / original performance).
         perf_scrambled = 0.0
         perf_baseline = 0.0
+        # Negation consistency accumulator.
+        neg_consistency_sum = 0.0
+        neg_consistency_items = 0
 
         # Shared cache for message dump + language-level eval metrics.
         eval_cache = None
@@ -358,6 +379,31 @@ class AlexBeth(Game):
                 perf_scrambled += torch.minimum(correct_prob, scrambled_correct_prob).sum().item()
                 perf_baseline += correct_prob.sum().item()
 
+            # Negation consistency: for predicate p and its negation ¬p on the same candidate, P(p=true) + P(¬p=true) should be close to 1.
+            if self.run_fancy_lang_eval and (not self.no_negation) and self._negation_partner_idx:
+                valid_rows = []
+                neg_pred_indices = []
+                for row_i, pred_i in enumerate(batch.predicate_idx):
+                    neg_i = self._negation_partner_idx.get(int(pred_i))
+                    if neg_i is not None:
+                        valid_rows.append(row_i)
+                        neg_pred_indices.append(neg_i)
+
+                if len(valid_rows) > 0:
+                    row_idx = torch.tensor(valid_rows, device=probs.device, dtype=torch.long)
+                    neg_pred_idx = torch.tensor(neg_pred_indices, device=probs.device, dtype=torch.long)
+
+                    neg_asker_outcome = self.asker(neg_pred_idx)
+                    beth_input = self._beth_input(batch)
+                    beth_input_subset = {k: v.index_select(0, row_idx) for k, v in beth_input.items()}
+                    neg_retriever_outcome = self.retriever(beth_input_subset, *neg_asker_outcome.action)
+                    neg_probs = torch.sigmoid(neg_retriever_outcome.scores)
+
+                    base_probs = probs.index_select(0, row_idx)
+                    neg_consistency = 1.0 - torch.abs((base_probs + neg_probs) - 1.0)
+                    neg_consistency_sum += neg_consistency.sum().item()
+                    neg_consistency_items += neg_consistency.numel()
+
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
             if eval_cache is not None:
@@ -398,6 +444,9 @@ class AlexBeth(Game):
             scrambling_ratio = 0
             if perf_baseline > 0.0: scrambling_ratio = perf_scrambled / perf_baseline
             log('eval/scrambling-resistance', scrambling_ratio)
+            neg_consistency_ratio = 0
+            if (not self.no_negation) and neg_consistency_items > 0: neg_consistency_ratio = neg_consistency_sum / neg_consistency_items
+            log('eval/neg_consistency', neg_consistency_ratio)
 
             if eval_cache is not None and len(eval_cache["messages"]) > 1:
                 # Topographic similarity: correlation between message distances and predicate identity distances.
@@ -422,6 +471,8 @@ class AlexBeth(Game):
                     log('eval/topographic_similarity', topo_corr)
                 elif self.autologger.display != 'minimal':
                     print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
+
+                # Decision tree: how easily predicate indentity can be recovered from messages.
 
         #                            #
         # -------------------------- #
