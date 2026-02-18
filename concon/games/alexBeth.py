@@ -401,8 +401,8 @@ class AlexBeth(Game):
 
                     base_probs = probs.index_select(0, row_idx)
                     neg_consistency = 1.0 - torch.abs((base_probs + neg_probs) - 1.0)
-                    neg_consistency_sum += neg_consistency.sum().item()
-                    neg_consistency_items += neg_consistency.numel()
+                    neg_constistency_total += neg_consistency.sum().item()
+                    neg_constistency_count += neg_consistency.numel()
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
@@ -445,7 +445,7 @@ class AlexBeth(Game):
             if perf_baseline > 0.0: scrambling_ratio = perf_scrambled / perf_baseline
             log('eval/scrambling-resistance', scrambling_ratio)
             neg_consistency_ratio = 0
-            if (not self.no_negation) and neg_consistency_items > 0: neg_consistency_ratio = neg_consistency_sum / neg_consistency_items
+            if (not self.no_negation) and neg_constistency_count > 0: neg_consistency_ratio = neg_constistency_total / neg_constistency_count
             log('eval/neg_consistency', neg_consistency_ratio)
 
             if eval_cache is not None and len(eval_cache["messages"]) > 1:
