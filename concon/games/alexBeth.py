@@ -295,9 +295,9 @@ class AlexBeth(Game):
         # Scrambling resistance is (performance after scrambling / original performance).
         perf_scrambled = 0.0
         perf_baseline = 0.0
-        # Negation consistency accumulator.
-        neg_consistency_sum = 0.0
-        neg_consistency_items = 0
+        # Running totals to compute negation consistency.
+        neg_consistency_total = 0.0
+        neg_consistency_count = 0
 
         # Shared cache for message dump + language-level eval metrics.
         eval_cache = None
@@ -465,7 +465,7 @@ class AlexBeth(Game):
 
                 if len(unique_messages) > 1 and len(unique_predicates) > 1:
                     sample_messages = [tuple(m) for (m, _) in sample]
-                    # Keep a sequence-like meaning so default Hamming distance works.
+                    # Wrap predicate ids into 1-element tuples so default Hamming distance works.
                     sample_meanings = [(int(pid),) for (_, pid) in sample]
                     topo_corr, *_ = compute_correlation.mantel(sample_messages, sample_meanings, correl_only=True)
                     log('eval/topographic_similarity', topo_corr)
