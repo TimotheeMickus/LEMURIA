@@ -70,9 +70,9 @@ class AlexBeth(Game):
         self.run_fancy_lang_eval = bool(self.dump_message_mode)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
         self.epochs = getattr(args, "epochs", None)
-        # Negation-specific metrics should only run when negation exists.
+        # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
-        self._negation_partner_idx = self._build_negation_partner_map()
+        self._predicate_negation_idx = self._build_negation_correspondence()
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -101,20 +101,24 @@ class AlexBeth(Game):
     def autologger(self):
         return self._logger
 
-    def _build_negation_partner_map(self):
-        # Maps predicate index -> index of its explicit negation (when both exist).
+    def _build_negation_correspondence(self):
+        '''
+        Returns a dictionary of {predicate index: index of its negation}.
+        Builds pairs of the indices of predicates in `self._dataset.predicates`.
+        This works both ways: if p[i]=¬p and p[j]=p, store both i: j and j: i.
+            partner: dict[int, int]
+        '''
         partner = {}
-        predicates = getattr(self._dataset, "predicates", None)
-        if predicates is None:
-            return partner
-
-        pred2idx = {pred: i for i, pred in enumerate(predicates)}
-        for i, pred in enumerate(predicates):
+        # Map predicates to their indices
+        # This should perhaps be a feature of the Dataset
+        pred2idx = {pred: i for i, pred in enumerate(self._dataset.predicates)}
+        # For each negative predicate and its index, Negation stores its positive "base"
+        for i, pred in enumerate(self._dataset.predicates):
             if isinstance(pred, predicate_data.Negation):
-                j = pred2idx.get(pred.predicate)
-                if j is not None:
-                    partner[i] = j
-                    partner[j] = i
+                # Map the negation and the base to each other
+                j = pred2idx[pred.predicate]
+                partner[i] = j
+                partner[j] = i
         return partner
     
     # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
@@ -280,7 +284,7 @@ class AlexBeth(Game):
         max_batches = 128
         nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
 
-        # Running sums so we can compute dataset-averaged metrics without materialising every batch.
+        # Epoch-level totals (we aggregate batch by batch, then normalize once at the end).
         total_items = 0
         total_loss = 0.0
         total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
@@ -292,10 +296,10 @@ class AlexBeth(Game):
         total_falsify_ce = 0.0 # falsify: predicate false for candidate.
         total_verify_items = 0 # denominators for ratios
         total_falsify_items = 0
-        # Scrambling resistance is (performance after scrambling / original performance).
+        # Scrambling resistance = preserved correctness after shuffling / original correctness.
         perf_scrambled = 0.0
         perf_baseline = 0.0
-        # Running totals to compute negation consistency.
+        # Mean negation consistency over matched (p, ¬p) rows.
         neg_consistency_total = 0.0
         neg_consistency_count = 0
 
@@ -380,29 +384,41 @@ class AlexBeth(Game):
                 perf_baseline += correct_prob.sum().item()
 
             # Negation consistency: for predicate p and its negation ¬p on the same candidate, P(p=true) + P(¬p=true) should be close to 1.
-            if self.run_fancy_lang_eval and (not self.no_negation) and self._negation_partner_idx:
-                valid_rows = []
+            # In particular: in the current evaluation batch select rows with predicate p
+            # Then run the model on the same candidates showing the model ¬p
+            # Alex generates a signal for ¬p, Beth outputs P(¬p=true | signal_¬p, candidate)
+            # Consistency per item: c = 1 - |P(p=true) + P(¬p=true) - 1|
+            # Per batch: C = 1/N * (sum for i=1 to N) of c(x_i)
+            if self.run_fancy_lang_eval and (not self.no_negation):
+                paired_rows = []
                 neg_pred_indices = []
+                # Store idx for Batch rows and their negations
+                # inb4: Rows already contain P(p=true) probabilities
                 for row_i, pred_i in enumerate(batch.predicate_idx):
-                    neg_i = self._negation_partner_idx.get(int(pred_i))
-                    if neg_i is not None:
-                        valid_rows.append(row_i)
-                        neg_pred_indices.append(neg_i)
+                    neg_i = self._predicate_negation_idx[int(pred_i)]
+                    paired_rows.append(row_i)
+                    neg_pred_indices.append(neg_i)
 
-                if len(valid_rows) > 0:
-                    row_idx = torch.tensor(valid_rows, device=probs.device, dtype=torch.long)
+                if len(paired_rows) > 0:
+                    # Build tensor of row positions in current batch and aligned negated predicate ids
+                    row_idx = torch.tensor(paired_rows, device=probs.device, dtype=torch.long)
                     neg_pred_idx = torch.tensor(neg_pred_indices, device=probs.device, dtype=torch.long)
 
+                    # Generate signals for negated predicates
                     neg_asker_outcome = self.asker(neg_pred_idx)
+                    # From candidate tensors for this batch, keep only rows that were paired
                     beth_input = self._beth_input(batch)
                     beth_input_subset = {k: v.index_select(0, row_idx) for k, v in beth_input.items()}
+                    # Score candidates based on ¬p signals and convert to probabilities
                     neg_retriever_outcome = self.retriever(beth_input_subset, *neg_asker_outcome.action)
-                    neg_probs = torch.sigmoid(neg_retriever_outcome.scores)
+                    p_true_given_not_p = torch.sigmoid(neg_retriever_outcome.scores)
+                    # Original probabilities of paired rows
+                    p_true_given_p = probs.index_select(0, row_idx)
 
-                    base_probs = probs.index_select(0, row_idx)
-                    neg_consistency = 1.0 - torch.abs((base_probs + neg_probs) - 1.0)
-                    neg_consistency_total += neg_consistency.sum().item()
-                    neg_consistency_count += neg_consistency.numel()
+                    neg_consistency = 1.0 - torch.abs((p_true_given_p + p_true_given_not_p) - 1.0)
+                    # Accumulate sum and count: C = 1/N * (sum for i=1 to N) of c(x_i)
+                    neg_consistency_total += neg_consistency.sum().item() # sum_i c(x_i)
+                    neg_consistency_count += neg_consistency.numel() # N
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
@@ -444,7 +460,7 @@ class AlexBeth(Game):
             scrambling_ratio = 0
             if perf_baseline > 0.0: scrambling_ratio = perf_scrambled / perf_baseline
             log('eval/scrambling-resistance', scrambling_ratio)
-            # Only if no_negation is not True (there is negation)
+            # Only meaningful when negation predicates exist.
             if not self.no_negation: 
                 neg_consistency_ratio = 0
                 if neg_consistency_count > 0: 
@@ -475,7 +491,7 @@ class AlexBeth(Game):
                 elif self.autologger.display != 'minimal':
                     print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
 
-                # Decision tree: how easily predicate indentity can be recovered from messages.
+                # Decision tree TODO: how easily predicate indentity can be recovered from messages.
 
         #                            #
         # -------------------------- #
