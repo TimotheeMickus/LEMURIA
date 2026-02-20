@@ -362,6 +362,9 @@ class Game(metaclass=ABCMeta):
         """
         Trains all agents over a given number of epochs.
         """
+        # Reference evaluation before parameter updates.
+        self.evaluate(data_loader, epoch_index=-1)
+
         for epoch_index in range(start_epoch_index, start_epoch_index + epochs):
             timepoint_0 = time.time()
 
