@@ -73,6 +73,8 @@ class AlexBeth(Game):
         # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
         self._predicate_negation_idx = self._build_negation_correspondence()
+        # For topographic similarity: candidate id = position in list
+        self._topsim_candidates = self._build_candidate_vector()
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -100,6 +102,13 @@ class AlexBeth(Game):
     @property
     def autologger(self):
         return self._logger
+    
+    def _build_candidate_vector(self):
+        candidate_vector = [
+            predicate_data.Candidate({prop: value for prop, value in zip(self._dataset.properties, values)}
+            for values in it.product(*(prop.values for prop in self._dataset.properties)))
+        ]
+        return candidate_vector
 
     def _build_negation_correspondence(self):
         '''
@@ -467,26 +476,28 @@ class AlexBeth(Game):
                     neg_consistency_ratio = neg_consistency_total / neg_consistency_count
                 log('eval/neg_consistency', neg_consistency_ratio)
 
+            # Topographic similarity understood as the Hamming distance between candidate meanings as vectors and predicates
             if eval_cache is not None and len(eval_cache["messages"]) > 1:
-                # Topographic similarity: correlation between message distances and predicate identity distances.
                 sample_size = 1024
+                # sample = [([s0, s1], id0), ([s2], id1), ...]
                 sample = list(zip(eval_cache["messages"], eval_cache["predicate_ids"]))
                 random.shuffle(sample)
                 sample = sample[:sample_size]
+                # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
+                sample_signals = [tuple(s) for (s, _) in sample]
 
-                unique_messages = set()
-                unique_predicates = set()
-                for m, pid in sample:
-                    unique_messages.add(tuple(m))
-                    unique_predicates.add(int(pid))
-                    if len(unique_messages) > 1 and len(unique_predicates) > 1:
-                        break
+                # Meaning is expressed as a binary vector over candidate IDs
+                # sample_cand_vec = [(1,1,0,0), (0,0,1,1), ...]
+                sample_cand_vecs = []
+                # For each predicate build meaning vector
+                for _, pid in sample:
+                    pred = self._dataset.predicates[int(pid)]
+                    # candidate_vec[k] = 1 if predicate verifies candidate_k, 0 otherwise
+                    candidate_vec = tuple(1 if pred.verifies(cand) else 0 for cand in self._topsim_candidates)
+                    sample_cand_vecs.append(candidate_vec)
 
-                if len(unique_messages) > 1 and len(unique_predicates) > 1:
-                    sample_messages = [tuple(m) for (m, _) in sample]
-                    # Wrap predicate ids into 1-element tuples so default Hamming distance works.
-                    sample_meanings = [(int(pid),) for (_, pid) in sample]
-                    topo_corr, *_ = compute_correlation.mantel(sample_messages, sample_meanings, correl_only=True)
+                if len(set(sample_signals)) > 1 and len(set(sample_cand_vecs)) > 1:
+                    topo_corr, *_ = compute_correlation.mantel(sample_signals, sample_cand_vecs, correl_only=True)
                     log('eval/topographic_similarity', topo_corr)
                 elif self.autologger.display != 'minimal':
                     print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')

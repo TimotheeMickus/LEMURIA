@@ -132,7 +132,7 @@ def get_args(remaining_args=None):
     group.add_argument('--overfit', help='use a fixed small predicate/candidate pool to test memorization', action='store_true')
     group.add_argument('--batch_size', help='batch size', default=128, type=int)
     group.add_argument('--num_candidates', help='number of candidates per predicate in a batch', default=10, type=int)
-    group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='random')
+    group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='balanced')
 
     group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
