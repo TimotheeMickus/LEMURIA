@@ -596,7 +596,7 @@ class Dataset():
         base_candidates = predicate.build(target=target) # list[Candidate]
         for _ in range(n):
             base_candidate = random.choice(base_candidates)
-            candidate = self.extendCandidate(base_candidate, allow_indeterminate):
+            candidate = self.extendCandidate(base_candidate, allow_indeterminate)
             
             candidates.append(candidate)
 
