@@ -620,7 +620,7 @@ class Dataset():
     # We shuffle candidates to avoid behaviours related to position.
     def _sample_balanced_candidates(self, predicate, num_candidates, allow_indeterminate):
         # Determine number of true/false.
-        assort (num_candidates % 2 == 0), f"It is impossible to balance an odd number ({num_candidates}) of candidates."
+        assert (num_candidates % 2 == 0), f"It is impossible to balance an odd number ({num_candidates}) of candidates."
         num_true = num_candidates // 2
         num_false = num_candidates // 2 #num_candidates - num_true
 
