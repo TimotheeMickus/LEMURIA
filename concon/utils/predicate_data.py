@@ -671,16 +671,15 @@ class Dataset():
 
         return count
 
-    # Builds a fixed predicate pool with fixed candidates/truths for overfit tests.
+    # Builds a fixed pool of instances. (Used for overfitting tests.)
     def _init_overfit_pool(self):
-        # Pick a fixed pool of predicates.
         pool_size = min(100, len(self.predicates))
-        # Randomly sample that many predicate indices (once).
         pool_indices = random.sample(range(len(self.predicates)), k=pool_size) # list[int]
+
         items = [] # list[(int, Predicate, list[Candidate], list[int])]
         for pred_idx in pool_indices:
             predicate = self.predicates[pred_idx]
-            if self.candidate_sampling == 'balanced':
+            if(self.candidate_sampling == 'balanced'):
                 candidates, truths = self._sample_balanced_candidates(predicate, self.num_candidates, self.allow_indeterminate)
             else:
                 candidates = []
@@ -689,7 +688,9 @@ class Dataset():
                     candidate = self.generateCandidate(allow_indeterminate=self.allow_indeterminate)
                     candidates.append(candidate)
                     truths.append(1 if predicate.check(candidate) == 1 else 0)
+
             items.append((pred_idx, predicate, candidates, truths))
+
         self._overfit_items = items
 
 
