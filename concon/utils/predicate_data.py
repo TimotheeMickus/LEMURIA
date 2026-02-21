@@ -538,21 +538,21 @@ class Dataset():
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
 
-            # Sample `num_candidates` candidates for the batch
+            # Samples `num_candidates` candidates.
             candidates = []
             truths = []
-            if candidate_sampling == 'balanced':
-                # At some point, it might be interesting to test against balanced distributions
+            if(candidate_sampling == 'balanced'):
+                # At some point, it might be interesting to test against balanced distributions TMOTHÉE: What is the point of this comment?
                 candidates, truths = self._sample_balanced_candidates(predicate, num_candidates, allow_indeterminate)
             else:
                 for _ in range(num_candidates):
                     candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
                     candidates.append(candidate)
-                    # cache predicate.check
+                    # cache predicate.check TIMOTHÉE I don't understand this comment.
                     truths.append(1 if predicate.check(candidate) == 1 else 0)
             batch.append((pred_idx, predicate, candidates, truths))
 
-        predicate_idx, pred_objects, candidates, truths = zip(*batch) # Unzips the list of tuples (to a tuple of lists).
+        predicate_idx, pred_objects, candidates, truths = zip(*batch)
 
         # In fact, it would be better to store in the batch tensors ready to be fed to the model.
         # So, the predicate indices instead of the predicates, and for the candidates, use graphTensorize here https://colab.research.google.com/drive/1C5iUSxX-MIJXIb4wfUzYBExRTF-OhsWn?usp=sharing
@@ -615,7 +615,7 @@ class Dataset():
 
         return node_idx, edge_idx, graph_size
     
-    # Sample candidates with balanced truth values so retriever cannot predict a "default" class.
+    # Samples candidates balacing satisfaction given a predicate. (This ensures that the performance of the random baseline is 0.5.)
     # Here, we determine the number of candidates to sample for each truth-value,
     # then we sample them through a helper if available, if not we add random candidates to fill the quota.
     # We shuffle candidates to avoid behaviours related to position.
