@@ -272,7 +272,7 @@ class Value(Predicate):
         if(target == 1): return [Candidate(prop2value={self.prop: self})]
         if(target == -1): return [Candidate(prop2value={self.prop: value}) for value in self.prop.values if value != self]
         if(target == 0): return [Candidate(prop2value={self.prop: None})]
-        assert False
+        assert False, f"Unknown target value ({target})."
 
     def __str__(self): return self.name
 
@@ -341,8 +341,7 @@ class Conjunction(Predicate):
             
             return list(s)
         
-        assert False
-            
+        assert False, f"Unknown target value ({target})."
 
     def __str__(self):
         return f"({self.pred1}∧{self.pred2})"
@@ -621,8 +620,9 @@ class Dataset():
     # We shuffle candidates to avoid behaviours related to position.
     def _sample_balanced_candidates(self, predicate, num_candidates, allow_indeterminate):
         # Determine number of true/false.
+        assort (num_candidates % 2 == 0), f"It is impossible to balance an odd number ({num_candidates}) of candidates."
         num_true = num_candidates // 2
-        num_false = num_candidates - num_true
+        num_false = num_candidates // 2 #num_candidates - num_true
 
         candidates = [] # list[Candidate]
         truths = [] # list[int]
@@ -639,13 +639,14 @@ class Dataset():
             truths.append(predicate.check(candidate))
 
         # Shuffle candidates to avoid strategies based on candidate positions.
+        # TIMOTHÉE If the agents are implemented correctly, this should be useless and so removed.
         combined = list(zip(candidates, truths))
         random.shuffle(combined)
         candidates, truths = zip(*combined)
 
         return candidates, truths
 
-    # Append up to n candidates that satisfy or falsify (1/-1) the predicate.
+    # Appends up to `n` candidates satisfying (target=1) or falsifying (target=-1) the predicate.
     # predicate.build() if available from generated set, then randomly sample until we hit n or a max attempt cap.
     # Candidate/truth list is updated in place.
     def _fill_target(self, predicate, target, n, allow_indeterminate, candidates, truths):
@@ -657,7 +658,7 @@ class Dataset():
             truths.append(1 if target == 1 else 0)
             count += 1
 
-        # TODO in fqct, there is a better way of doing this, by extending candidates returned by predicate.build.
+        # TODO in fact, there is a better way of doing this, by extending candidates returned by predicate.build.
         attempts = 0
         max_attempts = n * 50
         while count < n and attempts < max_attempts:
@@ -670,7 +671,7 @@ class Dataset():
 
         return count
 
-    # Build a fixed predicate pool with fixed candidates/truths for overfit tests.
+    # Builds a fixed predicate pool with fixed candidates/truths for overfit tests.
     def _init_overfit_pool(self):
         # Pick a fixed pool of predicates.
         pool_size = min(100, len(self.predicates))
