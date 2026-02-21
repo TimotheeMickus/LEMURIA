@@ -530,9 +530,11 @@ class Dataset():
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
         for _ in range(size):
-            if self.overfit:
+            if(self.overfit): # Specific procedure in overfitting mode.
                 pred_idx, predicate, candidates, truths = random.choice(self._overfit_items)
                 batch.append((pred_idx, predicate, list(candidates), list(truths)))
+                continue
+
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
 
