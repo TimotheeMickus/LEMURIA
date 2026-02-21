@@ -701,6 +701,7 @@ if(__name__ == "__main__"):
     dataset = Dataset(device='cpu', batch_size=128, properties="4-4", max_depth=3, nontrivial_only=False, no_negation=False, no_conjunction=False)
     print("\nDataset info: ")
     dataset.print_info()
+
     # Estimates the probability that a random candidate satisfy a random predicate.
     print("\nSatisfaction probability test (logical)")
     nb = 10_000
@@ -718,7 +719,7 @@ if(__name__ == "__main__"):
     print("\nEncoding correctness test: ")
     batch = dataset.get_batch(size=256)
     
-    # Sparse encoding should preserve indices
+    # Checks that sparse encoding preserves indices.
     sparse = batch.encode_predicates('sparse')
     assert np.all(sparse == np.array(batch.predicate_idx)), "Sparse encoding mismatch"
     print("Sparse encoding OK")
