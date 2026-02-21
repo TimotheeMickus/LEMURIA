@@ -413,7 +413,6 @@ class Dataset():
         self.allow_indeterminate = allow_indeterminate
         self.num_candidates = num_candidates
         self.candidate_sampling = candidate_sampling
-        # Creates an overfitting dataset (memorisable)
         self.overfit = overfit
 
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
@@ -431,8 +430,6 @@ class Dataset():
         self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules
         self.nb_categories = len(self.predicates) 
-        # Overfit pool (fixed predicates + fixed candidates/truths)
-        self._overfit_items = None
 
         # Stores predicates as tensors.
         self.object_token='<obj>'
@@ -457,8 +454,23 @@ class Dataset():
         edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
         self.edge_i2s, self.edge_s2i = self._vocabulary(edge_labels, unknown=None)
 
-        if self.overfit:
+        if(self.overfit):
             self._init_overfit_pool()
+
+    # Builds a fixed pool of instances. (Used for overfitting tests.)
+    def _init_overfit_pool(self, size=100):
+        instances = [] # list[(int, Predicate, list[Candidate], list[int])]
+        for pred_idx in random.choices(range(len(self.predicates)), k=size):
+            predicate = self.predicates[pred_idx]
+
+            if(self.candidate_sampling == 'balanced'):
+                candidates, truths = self.generateCandidatesBalanced(predicate, self.num_candidates, self.allow_indeterminate)
+            else:
+                candidates, truths = self.generateCandidates(self.num_candidates, self.allow_indeterminate)
+
+            instances.append((pred_idx, predicate, candidates, truths))
+
+        self._overfit_pool = instances
 
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int (a single node is of depth one)
@@ -529,26 +541,21 @@ class Dataset():
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
         for _ in range(size):
-            if(self.overfit): # Specific procedure in overfitting mode.
-                pred_idx, predicate, candidates, truths = random.choice(self._overfit_items)
-                batch.append((pred_idx, predicate, list(candidates), list(truths)))
+            if(self.overfit): # Specific procedure for overfitting mode.
+                pred_idx, predicate, candidates, truths = random.choice(self._overfit_pool)
+                batch.append((pred_idx, predicate, list(candidates), list(truths))) # TIMOTHÉE Why are the two lists copied (with `list`)?
                 continue
 
             # Selects a predicate.
             pred_idx, predicate = self.selectPredicate()
 
             # Samples `num_candidates` candidates.
-            candidates = []
-            truths = []
             if(candidate_sampling == 'balanced'):
                 # At some point, it might be interesting to test against balanced distributions TMOTHÉE: What is the point of this comment?
-                candidates, truths = self._sample_balanced_candidates(predicate, num_candidates, allow_indeterminate)
+                candidates, truths = self.generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate)
             else:
-                for _ in range(num_candidates):
-                    candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
-                    candidates.append(candidate)
-                    # cache predicate.check TIMOTHÉE I don't understand this comment.
-                    truths.append(1 if predicate.check(candidate) == 1 else 0)
+                candidates, truths = self.generateCandidates(num_candidates, allow_indeterminate)
+
             batch.append((pred_idx, predicate, candidates, truths))
 
         predicate_idx, pred_objects, candidates, truths = zip(*batch)
@@ -563,6 +570,38 @@ class Dataset():
         idx = np.random.randint(0, len(self.predicates))
         return (idx, self.predicates[idx])
 
+    # candidate: Candidate
+    # allow_indeterminate
+    # Outputs a Candidate.
+    def extendCandidate(self, candidate, allow_indeterminate):
+        prop2value = dict(candidate.prop2value) # dict[Property, Value|NoneType]
+
+        for prop in self.properties:
+            if(prop in prop2value): continue
+            if(allow_indeterminate and (np.random.rand() < (1 / (1 + len(prop.values))))): continue
+            
+            prop2value[prop] = np.random.choice(prop.values) # All values are equiprobable.
+        
+        return Candidate(prop2value)
+
+    # Generates `n` candidates satisfying (`target`=1) or falsifying (`target`=-1) `predicate`.
+    # predicate: Predicate
+    # target: int
+    # n: int
+    # allow_indeterminate: bool
+    # Outputs a list[Candidate].
+    def generateCandidatesTarget(self, predicate, target, n, allow_indeterminate):
+        candidates = [] # list[Candidate]
+
+        base_candidates = predicate.build(target=target) # list[Candidate]
+        for _ in range(n):
+            base_candidate = random.choice(base_candidates)
+            candidate = self.extendCandidate(base_candidate, allow_indeterminate):
+            
+            candidates.append(candidate)
+
+        return candidates
+
     # allow_indeterminate: Bool
     # Outputs a Candidate.
     def generateCandidate(self, allow_indeterminate):
@@ -575,21 +614,63 @@ class Dataset():
         
         return Candidate(prop2value)
     
+    # Samples candidates balacing satisfaction given a predicate. (This ensures that the performance of the random baseline is 0.5.)
+    # predicate: Predicate
+    # num_candidates: int
+    # allow_indeterminate: bool
+    # Outputs a (list[Candidate], list[int]).
+    def generateCandidatesBalanced(self, predicate, num_candidates, allow_indeterminate):
+        assert (num_candidates % 2 == 0), f"It is impossible to balance an odd number ({num_candidates}) of candidates."
+        num_true = num_candidates // 2
+        num_false = num_candidates // 2 #num_candidates - num_true
+
+        candidates = [] # list[Candidate]
+        truths = [] # list[int]
+
+        candidates.extend(self.generateCandidatesTarget(predicate, 1, num_true, allow_indeterminate))
+        truths.extend([1] * num_true)
+
+        candidates.extend(self.generateCandidatesTarget(predicate, -1, num_false, allow_indeterminate))
+        truths.extend([-1] * num_false)
+
+        # Shuffle candidates to avoid strategies based on candidate positions.
+        # TIMOTHÉE If the agents are implemented correctly, this should be useless and so removed.
+        combined = list(zip(candidates, truths))
+        random.shuffle(combined)
+        candidates, truths = zip(*combined)
+
+        return (candidates, truths)
+
+    # num_candidates: int
+    # allow_indeterminate: bool
+    # Outputs a (list[Candidate], list[int]).
+    def generateCandidates(self, num_candidates, allow_indeterminate):
+        candidates = [] # list[Candidate]
+        truths = [] # list[int]
+        for _ in range(num_candidates):
+            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
+            candidates.append(candidate)
+            truths.append(1 if predicate.check(candidate) == 1 else 0)
+
+        return (candidates, truths)
+   
+    # symbols: TODO
+    # unknown: str
     def _vocabulary(self, symbols, unknown='<unk>'):
         '''Given a set of strings, returns mappings: index2string and string2index.'''
         symbols = set(symbols)
-        if unknown is not None:
-            symbols.add(unknown)
-        i2s = list(symbols)
-        s2i = {s:i for (i,s) in enumerate(i2s)}
-        return i2s, s2i
+        if(unknown is not None): symbols.add(unknown)
+        i2s = list(symbols) # list[TODO]
+        s2i = {s: i for (i, s) in enumerate(i2s)} # dict[int, TODO]
+        
+        return (i2s, s2i)
 
+    # graph: list[dict[str, str]]
     def _tensorize_graph(self, graph, node_labels_sym2idx, edge_labels_sym2id, padding_length=None):
         '''
         Given a graph expressed as a list of dictionaries and a set of node and edge labels,
         returns node, edge indices and graph depth.
         '''
-        # graph: list[dict[str, str]]
         graph_size = sum([(len(o) + 1) for o in graph])
         length = padding_length if padding_length is not None else graph_size
 
@@ -612,86 +693,7 @@ class Dataset():
 
             root_id = i
 
-        return node_idx, edge_idx, graph_size
-    
-    # Samples candidates balacing satisfaction given a predicate. (This ensures that the performance of the random baseline is 0.5.)
-    # Here, we determine the number of candidates to sample for each truth-value,
-    # then we sample them through a helper if available, if not we add random candidates to fill the quota.
-    # We shuffle candidates to avoid behaviours related to position.
-    def _sample_balanced_candidates(self, predicate, num_candidates, allow_indeterminate):
-        # Determine number of true/false.
-        assert (num_candidates % 2 == 0), f"It is impossible to balance an odd number ({num_candidates}) of candidates."
-        num_true = num_candidates // 2
-        num_false = num_candidates // 2 #num_candidates - num_true
-
-        candidates = [] # list[Candidate]
-        truths = [] # list[int]
-
-        # Adds up to num_true candidates satisfying the predicate, selected from predicate.build(1). Same for negative candidates.
-        # (modify candidates and truths in place)
-        self._fill_target(predicate, 1, num_true, allow_indeterminate, candidates, truths)
-        self._fill_target(predicate, -1, num_false, allow_indeterminate, candidates, truths)
-
-        # If not enough candidates have been generated, this adds random samples.
-        while len(candidates) < num_candidates:
-            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
-            candidates.append(candidate)
-            truths.append(predicate.check(candidate))
-
-        # Shuffle candidates to avoid strategies based on candidate positions.
-        # TIMOTHÉE If the agents are implemented correctly, this should be useless and so removed.
-        combined = list(zip(candidates, truths))
-        random.shuffle(combined)
-        candidates, truths = zip(*combined)
-
-        return candidates, truths
-
-    # Appends up to `n` candidates satisfying (target=1) or falsifying (target=-1) the predicate.
-    # predicate.build() if available from generated set, then randomly sample until we hit n or a max attempt cap.
-    # Candidate/truth list is updated in place.
-    def _fill_target(self, predicate, target, n, allow_indeterminate, candidates, truths):
-        target_list = predicate.build(target=target) # list[Candidate]
-
-        count = 0
-        while count < n and target_list:
-            candidates.append(random.choice(target_list))
-            truths.append(1 if target == 1 else 0)
-            count += 1
-
-        # TODO in fact, there is a better way of doing this, by extending candidates returned by predicate.build.
-        attempts = 0
-        max_attempts = n * 50
-        while count < n and attempts < max_attempts:
-            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
-            if predicate.check(candidate) == target:
-                candidates.append(candidate)
-                truths.append(1 if target == 1 else 0)
-                count += 1
-            attempts += 1
-
-        return count
-
-    # Builds a fixed pool of instances. (Used for overfitting tests.)
-    def _init_overfit_pool(self):
-        pool_size = min(100, len(self.predicates))
-        pool_indices = random.sample(range(len(self.predicates)), k=pool_size) # list[int]
-
-        items = [] # list[(int, Predicate, list[Candidate], list[int])]
-        for pred_idx in pool_indices:
-            predicate = self.predicates[pred_idx]
-            if(self.candidate_sampling == 'balanced'):
-                candidates, truths = self._sample_balanced_candidates(predicate, self.num_candidates, self.allow_indeterminate)
-            else:
-                candidates = []
-                truths = []
-                for _ in range(self.num_candidates):
-                    candidate = self.generateCandidate(allow_indeterminate=self.allow_indeterminate)
-                    candidates.append(candidate)
-                    truths.append(1 if predicate.check(candidate) == 1 else 0)
-
-            items.append((pred_idx, predicate, candidates, truths))
-
-        self._overfit_items = items
+        return (node_idx, edge_idx, graph_size)
 
 
 def get_data_loader(args):
