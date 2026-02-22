@@ -8,7 +8,7 @@ import json
 from .games import AlexBeth
 from .utils.predicate_data import get_data_loader
 from .utils.misc import path_replace
-from .utils.logging import AutoLogger, build_run_name, setup_wandb_logging, finish_wandb_logging
+from .utils.log import AutoLogger, build_run_name, setup_wandb_logging, finish_wandb_logging
 
 def main(global_args=None, remaining_args=None):
     args = get_args(remaining_args)
