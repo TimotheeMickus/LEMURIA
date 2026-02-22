@@ -466,7 +466,7 @@ class Dataset():
             if(self.candidate_sampling == 'balanced'):
                 candidates, truths = self.generateCandidatesBalanced(predicate, self.num_candidates, self.allow_indeterminate)
             else:
-                candidates, truths = self.generateCandidates(self.num_candidates, self.allow_indeterminate)
+                candidates, truths = self.generateCandidates(predicate, self.num_candidates, self.allow_indeterminate)
 
             instances.append((pred_idx, predicate, candidates, truths))
 
@@ -554,7 +554,7 @@ class Dataset():
                 # At some point, it might be interesting to test against balanced distributions TMOTHÉE: What is the point of this comment?
                 candidates, truths = self.generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate)
             else:
-                candidates, truths = self.generateCandidates(num_candidates, allow_indeterminate)
+                candidates, truths = self.generateCandidates(predicate, num_candidates, allow_indeterminate)
 
             batch.append((pred_idx, predicate, candidates, truths))
 
@@ -642,9 +642,10 @@ class Dataset():
         return (candidates, truths)
 
     # num_candidates: int
+    # predicate: Predicate
     # allow_indeterminate: bool
     # Outputs a (list[Candidate], list[int]).
-    def generateCandidates(self, num_candidates, allow_indeterminate):
+    def generateCandidates(self, predicate, num_candidates, allow_indeterminate):
         candidates = [] # list[Candidate]
         truths = [] # list[int]
         for _ in range(num_candidates):
