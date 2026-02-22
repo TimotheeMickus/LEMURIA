@@ -13,7 +13,6 @@ import sys
 
 import socket # for `gethostname`
 import torch # for device
-from datetime import datetime
 
 def get_args():
     arg_parser = argparse.ArgumentParser()
