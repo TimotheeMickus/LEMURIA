@@ -631,13 +631,8 @@ class Dataset():
         truths.extend([1] * num_true)
 
         candidates.extend(self.generateCandidatesTarget(predicate, -1, num_false, allow_indeterminate))
-        truths.extend([-1] * num_false)
-
-        # Shuffle candidates to avoid strategies based on candidate positions.
-        # TIMOTHÉE If the agents are implemented correctly, this should be useless and so removed.
-        combined = list(zip(candidates, truths))
-        random.shuffle(combined)
-        candidates, truths = zip(*combined)
+        # BCE expects labels 0/1
+        truths.extend([0] * num_false)
 
         return (candidates, truths)
 
