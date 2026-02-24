@@ -493,7 +493,7 @@ class AlexBeth(Game):
                 for _, pid in sample:
                     pred = self._dataset.predicates[int(pid)]
                     # candidate_vec[k] = 1 if predicate verifies candidate_k, 0 otherwise
-                    candidate_vec = tuple(1 if pred.verifies(cand) else 0 for cand in self._topsim_candidates)
+                    candidate_vec = tuple(1 if cand.verifies(pred) else 0 for cand in self._topsim_candidates)
                     sample_cand_vecs.append(candidate_vec)
 
                 if len(set(sample_signals)) > 1 and len(set(sample_cand_vecs)) > 1:
