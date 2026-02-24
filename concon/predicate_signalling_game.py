@@ -105,6 +105,13 @@ def do(args):
             if(not args.no_summary):
                 filename = run_summary_dir / "FAILURE"
                 open(filename, 'a').close()
+
+        # Export predicate-level performance tables and tie them to W&B as one artifact.
+        model.dump_predicate_performance(
+            run_summary_dir,
+            wandb_run=wandb_run,
+            artifact_name=f"predicate-performance-{run_name}",
+        )
         finish_wandb_logging(wandb_run)
 
 

@@ -75,6 +75,9 @@ class AlexBeth(Game):
         self._predicate_negation_idx = self._build_negation_correspondence()
         # For topographic similarity: candidate id = position in list
         self._topsim_candidates = self._build_candidate_vector()
+        # Row-level predicate diagnostics accumulated across eval calls.
+        self._predicate_perf_rows = []  # (epoch, pred_idx, perf, acc)
+        self._predicate_text_by_idx = {}
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -129,6 +132,68 @@ class AlexBeth(Game):
                 partner[i] = j
                 partner[j] = i
         return partner
+
+    def dump_predicate_performance(self, output_dir, wandb_run=None, artifact_name=None):
+        # Save one raw table and one aggregated table at the end of the run.
+        if len(self._predicate_perf_rows) == 0:
+            return
+
+        os.makedirs(output_dir, exist_ok=True)
+        rows_path = os.path.join(output_dir, "predicate_perf_rows.csv")
+        stats_path = os.path.join(output_dir, "predicate_perf_stats.csv")
+
+        with open(rows_path, "w") as ostr:
+            writer = csv.writer(ostr)
+            writer.writerow(["epoch", "pred_idx", "pred_str", "row_perf", "row_acc"])
+            for epoch, pred_idx, row_perf, row_acc in self._predicate_perf_rows:
+                writer.writerow([epoch, pred_idx, self._predicate_text_by_idx.get(pred_idx, ""), row_perf, row_acc])
+
+        # Aggregate per (epoch, predicate).
+        # State: count, perf_sum, perf_sq_sum, perf_min, perf_max, acc_sum, acc_sq_sum, acc_min, acc_max
+        agg = {}
+        for epoch, pred_idx, row_perf, row_acc in self._predicate_perf_rows:
+            key = (epoch, pred_idx)
+            if key not in agg:
+                agg[key] = [0, 0.0, 0.0, row_perf, row_perf, 0.0, 0.0, row_acc, row_acc]
+            state = agg[key]
+            state[0] += 1
+            state[1] += row_perf
+            state[2] += (row_perf * row_perf)
+            state[3] = min(state[3], row_perf)
+            state[4] = max(state[4], row_perf)
+            state[5] += row_acc
+            state[6] += (row_acc * row_acc)
+            state[7] = min(state[7], row_acc)
+            state[8] = max(state[8], row_acc)
+
+        with open(stats_path, "w") as ostr:
+            writer = csv.writer(ostr)
+            writer.writerow([
+                "epoch", "pred_idx", "pred_str", "count",
+                "perf_min", "perf_max", "perf_mean", "perf_var",
+                "acc_min", "acc_max", "acc_mean", "acc_var",
+            ])
+            for (epoch, pred_idx), state in sorted(agg.items()):
+                count = state[0]
+                perf_mean = state[1] / count
+                perf_var = max((state[2] / count) - (perf_mean * perf_mean), 0.0)
+                acc_mean = state[5] / count
+                acc_var = max((state[6] / count) - (acc_mean * acc_mean), 0.0)
+                writer.writerow([
+                    epoch, pred_idx, self._predicate_text_by_idx.get(pred_idx, ""), count,
+                    state[3], state[4], perf_mean, perf_var,
+                    state[7], state[8], acc_mean, acc_var,
+                ])
+
+        if wandb_run is not None:
+            import wandb
+            artifact = wandb.Artifact(
+                name=(artifact_name or f"predicate-performance-{wandb_run.id}"),
+                type="analysis",
+            )
+            artifact.add_file(rows_path)
+            artifact.add_file(stats_path)
+            wandb_run.log_artifact(artifact)
     
     # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
     def _compute_truth_targets(self, batch, device):
@@ -344,11 +409,21 @@ class AlexBeth(Game):
             preds = (probs >= 0.5).float() # Shape: (batch, num_candidates)
             accuracy = (preds == truth_targets).float().mean().item() # per candidate (not predicate)
             # `perf` measures how much probability mass Beth assigns to the correct truth value.
-            perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).mean().item()
+            correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
+            perf = correct_prob.mean().item()
             # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions.
             entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item()
             # Average symbol count for Alex's message in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
+
+            # Store row-level performance for predicate-level diagnostics.
+            row_perf = correct_prob.mean(dim=1).detach().cpu().tolist()
+            row_acc = (preds == truth_targets).float().mean(dim=1).detach().cpu().tolist()
+            for i, pred_idx in enumerate(batch.predicate_idx):
+                pred_idx = int(pred_idx)
+                if pred_idx not in self._predicate_text_by_idx:
+                    self._predicate_text_by_idx[pred_idx] = str(batch.predicate[i])
+                self._predicate_perf_rows.append((int(epoch_index), pred_idx, float(row_perf[i]), float(row_acc[i])))
 
             batch_items = truth_targets.numel()
             total_items += batch_items
@@ -385,7 +460,6 @@ class AlexBeth(Game):
                 scrambled_outcome = self.retriever(self._beth_input(batch), message=scrambled_messages, length=batch_lens)
                 scrambled_probs = torch.sigmoid(scrambled_outcome.scores)
 
-                correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
                 scrambled_correct_prob = torch.where(truth_targets > 0.5, scrambled_probs, 1.0 - scrambled_probs)
 
                 # Limit at min(original, scrambled) so scrambling does not increase score.
