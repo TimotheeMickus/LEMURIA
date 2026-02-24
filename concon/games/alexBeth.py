@@ -188,7 +188,7 @@ class AlexBeth(Game):
         if wandb_run is not None:
             import wandb
             artifact = wandb.Artifact(
-                name=(artifact_name or f"predicate-performance-{wandb_run.id}"),
+                name=f"predicate-performance-{wandb_run.id}",
                 type="analysis",
             )
             artifact.add_file(rows_path)
