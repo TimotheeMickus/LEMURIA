@@ -66,6 +66,7 @@ class AlexBeth(Game):
             self._retriever_avg_reward = misc.Averager(size=12800)
 
         self.dump_message_mode = getattr(args, "dump_message", None)
+        self.dump_predicate_perf = getattr(args, "dump_predicate_perf", False)
         # Trigger fancy language eval whenever messages are dumped.
         self.run_fancy_lang_eval = bool(self.dump_message_mode)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
@@ -135,7 +136,7 @@ class AlexBeth(Game):
 
     def dump_predicate_performance(self, output_dir, wandb_run=None, artifact_name=None):
         # Save one raw table and one aggregated table at the end of the run.
-        if len(self._predicate_perf_rows) == 0:
+        if (not self.dump_predicate_perf) or (len(self._predicate_perf_rows) == 0):
             return
 
         os.makedirs(output_dir, exist_ok=True)
@@ -416,14 +417,15 @@ class AlexBeth(Game):
             # Average symbol count for Alex's message in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
 
-            # Store row-level performance for predicate-level diagnostics.
-            row_perf = correct_prob.mean(dim=1).detach().cpu().tolist()
-            row_acc = (preds == truth_targets).float().mean(dim=1).detach().cpu().tolist()
-            for i, pred_idx in enumerate(batch.predicate_idx):
-                pred_idx = int(pred_idx)
-                if pred_idx not in self._predicate_text_by_idx:
-                    self._predicate_text_by_idx[pred_idx] = str(batch.predicate[i])
-                self._predicate_perf_rows.append((int(epoch_index), pred_idx, float(row_perf[i]), float(row_acc[i])))
+            # Store row-level performance for predicate diagnostics only when requested.
+            if self.dump_predicate_perf:
+                row_perf = correct_prob.mean(dim=1).detach().cpu().tolist()
+                row_acc = (preds == truth_targets).float().mean(dim=1).detach().cpu().tolist()
+                for i, pred_idx in enumerate(batch.predicate_idx):
+                    pred_idx = int(pred_idx)
+                    if pred_idx not in self._predicate_text_by_idx:
+                        self._predicate_text_by_idx[pred_idx] = str(batch.predicate[i])
+                    self._predicate_perf_rows.append((int(epoch_index), pred_idx, float(row_perf[i]), float(row_acc[i])))
 
             batch_items = truth_targets.numel()
             total_items += batch_items

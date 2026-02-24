@@ -106,12 +106,12 @@ def do(args):
                 filename = run_summary_dir / "FAILURE"
                 open(filename, 'a').close()
 
-        # Export predicate-level performance tables and tie them to W&B as one artifact.
-        model.dump_predicate_performance(
-            run_summary_dir,
-            wandb_run=wandb_run,
-            artifact_name=f"predicate-performance-{run_name}",
-        )
+        if args.dump_predicate_perf:
+            # Export predicate-level performance tables and tie them to W&B as one artifact.
+            model.dump_predicate_performance(
+                run_summary_dir,
+                wandb_run=wandb_run,
+            )
         finish_wandb_logging(wandb_run)
 
 
@@ -205,6 +205,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
+    group.add_argument('--dump_predicate_perf', help='dump per-predicate performance tables and log them as a W&B artifact', action='store_true')
     
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 
