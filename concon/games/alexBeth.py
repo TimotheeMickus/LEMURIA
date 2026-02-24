@@ -401,12 +401,13 @@ class AlexBeth(Game):
             if self.run_fancy_lang_eval and (not self.no_negation):
                 paired_rows = []
                 neg_pred_indices = []
-                # Store idx for Batch rows and their negations
+                # Store idx for Batch rows and their negations if exist
                 # inb4: Rows already contain P(p=true) probabilities
                 for row_i, pred_i in enumerate(batch.predicate_idx):
                     neg_i = self._predicate_negation_idx[int(pred_i)]
-                    paired_rows.append(row_i)
-                    neg_pred_indices.append(neg_i)
+                    if neg_i is not None:
+                        paired_rows.append(row_i)
+                        neg_pred_indices.append(neg_i)
 
                 if len(paired_rows) > 0:
                     # Build tensor of row positions in current batch and aligned negated predicate ids
