@@ -135,13 +135,12 @@ class AlexBeth(Game):
         return partner
 
     def dump_predicate_performance(self, output_dir, wandb_run=None, artifact_name=None):
-        # Save one raw table and one aggregated table at the end of the run.
+        # Save one raw row-level table at the end of the run.
         if (not self.dump_predicate_perf) or (len(self._predicate_perf_rows) == 0):
             return
 
         os.makedirs(output_dir, exist_ok=True)
         rows_path = os.path.join(output_dir, "predicate_perf_rows.csv")
-        stats_path = os.path.join(output_dir, "predicate_perf_stats.csv")
 
         with open(rows_path, "w") as ostr:
             writer = csv.writer(ostr)
@@ -149,51 +148,10 @@ class AlexBeth(Game):
             for epoch, pred_idx, row_perf, row_acc in self._predicate_perf_rows:
                 writer.writerow([epoch, pred_idx, self._predicate_text_by_idx.get(pred_idx, ""), row_perf, row_acc])
 
-        # Aggregate per (epoch, predicate).
-        # State: count, perf_sum, perf_sq_sum, perf_min, perf_max, acc_sum, acc_sq_sum, acc_min, acc_max
-        agg = {}
-        for epoch, pred_idx, row_perf, row_acc in self._predicate_perf_rows:
-            key = (epoch, pred_idx)
-            if key not in agg:
-                agg[key] = [0, 0.0, 0.0, row_perf, row_perf, 0.0, 0.0, row_acc, row_acc]
-            state = agg[key]
-            state[0] += 1
-            state[1] += row_perf
-            state[2] += (row_perf * row_perf)
-            state[3] = min(state[3], row_perf)
-            state[4] = max(state[4], row_perf)
-            state[5] += row_acc
-            state[6] += (row_acc * row_acc)
-            state[7] = min(state[7], row_acc)
-            state[8] = max(state[8], row_acc)
-
-        with open(stats_path, "w") as ostr:
-            writer = csv.writer(ostr)
-            writer.writerow([
-                "epoch", "pred_idx", "pred_str", "count",
-                "perf_min", "perf_max", "perf_mean", "perf_var",
-                "acc_min", "acc_max", "acc_mean", "acc_var",
-            ])
-            for (epoch, pred_idx), state in sorted(agg.items()):
-                count = state[0]
-                perf_mean = state[1] / count
-                perf_var = max((state[2] / count) - (perf_mean * perf_mean), 0.0)
-                acc_mean = state[5] / count
-                acc_var = max((state[6] / count) - (acc_mean * acc_mean), 0.0)
-                writer.writerow([
-                    epoch, pred_idx, self._predicate_text_by_idx.get(pred_idx, ""), count,
-                    state[3], state[4], perf_mean, perf_var,
-                    state[7], state[8], acc_mean, acc_var,
-                ])
-
         if wandb_run is not None:
             import wandb
-            artifact = wandb.Artifact(
-                name=f"predicate-performance-{wandb_run.id}",
-                type="analysis",
-            )
+            artifact = wandb.Artifact(name=f"predicate-performance-{wandb_run.id}", type="analysis")
             artifact.add_file(rows_path)
-            artifact.add_file(stats_path)
             wandb_run.log_artifact(artifact)
     
     # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
