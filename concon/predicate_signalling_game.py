@@ -29,25 +29,26 @@ def do(args):
         # Loads the data.
         data_loader = get_data_loader(args)
 
-        # size of the predicate vocabulary
+        # Size of the message space (number of predicates).
         args.num_predicates = len(data_loader.predicates)
 
         # For candidate encoder
         args.node_vocab_size = len(data_loader.node_i2s)
         args.node_padding_id = data_loader.node_s2i[data_loader.padding_token]
         args.edge_vocab_size = len(data_loader.edge_i2s)
-        if args.candidate_encoder == 'graph_transformer':
-            if args.graph_d_model is None:
+        if(args.candidate_encoder == 'graph_transformer'):
+            if(args.graph_d_model is None):
                 args.graph_d_model = args.hidden_size
 
-            # Adjust graph defaults based on model size.
-            if args.graph_d_hidden is None:
+            # Adjusts graph defaults based on model size.
+            if(args.graph_d_hidden is None):
                 args.graph_d_hidden = args.graph_d_model * 2
-            elif args.graph_d_hidden < args.graph_d_model and not args.quiet:
+            elif((args.graph_d_hidden < args.graph_d_model) and (not args.quiet)):
                 raise ValueError(f"graph_d_hidden ({args.graph_d_hidden}) < graph_d_model ({args.graph_d_model}); consider >= {args.graph_d_model}.")
 
-            if args.graph_d_model % args.graph_num_heads != 0:
+            if(args.graph_d_model % args.graph_num_heads != 0):
                 raise ValueError(f"graph_d_model ({args.graph_d_model}) % graph_num_heads ({args.graph_num_heads}) must == 0.")
+            
             # # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
             # max_heads = min(8, args.graph_d_model)
             # safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
@@ -69,7 +70,9 @@ def do(args):
             run_summary_dir.mkdir(parents=True, exist_ok=True)
             with open(run_summary_dir / "hparams.json", "w") as f:
                 json.dump(vars(args), f, indent=2, default=str)
+        
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
+
         # Creates the model.
         model = AlexBeth(args, autologger, data_loader, message_dump_dir)
         model = model.to(args.device)
