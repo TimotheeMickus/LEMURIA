@@ -87,16 +87,17 @@ def do(args):
 
         total_trained_epochs = args.epochs
         model.train_agents(args.epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every, start_epoch_index=0)
-        if args.keep_training:
-            while model.max_perf < 1.0:
+        if(args.keep_training):
+            while(model.max_perf < 1.0):
                 user_input = input(f"Current accuracy: {model.max_perf:.6f}.\nAdd epochs?: ").strip()
                 try:
                     extra_epochs = int(user_input)
                 except ValueError:
                     print("Please enter an integer.")
                     continue
-                if extra_epochs <= 0:
-                    break
+
+                if(extra_epochs <= 0): break
+
                 total_trained_epochs += extra_epochs
                 model.epochs = total_trained_epochs
                 model.train_agents(extra_epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every, start_epoch_index=(total_trained_epochs - extra_epochs))
@@ -109,8 +110,8 @@ def do(args):
                 filename = run_summary_dir / "FAILURE"
                 open(filename, 'a').close()
 
-        if args.dump_predicate_perf:
-            # Export predicate-level performance tables and tie them to W&B as one artifact.
+        if(args.dump_predicate_perf):
+            # Exports predicate-level performance tables and tie them to W&B as one artifact.
             model.dump_predicate_performance(
                 run_summary_dir,
                 wandb_run=wandb_run,
