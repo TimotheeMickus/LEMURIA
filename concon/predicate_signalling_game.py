@@ -28,7 +28,8 @@ def do(args):
 
         # Loads the data.
         data_loader = get_data_loader(args)
-        data_loader.turnAsynchronous(nb_workers=2, nb_prefetch=2) # TODO There should be command line arguments for these.
+        nb_workers, nb_prefetch = (2, 2) # TODO There should be command line arguments for these.
+        if(nb_workers > 1): data_loader.turnAsynchronous(nb_workers=nb_workers, nb_prefetch=nb_prefetch)
 
         # Size of the message space (number of predicates).
         args.num_predicates = len(data_loader.predicates)
