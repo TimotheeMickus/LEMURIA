@@ -28,6 +28,7 @@ def do(args):
 
         # Loads the data.
         data_loader = get_data_loader(args)
+        data_loader.turnAsynchronous(nb_workers=2, nb_prefetch=2) # TODO There should be command line arguments for these.
 
         # Size of the message space (number of predicates).
         args.num_predicates = len(data_loader.predicates)
@@ -103,7 +104,7 @@ def do(args):
                 model.train_agents(extra_epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every, start_epoch_index=(total_trained_epochs - extra_epochs))
         
         # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
-        performance_threshold = 0.6
+        performance_threshold = 0.9
         if(model.max_perf < performance_threshold):
             print("This run has failed.")
             if(not args.no_summary):
@@ -117,6 +118,8 @@ def do(args):
                 wandb_run=wandb_run,
             )
         finish_wandb_logging(wandb_run)
+
+        data_loader.close()
 
 
 import argparse

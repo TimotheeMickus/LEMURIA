@@ -3,6 +3,14 @@ import torch
 import itertools
 import random
 
+try:
+    from .dataset import SeqAsyncDataset # When loading this file from outside of its directory.
+except:
+    from dataset import SeqAsyncDataset # When directly executing this file.
+
+# TODO
+# The batches should be tensorised right away. (maybe copying the tensor to pinned memory)
+
 class Batch():
     def __init__(self, size, predicate, predicate_idx, candidate, candidate_truth=None):
         self.size = size # int
@@ -18,8 +26,9 @@ class Batch():
 
     # Predicate encoding
     # May encode predicates as simply their indices (sparse one-hot encoding).
+    # TODO The comment above is misleading: this method never returns sparse one-hot vectors.
     def encode_predicates(self, mode='predicate'):
-        assert mode in ['predicate', 'sparse'], 'Unrecognized mode.'
+        assert (mode in ['predicate', 'sparse']), f'Mode {mode} unknown.'
         if(mode=='predicate'): return self.predicate
         if(mode=='sparse'): return np.array(self.predicate_idx)
 
@@ -406,14 +415,13 @@ class failureBasedDistribution():
 # Initializing a dataset creates properties and values for different predicates.
 # Then, it generates Predicates from their combinations (e.g. P0-v0, (¬(P0-v0)∧P1-v0)).
 # From these, builds a global vocabulary for graph nodes and edges used to tensorise candidates.
-class Dataset():
-    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=1, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
+class Dataset(SeqAsyncDataset):
+    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=2, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
         self.device = device
         self.batch_size = batch_size
         self.allow_indeterminate = allow_indeterminate
         self.num_candidates = num_candidates
         self.candidate_sampling = candidate_sampling
-        self.overfit = overfit
 
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
         self.properties = list() # list[Property]
@@ -454,11 +462,12 @@ class Dataset():
         edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
         self.edge_i2s, self.edge_s2i = self._vocabulary(edge_labels, unknown=None)
 
-        if(self.overfit):
-            self._init_overfit_pool()
+        self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
+        
+        super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties);
 
     # Builds a fixed pool of instances. (Used for overfitting tests.)
-    def _init_overfit_pool(self, size=100):
+    def init_overfit_pool(self, size=100):
         instances = [] # list[(int, Predicate, list[Candidate], list[int])]
         for pred_idx in random.choices(range(len(self.predicates)), k=size):
             predicate = self.predicates[pred_idx]
@@ -470,7 +479,7 @@ class Dataset():
 
             instances.append((pred_idx, predicate, candidates, truths))
 
-        self._overfit_pool = instances
+        return instances
 
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int (a single node is of depth one)
@@ -525,6 +534,18 @@ class Dataset():
         for prop in self.properties: print(f"{prop} ({prop.values})")
         
         print(f"{len(self.predicates)} predicates ({self.predicates})")
+   
+    # symbols: TODO
+    # unknown: str
+    # Outputs TODO.
+    def _vocabulary(self, symbols, unknown='<unk>'):
+        '''Given a set of strings, returns mappings: index2string and string2index.'''
+        symbols = set(symbols)
+        if(unknown is not None): symbols.add(unknown)
+        i2s = list(symbols) # list[TODO]
+        s2i = {s: i for (i, s) in enumerate(i2s)} # dict[int, TODO]
+        
+        return (i2s, s2i)
 
     # Generates a batch.
     # Outputs a Batch with candidate list(s) and aligned truth labels.
@@ -534,27 +555,39 @@ class Dataset():
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
         Additional kwargs are accepted for compatibility with image data iterators but ignored here.
         """
-        batch = []
         if(size is None): size = self.batch_size
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
         if(num_candidates is None): num_candidates = self.num_candidates
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
+        return self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, candidate_sampling=candidate_sampling, **kwargs);
+        #return self._get_batch(
+        #    size, data_type, allow_indeterminate, num_candidates, candidate_sampling, # request arguments
+        #    self.overfit_pool, self.predicates, self.properties # resource arguments
+        #)
+
+    @staticmethod
+    def _generate_batch(
+        size, data_type, allow_indeterminate, num_candidates, candidate_sampling, # request arguments
+        overfit_pool, predicates, properties, # resource arguments
+        **kwargs
+    ):
+        batch = []
         for _ in range(size):
-            if(self.overfit): # Specific procedure for overfitting mode.
-                pred_idx, predicate, candidates, truths = random.choice(self._overfit_pool)
+            if(overfit_pool is not None): # Specific procedure for overfitting mode.
+                pred_idx, predicate, candidates, truths = random.choice(overfit_pool)
                 batch.append((pred_idx, predicate, list(candidates), list(truths))) # TIMOTHÉE Why are the two lists copied (with `list`)?
                 continue
 
             # Selects a predicate.
-            pred_idx, predicate = self.selectPredicate()
+            pred_idx, predicate = Dataset._selectPredicate(predicates)
 
             # Samples `num_candidates` candidates.
             if(candidate_sampling == 'balanced'):
                 # At some point, it might be interesting to test against balanced distributions TMOTHÉE: What is the point of this comment?
-                candidates, truths = self.generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate)
+                candidates, truths = Dataset._generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, properties)
             else:
-                candidates, truths = self.generateCandidates(predicate, num_candidates, allow_indeterminate)
+                candidates, truths = Dataset._generateCandidates(predicate, num_candidates, allow_indeterminate, properties)
 
             batch.append((pred_idx, predicate, candidates, truths))
 
@@ -567,16 +600,26 @@ class Dataset():
 
     # Outputs a (int, Predicate).
     def selectPredicate(self):
-        idx = np.random.randint(0, len(self.predicates))
-        return (idx, self.predicates[idx])
+        return self._selectPredicate(self.predicates)
+
+    # predicate: list[Predicate]
+    @staticmethod
+    def _selectPredicate(predicates):
+        idx = np.random.randint(0, len(predicates))
+        return (idx, predicates[idx])
 
     # candidate: Candidate
     # allow_indeterminate
     # Outputs a Candidate.
     def extendCandidate(self, candidate, allow_indeterminate):
+        return self._extendCandidate(candidate, allow_indeterminate, self.properties)
+
+    # properties: list[Property]
+    @staticmethod
+    def _extendCandidate(candidate, allow_indeterminate, properties):
         prop2value = dict(candidate.prop2value) # dict[Property, Value|NoneType]
 
-        for prop in self.properties:
+        for prop in properties:
             if(prop in prop2value): continue
             if(allow_indeterminate and (np.random.rand() < (1 / (1 + len(prop.values))))): continue
             
@@ -591,12 +634,17 @@ class Dataset():
     # allow_indeterminate: bool
     # Outputs a list[Candidate].
     def generateCandidatesTarget(self, predicate, target, n, allow_indeterminate):
+        return self._generateCandidatesTarget(predicate, target, n, allow_indeterminate, self.properties)
+
+    # properties: list[Property]
+    @staticmethod
+    def _generateCandidatesTarget(predicate, target, n, allow_indeterminate, properties):
         candidates = [] # list[Candidate]
 
         base_candidates = predicate.build(target=target) # list[Candidate]
         for _ in range(n):
             base_candidate = random.choice(base_candidates)
-            candidate = self.extendCandidate(base_candidate, allow_indeterminate)
+            candidate = Dataset._extendCandidate(base_candidate, allow_indeterminate, properties)
             
             candidates.append(candidate)
 
@@ -605,9 +653,14 @@ class Dataset():
     # allow_indeterminate: Bool
     # Outputs a Candidate.
     def generateCandidate(self, allow_indeterminate):
+        return self._generateCandidate(allow_indeterminate, self.properties)
+
+    # properties: list[Property]
+    @staticmethod
+    def _generateCandidate(allow_indeterminate, properties):
         prop2value = dict() # dict[Property, Value|NoneType]
         
-        for prop in self.properties:
+        for prop in properties:
             if(allow_indeterminate and (np.random.rand() < (1 / (1 + len(prop.values))))): continue
             
             prop2value[prop] = np.random.choice(prop.values) # All values are equiprobable.
@@ -620,6 +673,11 @@ class Dataset():
     # allow_indeterminate: bool
     # Outputs a (list[Candidate], list[int]).
     def generateCandidatesBalanced(self, predicate, num_candidates, allow_indeterminate):
+        return self._generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, self.properties)
+
+    # properties: list[Property]
+    @staticmethod
+    def _generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, properties):
         assert (num_candidates % 2 == 0), f"It is impossible to balance an odd number ({num_candidates}) of candidates."
         num_true = num_candidates // 2
         num_false = num_candidates // 2 #num_candidates - num_true
@@ -627,10 +685,10 @@ class Dataset():
         candidates = [] # list[Candidate]
         truths = [] # list[int]
 
-        candidates.extend(self.generateCandidatesTarget(predicate, 1, num_true, allow_indeterminate))
+        candidates.extend(Dataset._generateCandidatesTarget(predicate, 1, num_true, allow_indeterminate, properties))
         truths.extend([1] * num_true)
 
-        candidates.extend(self.generateCandidatesTarget(predicate, -1, num_false, allow_indeterminate))
+        candidates.extend(Dataset._generateCandidatesTarget(predicate, -1, num_false, allow_indeterminate, properties))
         # BCE expects labels 0/1
         truths.extend([0] * num_false)
 
@@ -641,27 +699,23 @@ class Dataset():
     # allow_indeterminate: bool
     # Outputs a (list[Candidate], list[int]).
     def generateCandidates(self, predicate, num_candidates, allow_indeterminate):
+        return self._generateCandidates(predicate, num_candidates, allow_indeterminate, self.properties)
+
+    @staticmethod
+    def _generateCandidates(predicate, num_candidates, allow_indeterminate, properties):
         candidates = [] # list[Candidate]
         truths = [] # list[int]
         for _ in range(num_candidates):
-            candidate = self.generateCandidate(allow_indeterminate=allow_indeterminate)
+            candidate = Dataset._generateCandidate(allow_indeterminate=allow_indeterminate, properties=properties)
             candidates.append(candidate)
             truths.append(1 if predicate.check(candidate) == 1 else 0)
 
         return (candidates, truths)
-   
-    # symbols: TODO
-    # unknown: str
-    def _vocabulary(self, symbols, unknown='<unk>'):
-        '''Given a set of strings, returns mappings: index2string and string2index.'''
-        symbols = set(symbols)
-        if(unknown is not None): symbols.add(unknown)
-        i2s = list(symbols) # list[TODO]
-        s2i = {s: i for (i, s) in enumerate(i2s)} # dict[int, TODO]
-        
-        return (i2s, s2i)
 
     # graph: list[dict[str, str]]
+    # node_labels_sym2id: TODO
+    # edge_labels_sym2id: TODO
+    # padding_length: int|None
     def _tensorize_graph(self, graph, node_labels_sym2idx, edge_labels_sym2id, padding_length=None):
         '''
         Given a graph expressed as a list of dictionaries and a set of node and edge labels,
@@ -719,7 +773,7 @@ if(__name__ == "__main__"):
         print({truth_value: (100 * c / nb) for (truth_value, c) in counts.items()})
 
     print("\nEncoding correctness test: ")
-    batch = dataset.get_batch(size=256)
+    batch = dataset.get_batch(size=32)
     
     # Checks that sparse encoding preserves indices.
     sparse = batch.encode_predicates('sparse')
@@ -737,4 +791,14 @@ if(__name__ == "__main__"):
 
     print("\nAll tests passed")
 
+    print("\nBatch used:")
     print(batch)
+    
+    # Asynchronous
+    print("\nSwitching to asynchronous mode.")
+    dataset.turnAsynchronous(nb_workers=2, nb_prefetch=2);
+    batch = dataset.get_batch(size=32)
+    print("\nBatch:")
+    print(batch)
+
+    dataset.close()
