@@ -67,6 +67,7 @@ class AlexBeth(Game):
 
         self.dump_message_mode = getattr(args, "dump_message", None)
         self.dump_predicate_perf = getattr(args, "dump_predicate_perf", False)
+        self.dump_eval_metrics_enabled = getattr(args, "dump_eval_metrics", False)
         # Trigger fancy language eval whenever messages are dumped.
         self.run_fancy_lang_eval = bool(self.dump_message_mode)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
@@ -79,6 +80,11 @@ class AlexBeth(Game):
         # Row-level predicate diagnostics accumulated across eval calls.
         self._predicate_perf_rows = []  # (epoch, pred_idx, perf, acc)
         self._predicate_text_by_idx = {}
+        # One row per evaluate() call (epoch-level aggregate metrics).
+        self._eval_metrics_rows = []
+
+        if self.dump_eval_metrics_enabled and (not self.run_fancy_lang_eval):
+            raise ValueError("--dump_eval_metrics requires fancy eval metrics; enable --dump_message.")
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -151,6 +157,38 @@ class AlexBeth(Game):
         if wandb_run is not None:
             import wandb
             artifact = wandb.Artifact(name=f"predicate-performance-{wandb_run.id}", type="analysis")
+            artifact.add_file(rows_path)
+            wandb_run.log_artifact(artifact)
+
+    def dump_eval_metrics(self, output_dir, wandb_run=None):
+        # Save one epoch-level table at the end of the run.
+        if (not self.dump_eval_metrics_enabled) or (len(self._eval_metrics_rows) == 0):
+            return
+
+        os.makedirs(output_dir, exist_ok=True)
+        rows_path = os.path.join(output_dir, "eval_metrics_rows.csv")
+        fieldnames = [
+            "epoch",
+            "eval/loss",
+            "eval/accuracy",
+            "eval/perf",
+            "eval/retriever_entropy",
+            "eval/msg_length",
+            "eval/c.e._verify",
+            "eval/c.e._falsify",
+            "eval/scrambling-resistance",
+            "eval/neg_consistency",
+            "eval/topographic_similarity",
+        ]
+
+        with open(rows_path, "w") as ostr:
+            writer = csv.DictWriter(ostr, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self._eval_metrics_rows)
+
+        if wandb_run is not None:
+            import wandb
+            artifact = wandb.Artifact(name=f"eval-metrics-{wandb_run.id}", type="analysis")
             artifact.add_file(rows_path)
             wandb_run.log_artifact(artifact)
     
@@ -484,15 +522,25 @@ class AlexBeth(Game):
         # --- logging and stdout --- #
         #                            #
         # Normalise the accumulated sums and push them to TensorBoard / stdout.
-        avg_accuracy = (total_accuracy / total_items)
-        log('eval/loss', total_loss / total_items)
-        log('eval/accuracy', avg_accuracy)
-        log('eval/perf', total_perf / total_items)
-        log('eval/retriever_entropy', total_entropy / total_items)
-        log('eval/msg_length', total_msg_length / total_items)  # Average number of symbols Alex produced.
+        eval_loss = total_loss / total_items
+        eval_accuracy = total_accuracy / total_items
+        eval_perf = total_perf / total_items
+        eval_retriever_entropy = total_entropy / total_items
+        eval_msg_length = total_msg_length / total_items
+        log('eval/loss', eval_loss)
+        log('eval/accuracy', eval_accuracy)
+        log('eval/perf', eval_perf)
+        log('eval/retriever_entropy', eval_retriever_entropy)
+        log('eval/msg_length', eval_msg_length)  # Average number of symbols Alex produced.
+        avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
 
         # Fancy metrics
+        verify_ratio = None
+        falsify_ratio = None
+        scrambling_ratio = None
+        neg_consistency_ratio = (float("nan") if self.no_negation else None)
+        topo_corr = None
         if self.run_fancy_lang_eval:
             verify_ratio = 0
             falsify_ratio = 0
@@ -538,6 +586,29 @@ class AlexBeth(Game):
                     print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
 
                 # Decision tree TODO: how easily predicate indentity can be recovered from messages.
+
+        if self.dump_eval_metrics_enabled:
+            row = {
+                "epoch": int(epoch_index),
+                "eval/loss": float(eval_loss),
+                "eval/accuracy": float(eval_accuracy),
+                "eval/perf": float(eval_perf),
+                "eval/retriever_entropy": float(eval_retriever_entropy),
+                "eval/msg_length": float(eval_msg_length),
+                "eval/c.e._verify": verify_ratio,
+                "eval/c.e._falsify": falsify_ratio,
+                "eval/scrambling-resistance": scrambling_ratio,
+                "eval/neg_consistency": neg_consistency_ratio,
+                "eval/topographic_similarity": topo_corr,
+            }
+            missing = [k for k, v in row.items() if (k != "epoch" and v is None)]
+            if missing:
+                raise RuntimeError(
+                    "Missing eval metrics for epoch "
+                    f"{epoch_index}: {', '.join(missing)}. "
+                    "Enable fancy eval with --dump_message and keep enough variation for topographic similarity."
+                )
+            self._eval_metrics_rows.append(row)
 
         #                            #
         # -------------------------- #
