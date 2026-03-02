@@ -540,7 +540,7 @@ class AlexBeth(Game):
         falsify_ratio = None
         scrambling_ratio = None
         neg_consistency_ratio = (float("nan") if self.no_negation else None)
-        topo_corr = None
+        topo_corr = float("nan")
         if self.run_fancy_lang_eval:
             verify_ratio = 0
             falsify_ratio = 0
@@ -582,8 +582,10 @@ class AlexBeth(Game):
                 if len(set(sample_signals)) > 1 and len(set(sample_cand_vecs)) > 1:
                     topo_corr, *_ = compute_correlation.mantel(sample_signals, sample_cand_vecs, correl_only=True)
                     log('eval/topographic_similarity', topo_corr)
-                elif self.autologger.display != 'minimal':
-                    print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
+                else:
+                    log('eval/topographic_similarity', topo_corr)
+                    if self.autologger.display != 'minimal':
+                        print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
 
                 # Decision tree TODO: how easily predicate indentity can be recovered from messages.
 
@@ -606,7 +608,7 @@ class AlexBeth(Game):
                 raise RuntimeError(
                     "Missing eval metrics for epoch "
                     f"{epoch_index}: {', '.join(missing)}. "
-                    "Enable fancy eval with --dump_message and keep enough variation for topographic similarity."
+                    "Enable fancy eval with --dump_message."
                 )
             self._eval_metrics_rows.append(row)
 
