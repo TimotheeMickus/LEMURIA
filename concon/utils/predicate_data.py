@@ -8,77 +8,31 @@ try:
 except:
     from dataset import SeqAsyncDataset # When directly executing this file.
 
-# TODO
-# The batches should be tensorised right away. (and the dataset should have a `pin_memory` argument, usually set to True when using cuda)
-
 class Batch():
-    def __init__(self, size, predicate, predicate_idx, candidate, candidate_truth=None):
-        self.size = size # int
+    def __init__(self, size, predicate, predicate_idx, candidate, node_idx, edge_idx, graph_sizes, candidate_truth=None):
+        self.size = size # int, in number of instances
+
         self.predicate = predicate # list[Predicate]
-        self.predicate_idx = predicate_idx # list[int]
+        self.predicate_idx = predicate_idx # list[int] or tensor of shape (batch)
         self.candidate = candidate # list[list[Candidate]]
-        self.candidate_truth = candidate_truth # list[list[int]], aligned with candidate
+
+        self.node_idx = node_idx # list[list[list[int]]] or tensor of shape (batch, candidate, node)
+        self.edge_idx = edge_idx # list[list[list[list[int]]]] or tensor of shape (batch, candidate, node, node)
+        self.graph_sizes = graph_sizes # list[list[int]] tensor of shape (batch, candidate), in number of nodes
         
-        # These are defined when `tensorize()` is called.
-        self.node_idx = None
-        self.edge_idx = None
-        self.graph_sizes = None
+        self.candidate_truth = candidate_truth # None or list[list[int]] or tensor of shape (batch, candidate), aligned with candidate
 
-    # Predicate encoding
-    # May encode predicates as simply their indices (sparse one-hot encoding).
-    # TODO The comment above is misleading: this method never returns sparse one-hot vectors.
-    def encode_predicates(self, mode='predicate'):
-        assert (mode in ['predicate', 'sparse']), f'Mode {mode} unknown.'
-        if(mode=='predicate'): return self.predicate
-        if(mode=='sparse'): return np.array(self.predicate_idx)
+    # pin_memory: bool
+    def tensorize(self, device=None, pin_memory=False):
+        assert ((pin_memory == False) or (device is None) or (device == "cpu"))
 
-    # Tensorize this batch (using Dataset vocabulary)
-    def tensorize(self, dataset):
-        # convert nested candidates to graphs
-        # graphs: list[batch] of list[num_candidates] of graph objects (list[dict])
-        graphs = [[self._candidate_to_graph(c) for c in candidate_list] for candidate_list in self.candidate]
-
-        nl_s2i = dataset.node_s2i
-        el_s2i = dataset.edge_s2i
-
-        node_idx = []    # (batch, num_candidates, max_nodes)
-        edge_idx = []    # (batch, num_candidates, max_nodes, max_nodes)
-        graph_sizes = [] # (batch, num_candidates)
-
-        # take the largest total node count across all graphs
-        # padding_length: max_nodes (int)
-        padding_length = max(sum(len(o) + 1 for o in g) for item in graphs for g in item) if graphs else 1
-
-        # This block tensorizes each candidate graph per batch item.
-        # It collects node/edge indices and sizes into nested lists.
-        for item in graphs:
-            item_nodes, item_edges, item_sizes = [], [], []
-            for g in item:
-                # n: (max_nodes,) node indices
-                # e: (max_nodes, max_nodes) edge indices
-                # s: graph size (number of nodes before padding)
-                n, e, s = dataset._tensorize_graph(g, nl_s2i, el_s2i, padding_length)
-                item_nodes.append(n)
-                item_edges.append(e)
-                item_sizes.append(s)
-            node_idx.append(item_nodes)
-            edge_idx.append(item_edges)
-            graph_sizes.append(item_sizes)
-
-        # nested lists
-        # node_idx: list[batch][num_candidates][max_nodes]
-        # edge_idx: list[batch][num_candidates][max_nodes][max_nodes]
-        # graph_sizes: list[batch][num_candidates]
-        self.node_idx = torch.tensor(node_idx, dtype=torch.long)
-        self.edge_idx = torch.tensor(edge_idx, dtype=torch.long)
-        self.graph_sizes = torch.tensor(graph_sizes, dtype=torch.long)
-
-        return self  # allow chaining
-    
-    # Transform a candidate into a graph dictionary,
-    # one object with feature-value pairs, e.g. [{"P0": "v2", "P1", "v0"}].
-    def _candidate_to_graph(self, c):
-        return [{p.name: v.name for p, v in c.prop2value.items() if v is not None}]
+        self.predicate_idx = torch.tensor(self.predicate_idx, device=device, dtype=torch.long, pin_memory=pin_memory)
+        
+        self.node_idx = torch.tensor(self.node_idx, device=device, dtype=torch.long, pin_memory=pin_memory)
+        self.edge_idx = torch.tensor(self.edge_idx, device=device, dtype=torch.long, pin_memory=pin_memory)
+        self.graph_sizes = torch.tensor(self.graph_sizes, device=device, dtype=torch.int, pin_memory=pin_memory)
+        
+        if(self.candidate_truth is not None): self.candidate_truth = torch.tensor(self.candidate_truth, device=device, dtype=torch.float32, pin_memory=pin_memory)
 
     def __eq__(self, other):
         if(not isinstance(other, Batch)): return NotImplemented
@@ -103,81 +57,14 @@ class Batch():
         Decode node indices for a batch item into human-readable labels.
         If candidate_idx is None, prints all candidates for the item.
         """
-        if(self.node_idx is None):
-            raise ValueError("Batch is not tensorized; call batch.tensorize(dataset) first.")
-
         def decode_row(d, row):
             return [d[i] for i in row]
 
         return [(
-            [decode_row(dataset.node_i2s, row) for row in self.node_idx[item_idx]],
+            [decode_row(dataset.graph_converter.node_i2s, row) for row in self.node_idx[item_idx]],
             [decode_row(dataset.edge_i2s, row) for mtx in self.edge_idx[item_idx] for row in mtx],
             self.graph_sizes[item_idx],
         ) for item_idx in range(self.size)]
-
-    # Used for debugging.
-    # Returns (list[None|int], list[None|int], list[None|int]).
-    #def indices(self):
-    #    return ([dp.idx for dp in self.original], [dp.idx for dp in self.target], [dp.idx for l in self.base_distractors for dp in l])
-
-    # Used for debugging.
-    # Returns (list[None|tuple[int]], list[None|tuple[int]], list[None|tuple[int]]).
-    #def categories(self):
-    #    return ([dp.category for dp in self.original], [dp.category for dp in self.target], [dp.category for l in self.base_distractors for dp in l])
-
-    # Used for debugging.
-    # Returns an int.
-    #def signature(self):
-    #    a, b, c = self.indices()
-    #    d, e, f = self.categories()
-    #
-    #    return hash(tuple([tuple(x) for x in [a, b, c, d, e, f]]))
-
-    #def original_img(self, stack=False, f=None):
-    #    if(f is None): f = (lambda x: x)
-    #
-    #    tmp = [f(x.img) for x in self.original]
-    #
-    #    if(stack): return torch.stack(tmp)
-    #    else: return tmp
-    
-    #def target_img(self, stack=False, f=None):
-    #    if(f is None): f = (lambda x: x)
-    #
-    #    tmp = [f(x.img) for x in self.target]
-    #
-    #    if(stack): return torch.stack(tmp)
-    #    else: return tmp
-
-    # Returns a list or a tensor of the original/target categories of the batch, possibly transformed by a function first.
-    # stack: whether to return a tensor (True) or a list (False)
-    # f: the function (if any) to apply to each category
-    #def target_category(self, stack=False, f=None):
-    #    if(f is None): f = (lambda x: x)
-    #
-    #    tmp = [f(x.category) for x in self.target]
-    #
-    #    if(stack): return torch.tensor(tmp)
-    #    else: return tmp
-    
-    #def base_distractors_img(self, flat=False, stack=False, f=None):
-    #    if(f is None): f = (lambda x: x)
-    #
-    #    if(not flat):
-    #        tmp = [[f(x.img) for x in base_distractor] for base_distractor in self.base_distractors] # list[list[tensor of shape (*IMG_SHAPE)]]
-    #        if(stack): tmp = list(map(torch.stack, tmp)) # list[tensor of shape (1, *IMG_SHAPE)]
-    #    else: tmp = [f(x.img) for base_distractor in self.base_distractors for x in base_distractor] # list[tensor of shape (*IMG_SHAPE)]
-    #
-    #    if(stack): return torch.stack(tmp)
-    #    else: return tmp
-    
-    #def get_images(self, original=True, target=True, base_distractors=True):
-    #    images = []
-    #    if(original): images.extend(self.original_img())
-    #    if(target): images.extend(self.target_img())
-    #    if(base_distractors): images.extend(self.base_distractors_img(flat=True))
-    #
-    #    return images
 
 class Property():
     # name: str
@@ -412,6 +299,81 @@ class failureBasedDistribution():
 
         return np.random.choice(a=allowed_categories_idx, p=dist)
 
+class GraphConverter:
+    object_token='<obj>'
+    padding_token='<pad>'
+    selfedge_label='<self>'
+    noedge_label='<noedge>'
+    obj2feat_edge='obj2feat'
+    feat2obj_edge='feat2obj'
+
+    def __init__(self, node_i2s, node_s2i, edge_i2s, edge_s2i):
+        self.node_i2s = node_i2s
+        self.node_s2i = node_s2i
+        self.edge_i2s = edge_i2s
+        self.edge_s2i = edge_s2i
+    
+    # Turns a graph into a triplet (node indices, edge indices, size).
+    # graph: list[dict[str, str]]
+    # padding_length: int|None
+    # Ouputs an (list[int], list[list[int]], int).
+    def convertGraph(self, graph, padding_length=None):
+        graph_size = sum([(len(o) + 1) for o in graph])
+        length = padding_length if(padding_length is not None) else graph_size
+
+        node_idx = [self.node_s2i[self.padding_token]] * length # list[int]
+        edge_idx = [[self.edge_s2i[self.noedge_label]] * length for _ in range(length)] # list[list[int]]
+
+        root_id = 0
+        for o in graph:
+            node_idx[root_id] = self.node_s2i[self.object_token]
+            edge_idx[root_id][root_id] = self.edge_s2i[self.selfedge_label]
+
+            i = root_id + 1
+            for feature, value in o.items():
+                node_idx[i] = self.node_s2i[(feature, value)]
+                edge_idx[i][i] = self.edge_s2i[self.selfedge_label]
+
+                edge_idx[root_id][i] = self.edge_s2i[self.obj2feat_edge]
+                edge_idx[i][root_id] = self.edge_s2i[self.feat2obj_edge]
+                i += 1
+
+            root_id = i
+
+        return (node_idx, edge_idx, graph_size)
+    
+    # candidates: list[list[Candidate]]
+    def convert(self, candidates):
+        # A candidate is an object that is turned into a dictionary (e.g. {"P0": "P0-v2", "P1", "P1-v0"}). This dictionary is wrapped into a list because in general a single input could consists of multiple objects; here we have a single object so a list of size 1.
+        batch = [
+            [
+                [
+                    {p.name: v.name for p, v in candidate.prop2value.items() if v is not None}
+                ]
+                for candidate in candidate_list
+            ] 
+            for candidate_list in candidates
+        ] # list[list[list[dict[str, str]]]]; dimensions are (instances, candidates, objects)
+
+        node_idx = []    # (batch, num_candidates, max_nodes)
+        edge_idx = []    # (batch, num_candidates, max_nodes, max_nodes)
+        graph_sizes = [] # (batch, num_candidates), in number of nodes
+
+        padding_length = max(sum((len(o) + 1) for o in graph) for item in batch for graph in item) if(batch != []) else 0 # largest total node count across all graphs
+
+        for item in batch:
+            item_nodes, item_edges, item_sizes = zip(*[self.convertGraph(graph, padding_length) for graph in item])
+            node_idx.append(item_nodes)
+            edge_idx.append(item_edges)
+            graph_sizes.append(item_sizes)
+
+        # RMK: The data is not yet converted in PyTorch tensors due to efficiency reasons (tensors seem slow to serialise and thus do not work so well with multiprocessing).
+        #node_idx = torch.tensor(node_idx, dtype=torch.long, pin_memory=pin_memory)
+        #edge_idx = torch.tensor(edge_idx, dtype=torch.long, pin_memory=pin_memory)
+        #graph_sizes = torch.tensor(graph_sizes, dtype=torch.long, pin_memory=pin_memory)
+
+        return (node_idx, edge_idx, graph_sizes)
+
 # Initializing a dataset creates properties and values for different predicates.
 # Then, it generates Predicates from their combinations (e.g. P0-v0, (¬(P0-v0)∧P1-v0)).
 # From these, builds a global vocabulary for graph nodes and edges used to tensorise candidates.
@@ -436,35 +398,30 @@ class Dataset(SeqAsyncDataset):
 
         # Generates predicates.
         self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
-        # naming convention inconsistent internally but compatible with modules
+        # naming convention inconsistent internally but compatible with modules; TIMOTHÉE: be more specific
         self.nb_categories = len(self.predicates) 
 
-        # Stores predicates as tensors.
-        self.object_token='<obj>'
-        self.padding_token='<pad>'
-        self.selfedge_label='<self>'
-        self.noedge_label='<noedge>'
-        self.obj2feat_edge='obj2feat'
-        self.feat2obj_edge='feat2obj'
-
-        # Build a global node vocabulary based on all predicates
-        node_labels = {self.object_token}
-        for property in self.properties:
-            for value in property.values:
+        # Builds a global node vocabulary.
+        node_labels = {GraphConverter.object_token}
+        for prop in self.properties:
+            for value in prop.values:
                 # Store ("Px", "vx") pairs as node labels for features
-                node_labels.add((property.name, value.name))
+                node_labels.add((prop.name, value.name))
 
-        self.node_i2s, self.node_s2i = self._vocabulary(node_labels, unknown=None)
-        self.node_i2s.append(self.padding_token)
-        self.node_s2i[self.padding_token] = len(self.node_s2i)
+        node_i2s, node_s2i = self._vocabulary(node_labels, unknown=None)
+        node_i2s.append(GraphConverter.padding_token)
+        node_s2i[GraphConverter.padding_token] = len(node_s2i)
 
-        # Global edge vocabulary
-        edge_labels = {self.selfedge_label, self.noedge_label, self.obj2feat_edge, self.feat2obj_edge}
-        self.edge_i2s, self.edge_s2i = self._vocabulary(edge_labels, unknown=None)
+        # Builds a global edge vocabulary.
+        edge_labels = {GraphConverter.selfedge_label, GraphConverter.noedge_label, GraphConverter.obj2feat_edge, GraphConverter.feat2obj_edge}
+        edge_i2s, edge_s2i = self._vocabulary(edge_labels, unknown=None)
+        
+        self.graph_converter = GraphConverter(node_i2s=node_i2s, node_s2i=node_s2i, edge_i2s=edge_i2s, edge_s2i=edge_s2i)
 
+        # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
         
-        super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties);
+        super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter);
 
     # Builds a fixed pool of instances. (Used for overfitting tests.)
     def init_overfit_pool(self, size=100):
@@ -535,21 +492,22 @@ class Dataset(SeqAsyncDataset):
         
         print(f"{len(self.predicates)} predicates ({self.predicates})")
    
-    # symbols: TODO
+    # symbols: collection[str]
     # unknown: str
-    # Outputs TODO.
+    # Outputs a (list[str], dict[int, str]).
     def _vocabulary(self, symbols, unknown='<unk>'):
         '''Given a set of strings, returns mappings: index2string and string2index.'''
         symbols = set(symbols)
         if(unknown is not None): symbols.add(unknown)
-        i2s = list(symbols) # list[TODO]
-        s2i = {s: i for (i, s) in enumerate(i2s)} # dict[int, TODO]
+
+        i2s = list(symbols) # list[str]
+        s2i = {s: i for (i, s) in enumerate(i2s)} # dict[int, str]
         
         return (i2s, s2i)
 
     # Generates a batch.
     # Outputs a Batch with candidate list(s) and aligned truth labels.
-    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, num_candidates=None, candidate_sampling=None, **kwargs):
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, num_candidates=None, candidate_sampling=None, device=None, pin_memory=False, **kwargs):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
@@ -560,7 +518,12 @@ class Dataset(SeqAsyncDataset):
         if(num_candidates is None): num_candidates = self.num_candidates
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
-        return self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, candidate_sampling=candidate_sampling, **kwargs);
+        batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, candidate_sampling=candidate_sampling, **kwargs);
+        
+        if(device is None): device = self.device
+        batch.tensorize(device=device, pin_memory=pin_memory)
+
+        return batch
         #return self._get_batch(
         #    size, data_type, allow_indeterminate, num_candidates, candidate_sampling, # request arguments
         #    self.overfit_pool, self.predicates, self.properties # resource arguments
@@ -569,7 +532,7 @@ class Dataset(SeqAsyncDataset):
     @staticmethod
     def _generate_batch(
         size, data_type, allow_indeterminate, num_candidates, candidate_sampling, # request arguments
-        overfit_pool, predicates, properties, # resource arguments
+        overfit_pool, predicates, properties, graph_converter, # resource arguments
         **kwargs
     ):
         batch = []
@@ -591,12 +554,11 @@ class Dataset(SeqAsyncDataset):
 
             batch.append((pred_idx, predicate, candidates, truths))
 
-        predicate_idx, pred_objects, candidates, truths = zip(*batch)
+        predicate_idx, predicate, candidates, truths = zip(*batch)
 
-        # In fact, it would be better to store in the batch tensors ready to be fed to the model.
-        # So, the predicate indices instead of the predicates, and for the candidates, use graphTensorize here https://colab.research.google.com/drive/1C5iUSxX-MIJXIb4wfUzYBExRTF-OhsWn?usp=sharing
-        # MG: my proposition is for now we tensorize lazily in AlexBeth._beth_input, fix later for efficiency
-        return Batch(size=size, predicate=list(pred_objects), predicate_idx=list(predicate_idx), candidate=list(candidates), candidate_truth=list(truths))
+        node_idx, edge_idx, graph_sizes = graph_converter.convert(candidates)
+
+        return Batch(size=size, predicate=predicate, predicate_idx=predicate_idx, candidate=candidates, node_idx=node_idx, edge_idx=edge_idx, graph_sizes=graph_sizes, candidate_truth=truths)
 
     # Outputs a (int, Predicate).
     def selectPredicate(self):
@@ -712,39 +674,6 @@ class Dataset(SeqAsyncDataset):
 
         return (candidates, truths)
 
-    # graph: list[dict[str, str]]
-    # node_labels_sym2id: TODO
-    # edge_labels_sym2id: TODO
-    # padding_length: int|None
-    def _tensorize_graph(self, graph, node_labels_sym2idx, edge_labels_sym2id, padding_length=None):
-        '''
-        Given a graph expressed as a list of dictionaries and a set of node and edge labels,
-        returns node, edge indices and graph depth.
-        '''
-        graph_size = sum([(len(o) + 1) for o in graph])
-        length = padding_length if padding_length is not None else graph_size
-
-        node_idx = [node_labels_sym2idx[self.padding_token]] * length # list[int]
-        edge_idx = [[edge_labels_sym2id[self.noedge_label]] * length for _ in range(length)] # list[list[int]]
-
-        root_id = 0
-        for o in graph:
-            node_idx[root_id] = node_labels_sym2idx[self.object_token]
-            edge_idx[root_id][root_id] = edge_labels_sym2id[self.selfedge_label]
-
-            i = root_id + 1
-            for feature, value in o.items():
-                node_idx[i] = node_labels_sym2idx[(feature, value)]
-                edge_idx[i][i] = edge_labels_sym2id[self.selfedge_label]
-
-                edge_idx[root_id][i] = edge_labels_sym2id[self.obj2feat_edge]
-                edge_idx[i][root_id] = edge_labels_sym2id[self.feat2obj_edge]
-                i += 1
-
-            root_id = i
-
-        return (node_idx, edge_idx, graph_size)
-
 
 def get_data_loader(args):
     dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, min_depth=args.min_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
@@ -775,16 +704,8 @@ if(__name__ == "__main__"):
     print("\nEncoding correctness test: ")
     batch = dataset.get_batch(size=32)
     
-    # Checks that sparse encoding preserves indices.
-    sparse = batch.encode_predicates('sparse')
-    assert np.all(sparse == np.array(batch.predicate_idx)), "Sparse encoding mismatch"
-    print("Sparse encoding OK")
-    
-    # Tensorization test: component shapes must be consistent
-    batch.tensorize(dataset)
-    assert batch.node_idx is not None
-    assert batch.edge_idx is not None
-    assert batch.graph_sizes is not None
+    # Conversion test: component shapes must be consistent
+    batch.tensorize()
     assert len(batch.node_idx) == batch.size
     assert len(batch.edge_idx) == batch.size
     print("Graph tensorization OK")

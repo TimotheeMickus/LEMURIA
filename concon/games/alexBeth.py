@@ -198,27 +198,21 @@ class AlexBeth(Game):
         Returns a float tensor of shape (batch size,) where 1.0 denotes that the
         predicate holds for the candidate, and 0.0 otherwise.
         """
-        return torch.tensor(batch.candidate_truth, dtype=torch.float32, device=device)
+        return batch.candidate_truth
     
     def agents_for_CNN_pretraining(self):
         raise NotImplementedError # In fact, the method should not even exist (the superclass should be modified).
 
     # batch: Batch
     def _alex_input(self, batch):
-        predicate_idx = batch.encode_predicates('sparse') # return list/np array of ints
-        device = next(self.asker.parameters()).device
-        return torch.tensor(predicate_idx, device=device, dtype=torch.long)
+        return batch.predicate_idx
 
     # batch: Batch
     def _beth_input(self, batch):
-        if batch.node_idx is None or batch.edge_idx is None or batch.graph_sizes is None:
-            batch.tensorize(self._dataset)
-        # self.retriever is nn.Module; PyTorch modules don’t expose a .device attribute. (that's why no self.retriever.device)
-        device = next(self.retriever.parameters()).device
         return {
-            'node_idx': batch.node_idx.to(device, non_blocking=True), 
-            'edge_idx': batch.edge_idx.to(device, non_blocking=True), 
-            'graph_size': batch.graph_sizes.to(device, non_blocking=True)
+            'node_idx': batch.node_idx, 
+            'edge_idx': batch.edge_idx, 
+            'graph_size': batch.graph_sizes, 
         }
 
     def __call__(self, batch):
@@ -231,6 +225,7 @@ class AlexBeth(Game):
         """
         return self.alex_to_beth(batch)
 
+    # batch: Batch
     def alex_to_beth(self, batch):
         asker = self.asker
         retriever = self.retriever
@@ -587,7 +582,7 @@ class AlexBeth(Game):
                     if self.autologger.display != 'minimal':
                         print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
 
-                # Decision tree TODO: how easily predicate indentity can be recovered from messages.
+                # Decision tree TODO: how easily predicate identity can be recovered from messages.
 
         if self.dump_eval_metrics_enabled:
             row = {
