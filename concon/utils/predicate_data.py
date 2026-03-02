@@ -9,7 +9,7 @@ except:
     from dataset import SeqAsyncDataset # When directly executing this file.
 
 # TODO
-# The batches should be tensorised right away. (maybe copying the tensor to pinned memory)
+# The batches should be tensorised right away. (and the dataset should have a `pin_memory` argument, usually set to True when using cuda)
 
 class Batch():
     def __init__(self, size, predicate, predicate_idx, candidate, candidate_truth=None):
@@ -218,20 +218,20 @@ class Predicate():
     def _build(self, target=1):
         raise NotImplementedError
 
-    # Outputs a Bool.
+    # Outputs a bool.
     def isVerifiable(self):
         return (len(self.build(target=1)) > 0)
 
-    # Outputs a Bool.
+    # Outputs a bool.
     def isFalsifiable(self):
         return (len(self.build(target=-1)) > 0)
 
-    # Outputs a Bool.
+    # Outputs a bool.
     def isNontrivial(self):
         return self.isVerifiable() and self.isFalsifiable()
 
     # other: Predicate
-    # Outputs a Bool.
+    # Outputs a bool.
     def isAsStrongAs(self, other):
         for c in self.build(target=1):
             if(other.check(c) < 1): return False
@@ -242,12 +242,12 @@ class Predicate():
         return True
     
     # other: Predicate
-    # Outputs a Bool.
+    # Outputs a bool.
     def isEquivalentTo(self, other):
         return self.isAsStrongAs(other) and other.isAsStrongAs(self)
 
     # others: iterable[Predicate]
-    # Outputs a Bool.
+    # Outputs a bool.
     def hasEquivalentIn(self, others):
         for other in others:
             if(self.isEquivalentTo(other)):
@@ -650,7 +650,7 @@ class Dataset(SeqAsyncDataset):
 
         return candidates
 
-    # allow_indeterminate: Bool
+    # allow_indeterminate: bool
     # Outputs a Candidate.
     def generateCandidate(self, allow_indeterminate):
         return self._generateCandidate(allow_indeterminate, self.properties)
