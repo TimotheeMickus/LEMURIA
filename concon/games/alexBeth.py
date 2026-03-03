@@ -178,7 +178,10 @@ class AlexBeth(Game):
             "eval/c.e._falsify",
             "eval/scrambling-resistance",
             "eval/neg_consistency",
-            "eval/topographic_similarity",
+            "eval/topsim_extensional_levenshtein",
+            "eval/topsim_extensional_jaccard",
+            "eval/topsim_intensional_levenshtein",
+            "eval/topsim_intensional_jaccard",
         ]
 
         with open(rows_path, "w") as ostr:
@@ -535,7 +538,10 @@ class AlexBeth(Game):
         falsify_ratio = None
         scrambling_ratio = None
         neg_consistency_ratio = (float("nan") if self.no_negation else None)
-        topo_corr = float("nan")
+        topsim_ext_levenshtein = float("nan")
+        topsim_ext_jaccard = float("nan")
+        topsim_int_levenshtein = float("nan")
+        topsim_int_jaccard = float("nan")
         if self.run_fancy_lang_eval:
             verify_ratio = 0
             falsify_ratio = 0
@@ -563,6 +569,7 @@ class AlexBeth(Game):
                 sample = sample[:sample_size]
                 # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
                 sample_signals = [tuple(s) for (s, _) in sample]
+                sample_pred_ids = [int(pid) for (_, pid) in sample]
 
                 # Meaning is expressed as a binary vector over candidate IDs
                 # sample_cand_vec = [(1,1,0,0), (0,0,1,1), ...]
@@ -574,13 +581,61 @@ class AlexBeth(Game):
                     candidate_vec = tuple(1 if pred.check(cand) == 1 else 0 for cand in self._topsim_candidates)
                     sample_cand_vecs.append(candidate_vec)
 
+                # Topographic similarity:
+                # extensional: predicate meaning expressed as the binary vector of whether a candidate satisfies it
+                # intensional: the meaning is the embedding ("what the robots think")
+                # Levenshtein vs. Jaccard: order-dependent vs. invariant
+                # report 2 x 2
                 if len(set(sample_signals)) > 1 and len(set(sample_cand_vecs)) > 1:
-                    topo_corr, *_ = compute_correlation.mantel(sample_signals, sample_cand_vecs, correl_only=True)
-                    log('eval/topographic_similarity', topo_corr)
+                    # Intensional topsim: meaning distance is cosine distance between predicate embeddings.
+                    asker_device = next(self.asker.parameters()).device
+                    pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=asker_device)
+                    sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).detach().cpu().numpy()
+                    # Compute each pairwise distance vector once, then reuse it for all 4 topsims.
+                    # This avoids recomputing expensive Jaccard distances multiple times.
+                    signal_strings = [''.join(map(chr, msg)) for msg in sample_signals]
+                    n = len(sample_signals)
+                    pair_count = (n * (n - 1)) // 2
+                    msg_lev_d = np.empty(pair_count, dtype=float)
+                    ext_d = np.empty(pair_count, dtype=float)
+                    int_d = np.empty(pair_count, dtype=float)
+                    msg_jac_d = compute_correlation.pairwise_multiset_jaccard_distances(sample_signals)
+
+                    k = 0
+                    for i in range(n - 1):
+                        sig_i_str = signal_strings[i]
+                        ext_i = sample_cand_vecs[i]
+                        vec_i = sender_vecs[i]
+                        for j in range(i + 1, n):
+                            msg_lev_d[k] = compute_correlation.levenshtein(sig_i_str, signal_strings[j])
+                            ext_d[k] = sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j]))
+                            int_d[k] = float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j]))
+                            k += 1
+
+                    def _safe_corr(x, y):
+                        x = x - x.mean()
+                        y = y - y.mean()
+                        denom = np.sqrt((x * x).sum() * (y * y).sum())
+                        if denom == 0:
+                            return float("nan")
+                        return float((x * y).sum() / denom)
+
+                    topsim_ext_levenshtein = _safe_corr(msg_lev_d, ext_d)
+                    topsim_ext_jaccard = _safe_corr(msg_jac_d, ext_d)
+                    topsim_int_levenshtein = _safe_corr(msg_lev_d, int_d)
+                    topsim_int_jaccard = _safe_corr(msg_jac_d, int_d)
+
+                    log('eval/topsim_extensional_levenshtein', topsim_ext_levenshtein)
+                    log('eval/topsim_extensional_jaccard', topsim_ext_jaccard)
+                    log('eval/topsim_intensional_levenshtein', topsim_int_levenshtein)
+                    log('eval/topsim_intensional_jaccard', topsim_int_jaccard)
                 else:
-                    log('eval/topographic_similarity', topo_corr)
+                    log('eval/topsim_extensional_levenshtein', topsim_ext_levenshtein)
+                    log('eval/topsim_extensional_jaccard', topsim_ext_jaccard)
+                    log('eval/topsim_intensional_levenshtein', topsim_int_levenshtein)
+                    log('eval/topsim_intensional_jaccard', topsim_int_jaccard)
                     if self.autologger.display != 'minimal':
-                        print('eval/topographic_similarity\tnot enough variation in sampled messages/meanings')
+                        print('eval/topsim\tnot enough variation in sampled messages/meanings')
 
                 # Decision tree TODO: how easily predicate identity can be recovered from messages.
 
@@ -596,7 +651,10 @@ class AlexBeth(Game):
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,
                 "eval/neg_consistency": neg_consistency_ratio,
-                "eval/topographic_similarity": topo_corr,
+                "eval/topsim_extensional_levenshtein": topsim_ext_levenshtein,
+                "eval/topsim_extensional_jaccard": topsim_ext_jaccard,
+                "eval/topsim_intensional_levenshtein": topsim_int_levenshtein,
+                "eval/topsim_intensional_jaccard": topsim_int_jaccard,
             }
             missing = [k for k, v in row.items() if (k != "epoch" and v is None)]
             if missing:

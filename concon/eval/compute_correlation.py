@@ -181,6 +181,36 @@ def jaccard(seq1, seq2):
             union += 1
     return 1 - (intersection / union)
 
+def pairwise_multiset_jaccard_distances(messages):
+    """
+    Vectorized pairwise multiset Jaccard distances for a list of token sequences.
+    Returns the condensed upper-triangle distance vector.
+    """
+    n = len(messages)
+    pair_count = (n * (n - 1)) // 2
+    if pair_count == 0:
+        return np.empty(0, dtype=float)
+
+    max_symbol = max((max(msg) for msg in messages if len(msg) > 0), default=-1)
+    if max_symbol < 0:
+        return np.zeros(pair_count, dtype=float)
+
+    # Count vectors (multiset representation).
+    counts = np.zeros((n, max_symbol + 1), dtype=np.float32)
+    for i, msg in enumerate(messages):
+        if len(msg) > 0:
+            counts[i] = np.bincount(msg, minlength=max_symbol + 1)
+
+    # For nonnegative count vectors:
+    # union = (s_i + s_j + L1)/2, intersection = (s_i + s_j - L1)/2
+    # => Jaccard distance = 1 - inter/union = 2*L1 / (s_i + s_j + L1)
+    l1 = scipy.spatial.distance.pdist(counts, metric='cityblock')
+    lengths = np.array([len(msg) for msg in messages], dtype=np.float32)
+    triu_i, triu_j = np.triu_indices(n, k=1)
+    len_sums = lengths[triu_i] + lengths[triu_j]
+    denom = len_sums + l1
+    return np.divide(2.0 * l1, denom, out=np.zeros_like(l1), where=(denom > 0))
+
 """
 @ft.lru_cache(maxsize=32768)
 def jaccard2(seq1, seq2):
