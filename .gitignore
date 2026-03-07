@@ -11,3 +11,4 @@ notebooks/graph_enc.py
 changelog.txt
 wandb/
 runs/
+*.swp
