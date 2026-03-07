@@ -32,15 +32,15 @@ class AlexBeth(Game):
         self._logger = logger
         self._dataset = dataset
 
-        self.base_alphabet_size = args.base_alphabet_size # Number of symbols without special ones (padding, EOS, etc.)
-        self.max_len_msg = args.max_len
-
         self.use_expectation = args.use_expectation
         self.grad_scaling = (args.grad_scaling or 0)
         self.grad_clipping = (args.grad_clipping or 0)
         self.beta_asker = args.beta_asker
         self.beta_retriever = args.beta_retriever
         self.len_penalty = args.len_penalty
+        self.voc_penalty = args.voc_penalty
+
+        self.base_alphabet_size = args.base_alphabet_size # Number of symbols excluding special ones (padding, EOS, etc.)
 
         self.shared = args.shared # Whether some parameters are shared between Alex and Beth.
         if(self.shared):
@@ -51,11 +51,20 @@ class AlexBeth(Game):
             self._retriever = askerRetriever.retriever
 
             parameters = askerRetriever.parameters()
+        
+            assert (self._asker.alphabet_size == self._retriever.alphabet_size) # The asker and the retreiver have the exact same vocabulary.
         else:
             self._asker = Asker.from_args(args)
             self._retriever = Retriever.from_args(args)
 
             parameters = it.chain(self.asker.parameters(), self.retriever.parameters())
+            
+            assert (self._asker.alphabet_size == (self._retriever.alphabet_size + 1)) # Only the asker has the BOS symbol in its vocabulary.
+        
+        self.full_alphabet_size = self._asker.alphabet_size - 1 # Number of symbols that can be found in the signals; this includes padding and EOS but excludes BOS.
+        assert (self.full_alphabet_size == (self.base_alphabet_size + 2))
+        
+        self.max_len_msg = args.max_len
 
         self._optim = build_optimizer(parameters, args.learning_rate)
         
@@ -286,15 +295,41 @@ class AlexBeth(Game):
         else:
             rewards = torch.bernoulli(correct_prob).mean(dim=1).detach() # We sample whether the retriever is right according to the probability of the retriever being right; the reward is 1 when the retriever is right, 0 otherwise. # Shape: (batch,)
 
-        msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,)
+        msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,), includes the EOS symbol (usualy 0).
 
         rewards += -1 * (msg_lengths >= self.max_len_msg) # Penalty related to messages exceeding the length limit.
 
         if(self.len_penalty > 0.0):
-            # The penalty equals to 0 when `args.len_penalty` is set to 0, and increases to 1 with the length of the message otherwise.
+            # The penalty equals 0 when `len_penalty` is set to 0, and increases (the faster the higher `len_penalty` is) to 1 with the length of the message otherwise.
+            # RMK: We could imagine a non-uniform penalty (that depends on the position of the token for symbols ≠ EOS).
             length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * msg_lengths)) # Shape: (batch,)
 
             rewards = (rewards - length_penalties) # Shape: (batch,)
+
+        if(self.voc_penalty > 0.0):
+            # Each symbol of the base alphabet is associated with a total penalty equal to `batch_size` * `voc_penalty`, distributed over all messages in proportion of their use of the symbol (as if the total penalty were distributed equally over all occurrences of the symbol).
+            # Ex: If each signal uses a single symbol and at least once, and all signals use different symbols, each signal gets a penalty equal to `voc_penalty`.
+            # Ex: If all signal uses a single symbol overall, each signal gets a penalty equal to `voc_penalty` * its length * `batch_size` / sum of lengths, which is `voc_penalty` when the signals are of the same length ≥ 1.
+            # RMK: We could imagine a non-uniform penalty (that depends on the position of the token).
+            vocabulary_counts = torch.bincount(asker_action[0].view(-1), minlength=self.full_alphabet_size) # Shape: (full_alphabet_size,), includes padding and EOS
+            #vocabulary_counts[self.asker.eos_index] = 0 # no penalty for using EOS
+            #vocabulary_counts[self.asker.padding_idx] = 0 # no penalty for "using" padding
+
+            vocabulary_freqs = 1.0 / vocabulary_counts # Shape: (full_alphabet_size,)
+            vocabulary_freqs[self.asker.eos_index] = 0.0 # no penalty for using EOS
+            vocabulary_freqs[self.asker.padding_idx] = 0.0 # no penalty for "using" padding
+
+            batch_size = asker_action[0].shape[0]
+            symbol_penalty = (self.voc_penalty * batch_size) * vocabulary_freqs # Shape: (full_alphabet_size,)
+
+            vocabulary_penalties = symbol_penalty[asker_action[0]].sum(dim=1) # Shape (batch,)
+            
+            #print(asker_action[0])
+            #print(vocabulary_counts)
+            #print(symbol_penalty)
+            #input(vocabulary_penalties)
+
+            rewards = (rewards - vocabulary_penalties) # Shape: (batch,)
 
         return (rewards, perf)
 
@@ -960,7 +995,7 @@ class AlexBeth(Game):
             log('FM_corr/var Entropy category per msgs', varH)
 
         # Decision tree stuff
-        alphabet_size = (self.base_alphabet_size + 1)
+        alphabet_size = (self.base_alphabet_size + 1) # with EOS
         gram_size = 1 # Max size of n-grams to consider
         tmp = decision_tree.analyse(messages, categories, alphabet_size, data_loader.concepts, gram_size)
         (full_tree, full_tree_accuracy) = tmp['full_tree']

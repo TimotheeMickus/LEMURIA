@@ -19,7 +19,7 @@ class AskerRetriever(Agent):
 
     @classmethod
     def from_args(cls, args):
-        num_predicates = getattr(args, "num_predicates")
+        num_predicates = getattr(args, "num_predicates") # TODO Why this weird instruction?
         predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
         symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # +2: padding symbol, BOS symbol
         

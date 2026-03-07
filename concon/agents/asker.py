@@ -20,6 +20,11 @@ class Asker(Agent):
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
 
+        self.alphabet_size = self.message_decoder.alphabet_size
+        self.eos_index = self.message_decoder.eos_index
+        self.padding_idx = self.message_decoder.padding_idx # TODO improve consistency
+        self.bos_index = self.message_decoder.bos_index # not actually used in the signals produced
+
     def forward(self, predicate_idx):
         """
             Forward propagation.
@@ -58,9 +63,9 @@ class Asker(Agent):
     def from_args(cls, args, predicate_encoder=None, symbol_embeddings=None):
         has_shared_param = (predicate_encoder is not None) or (symbol_embeddings is not None)
         
-        num_predicates = getattr(args, "num_predicates")
+        num_predicates = getattr(args, "num_predicates") # TODO Why this weird instruction?
         if(predicate_encoder is None): predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
-        # this is essentially the signal generator
+
         message_decoder = MessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
         
         return cls(predicate_encoder, message_decoder, args, has_shared_param)

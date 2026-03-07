@@ -178,6 +178,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
     group.add_argument('--len_penalty', help='coefficient for the length penalty of the messages', default=0.01, type=float)
+    group.add_argument('--voc_penalty', help='coefficient for the vocabulary usage penalty', default=0.0, type=float)
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument('--beta_asker', help='asker entropy penalty coefficient', type=float, default=0.01)
     group.add_argument('--beta_retriever', help='retriever entropy penalty coefficient', type=float, default=0.0)

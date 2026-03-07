@@ -50,8 +50,11 @@ class MessageEncoder(nn.Module):
     """
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, symbol_embeddings):
         super(MessageEncoder, self).__init__()
+
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
+        
+        self.alphabet_size = self.symbol_embeddings.num_embeddings
 
     def forward(self, message, length):
         """
@@ -62,10 +65,12 @@ class MessageEncoder(nn.Module):
         Output:
             encoded message, of shape [args.batch_size x output_dim]
         """
-        # encode
+        # Runs the LSTM on the signal.
         embeddings = self.symbol_embeddings(message)
         embeddings = self.lstm(embeddings)[0]
+
         # select last step corresponding to message
+        # TODO This looks inefficient. LSTMs can do this themselves (see `pack_padded_sequence` and `pad_packed_sequence`).
         index = torch.arange(message.size(-1)).expand_as(message).to(message.device)
         output = embeddings.masked_select((index == (length-1)).unsqueeze(-1))
 
@@ -89,6 +94,7 @@ class MessageDecoder(nn.Module):
     '''
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, max_msg_len, symbol_embeddings):
         super(MessageDecoder, self).__init__()
+
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
         # project encoded message onto cell
@@ -99,12 +105,16 @@ class MessageDecoder(nn.Module):
         self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size + 1)
 
         self.max_msg_len = max_msg_len
-        self.bos_index = base_alphabet_size + 2
+        
+        self.alphabet_size = self.symbol_embeddings.num_embeddings
+        assert self.alphabet_size == (base_alphabet_size + 3) # +3: EOS symbol, padding symbol, BOS symbol
         self.eos_index = 0
         self.padding_idx = base_alphabet_size + 1
+        self.bos_index = base_alphabet_size + 2 # not actually used in the signals produced
 
     # Returns a dictionary.
     # encoded: tensor of shape (batch size, encoding size)
+    # TODO Optimise with torch.jit.script.
     def forward(self, encoded):
         # Initialisation
         last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
@@ -126,6 +136,7 @@ class MessageDecoder(nn.Module):
         for _ in range(self.max_msg_len):
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
+
             # Selects actions
             probs = F.softmax(output, dim=-1) # Shape: (batch size, (alphabet size + 1))
             dist = Categorical(probs)

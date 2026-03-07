@@ -28,6 +28,8 @@ class Retriever(Agent):
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
+        
+        self.alphabet_size = self.message_encoder.alphabet_size
 
     def encode_message(self, message, length):
         return self.message_encoder(message, length).unsqueeze(-1)
