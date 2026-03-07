@@ -180,7 +180,7 @@ def get_args(remaining_args=None):
     group.add_argument('--len_penalty', help='coefficient for the length penalty of the messages', default=0.01, type=float)
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument('--beta_asker', help='asker entropy penalty coefficient', type=float, default=0.01)
-    group.add_argument('--beta_retriever', help='retriever entropy penalty coefficient', type=float, default=0.001)
+    group.add_argument('--beta_retriever', help='retriever entropy penalty coefficient', type=float, default=0.0)
     group.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
     group.add_argument('--grad_clipping', help='threshold for gradient clipping', default=1, type=float)
     group.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
