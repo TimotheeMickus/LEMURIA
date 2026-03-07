@@ -104,7 +104,9 @@ def do(args):
                 total_trained_epochs += extra_epochs
                 model.epochs = total_trained_epochs
                 model.train_agents(extra_epochs, args.steps_per_epoch, data_loader, run_models_dir=run_models_dir, save_every=args.save_every, start_epoch_index=(total_trained_epochs - extra_epochs))
-        
+
+        data_loader.close()
+
         # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
         performance_threshold = 0.9
         if(model.max_perf < performance_threshold):
@@ -119,14 +121,14 @@ def do(args):
                 run_summary_dir,
                 wandb_run=wandb_run,
             )
+        
         if(args.dump_eval_metrics):
             model.dump_eval_metrics(
                 run_summary_dir,
                 wandb_run=wandb_run,
             )
+        
         finish_wandb_logging(wandb_run)
-
-        data_loader.close()
 
 
 import argparse

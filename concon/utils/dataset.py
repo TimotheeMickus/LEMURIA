@@ -62,7 +62,8 @@ class SeqAsyncDataset:
     # `resources` describes the structures that the worker needs to work.
     @staticmethod
     def _worker(task_queue, result_queue, fn, **resources):
-        print("Dataset worker started.") # DEBUG
+        print("Dataset worker started.")
+        result_queue.cancel_join_thread() # So that the worker can really stop even if there is data in the queue.
         
         while(True):
             request = task_queue.get() # tuple[(str, ?)]; blocking
@@ -71,7 +72,7 @@ class SeqAsyncDataset:
             if(request is None): break # Stopping request.
             result_queue.put((request, fn(**dict(request), **resources)))
         
-        print("Dataset worker stopped.") # DEBUG
+        print("Dataset worker stopped.")
 
     # nb_prefetch: int
     def _asynchronous_get_batch(self, nb_prefetch=None, **kwargs):
