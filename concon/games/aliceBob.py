@@ -35,7 +35,7 @@ class AliceBob(Game):
         self.grad_clipping = (args.grad_clipping or 0)
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
-        self.penalty = args.penalty
+        self.len_penalty = args.len_penalty
 
         self.shared = args.shared
         if(self.shared):
@@ -187,8 +187,9 @@ class AliceBob(Game):
 
         rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
 
-        if(self.penalty > 0.0):
-            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths.float())) # Equal to 0 when `args.penalty` is set to 0, increases to 1 with the length of the message otherwise
+        if(self.len_penalty > 0.0):
+            # The penalty equals to 0 when `args.len_penalty` is set to 0, and increases to 1 with the length of the message otherwise.
+            length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * msg_lengths)) # Shape: (batch,)
 
             rewards = (rewards - length_penalties) # Shape: (batch size)
 

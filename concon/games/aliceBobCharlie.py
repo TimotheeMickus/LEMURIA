@@ -29,7 +29,7 @@ class AliceBobCharlie(AliceBob):
         self.grad_clipping = args.grad_clipping or 0
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
-        self.penalty = args.penalty
+        self.len_penalty = args.len_penalty
 
         self.shared = args.shared
         if(self.shared):

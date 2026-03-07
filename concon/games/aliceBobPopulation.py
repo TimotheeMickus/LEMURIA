@@ -27,7 +27,7 @@ class AliceBobPopulation(AliceBob):
         self.grad_clipping = args.grad_clipping or 0
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
-        self.penalty = args.penalty
+        self.len_penalty = args.len_penalty
 
         size = args.population # There are `size` senders and `size` receivers.
 

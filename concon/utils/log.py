@@ -27,7 +27,7 @@ def build_run_name(args, run_index):
         f"lr={args.learning_rate}",
         f"ba={args.beta_asker}",
         f"br={args.beta_retriever}",
-        f"pen={args.penalty}",
+        f"pen={args.len_penalty}",
         f"ep={args.epochs}",
         f"spe={args.steps_per_epoch}",
         f"gc={args.grad_clipping}",

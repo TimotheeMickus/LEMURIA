@@ -40,7 +40,7 @@ class AlexBeth(Game):
         self.grad_clipping = (args.grad_clipping or 0)
         self.beta_asker = args.beta_asker
         self.beta_retriever = args.beta_retriever
-        self.penalty = args.penalty
+        self.len_penalty = args.len_penalty
 
         self.shared = args.shared # Whether some parameters are shared between Alex and Beth.
         if(self.shared):
@@ -287,11 +287,14 @@ class AlexBeth(Game):
             rewards = torch.bernoulli(correct_prob).mean(dim=1).detach() # We sample whether the retriever is right according to the probability of the retriever being right; the reward is 1 when the retriever is right, 0 otherwise. # Shape: (batch,)
 
         msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,)
+
         rewards += -1 * (msg_lengths >= self.max_len_msg) # Penalty related to messages exceeding the length limit.
 
-        if(self.penalty > 0.0):
-            length_penalties = 1.0 - (1.0 / (1.0 + self.penalty * msg_lengths)) # Shape: (batch,)
-            rewards = rewards - length_penalties # Shape: (batch,)
+        if(self.len_penalty > 0.0):
+            # The penalty equals to 0 when `args.len_penalty` is set to 0, and increases to 1 with the length of the message otherwise.
+            length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * msg_lengths)) # Shape: (batch,)
+
+            rewards = (rewards - length_penalties) # Shape: (batch,)
 
         return (rewards, perf)
 
