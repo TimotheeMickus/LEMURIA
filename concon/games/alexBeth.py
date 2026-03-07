@@ -444,8 +444,9 @@ class AlexBeth(Game):
             # `perf` measures how much probability mass Beth assigns to the correct truth value.
             correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
             perf = correct_prob.mean().item()
-            # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions.
-            entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item()
+
+            # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions. TODO Is this really useful?
+            entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item() # TODO Instead of adding 1e-8 factors, use something like torch.where((a != 0), (a * b), 0.).
             # Average symbol count for Alex's message in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
 
