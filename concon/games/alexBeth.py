@@ -555,6 +555,8 @@ class AlexBeth(Game):
                     eval_cache["predicate_ids"].append(int(batch.predicate_idx[i]))
                     eval_cache["predicate_texts"].append(str(batch.predicate[i]))
                     eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
+                    
+        # TODO Also computes how much of the vocabulary is used (see vocabulary_counts somewhere, then (vocabulary_counts > 0).sum()).
 
         # --- logging and stdout --- #
         #                            #
