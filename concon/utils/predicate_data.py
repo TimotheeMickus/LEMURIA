@@ -12,9 +12,11 @@ class Batch():
     def __init__(self, size, predicate, predicate_idx, candidate, node_idx, edge_idx, graph_sizes, candidate_truth=None):
         self.size = size # int, in number of instances
 
-        self.predicate = predicate # list[Predicate]
+        #self.predicate = predicate # list[Predicate]
         self.predicate_idx = predicate_idx # list[int] or tensor of shape (batch)
-        self.candidate = candidate # list[list[Candidate]]
+        
+        # RMK: The Candidate·s contain Property·s and Value·s (which refer to each other), and these don't get serialised easily (which is necessary for multiprocessing).
+        #self.candidate = candidate # list[list[Candidate]]
 
         self.node_idx = node_idx # list[list[list[int]]] or tensor of shape (batch, candidate, node)
         self.edge_idx = edge_idx # list[list[list[list[int]]]] or tensor of shape (batch, candidate, node, node)
@@ -54,7 +56,7 @@ class Batch():
 
     def pretty_print(self, dataset):
         """
-        Decode node indices for a batch item into human-readable labels.
+        Decodes node indices for a batch item into human-readable labels.
         If candidate_idx is None, prints all candidates for the item.
         """
         def decode_row(d, row):
@@ -271,6 +273,7 @@ class Candidate():
 
 class failureBasedDistribution():
     def __init__(self, nb_categories, momentum_factor=0.99, smoothing_factor=1.0):
+        raise NotImplementedError
         self.momentum_factor = momentum_factor
 
         # Initialisation with smoothing
@@ -374,9 +377,7 @@ class GraphConverter:
 
         return (node_idx, edge_idx, graph_sizes)
 
-# Initializing a dataset creates properties and values for different predicates.
-# Then, it generates Predicates from their combinations (e.g. P0-v0, (¬(P0-v0)∧P1-v0)).
-# From these, builds a global vocabulary for graph nodes and edges used to tensorise candidates.
+# A dataset contains properties and (property) values, but also mappings (to indices) used to tensories objects.
 class Dataset(SeqAsyncDataset):
     def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=2, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
         self.device = device
@@ -402,25 +403,26 @@ class Dataset(SeqAsyncDataset):
         self.nb_categories = len(self.predicates) 
 
         # Builds a global node vocabulary.
-        node_labels = {GraphConverter.object_token}
+        node_labels = {GraphConverter.object_token} # set[str | (str, str)]
         for prop in self.properties:
             for value in prop.values:
-                # Store ("Px", "vx") pairs as node labels for features
                 node_labels.add((prop.name, value.name))
 
         node_i2s, node_s2i = self._vocabulary(node_labels, unknown=None)
-        node_i2s.append(GraphConverter.padding_token)
+        node_i2s.append(GraphConverter.padding_token) # TIMOTHÉE: why is padding_token not handled the same way object_token is?
         node_s2i[GraphConverter.padding_token] = len(node_s2i)
 
         # Builds a global edge vocabulary.
-        edge_labels = {GraphConverter.selfedge_label, GraphConverter.noedge_label, GraphConverter.obj2feat_edge, GraphConverter.feat2obj_edge}
+        edge_labels = {GraphConverter.selfedge_label, GraphConverter.noedge_label, GraphConverter.obj2feat_edge, GraphConverter.feat2obj_edge} # set[str]
         edge_i2s, edge_s2i = self._vocabulary(edge_labels, unknown=None)
         
         self.graph_converter = GraphConverter(node_i2s=node_i2s, node_s2i=node_s2i, edge_i2s=edge_i2s, edge_s2i=edge_s2i)
 
         # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
-        
+
+        # TODO Predicate·s, Property·s and Value·s don't get serialised easily so don't record them as resources.
+        # Create a static method to generate them and give the method to the (asynchronous) workers.
         super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter);
 
     # Builds a fixed pool of instances. (Used for overfitting tests.)
@@ -564,7 +566,7 @@ class Dataset(SeqAsyncDataset):
     def selectPredicate(self):
         return self._selectPredicate(self.predicates)
 
-    # predicate: list[Predicate]
+    # predicates: list[Predicate]
     @staticmethod
     def _selectPredicate(predicates):
         idx = np.random.randint(0, len(predicates))
