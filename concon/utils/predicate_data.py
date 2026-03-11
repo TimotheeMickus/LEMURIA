@@ -523,6 +523,8 @@ class Dataset(SeqAsyncDataset):
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
         batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, candidate_sampling=candidate_sampling, **kwargs);
+
+        batch.predicate = [self.predicates[pred_idx] for pred_idx in batch.predicate_idx]
         
         if(device is None): device = self.device
         batch.tensorize(device=device, pin_memory=pin_memory)
@@ -709,7 +711,6 @@ if(__name__ == "__main__"):
     batch = dataset.get_batch(size=32)
     
     # Conversion test: component shapes must be consistent
-    batch.tensorize()
     assert len(batch.node_idx) == batch.size
     assert len(batch.edge_idx) == batch.size
     print("Graph tensorization OK")
