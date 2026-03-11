@@ -440,6 +440,7 @@ class Dataset(SeqAsyncDataset):
 
         return instances
 
+    # TODO Find ways to optimise this function.
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int (a single node is of depth one)
     # min_depth: int
