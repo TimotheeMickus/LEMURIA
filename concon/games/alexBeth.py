@@ -83,6 +83,8 @@ class AlexBeth(Game):
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
+        # Used to decide whether to dump messages during a hike in performance
+        self._prev_eval_perf = None
         self._predicate_negation_idx = self._build_negation_correspondence()
         # For topographic similarity: candidate id = position in list
         self._topsim_candidates = self._build_candidate_vector()
@@ -333,7 +335,7 @@ class AlexBeth(Game):
 
         return (rewards, perf)
 
-    # Returns (loss, pref, rewards) where loss is scalar and perf/rewards are (batch,)
+    # Returns (loss, perf, rewards) where loss is scalar and perf/rewards are (batch,)
     # asker_outcome: (log_prob of (batch, max_msg_len), entropy (batch, 1))
     # retriever_scores: tensor of shape (batch size, number of candidates)
     # truth_targets: tensor of shape (batch size, number of candidates)
@@ -553,8 +555,24 @@ class AlexBeth(Game):
                     message = batch_messages[i].tolist()[:batch_lens[i].item()]
                     eval_cache["messages"].append(message)
                     eval_cache["predicate_ids"].append(int(batch.predicate_idx[i]))
-                    eval_cache["predicate_texts"].append(str(batch.predicate[i]))
-                    eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
+                    # TODO This was crashing
+                    # eval_cache["predicate_texts"].append(str(batch.predicate[i]))
+                    # eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
+                    # ---- and with this it works now:
+                    pred_list = getattr(batch, "predicate", None)
+                    if pred_list is not None: 
+                        eval_cache["predicate_texts"].append(str(pred_list[i]))
+                    else: 
+                        eval_cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
+                    cand_texts = getattr(batch, "candidate_texts", None)
+                    if cand_texts is not None: 
+                        eval_cache["candidate_texts"].append(cand_texts[i])
+                    else:  
+                        cand_list = getattr(batch, "candidate", None)
+                        if cand_list is not None:
+                            eval_cache["candidate_texts"].append(",".join(str(c) for c in cand_list[i]))
+                        else:
+                            eval_cache["candidate_texts"].append("")
                     
         # TODO Also computes how much of the vocabulary is used (see vocabulary_counts somewhere, then (vocabulary_counts > 0).sum()).
 
@@ -708,9 +726,15 @@ class AlexBeth(Game):
 
         #                            #
         # -------------------------- #
-
+        # Decide if there is a performance hike
+        is_perf_hike = (self._prev_eval_perf is not None) and (eval_perf > self._prev_eval_perf)
+        self._prev_eval_perf = eval_perf
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
-        if self.message_dump_dir and eval_cache is not None and (self.dump_message_mode == 'all' or epoch_index == self.epochs - 1):
+        if self.message_dump_dir and eval_cache is not None and (
+            self.dump_message_mode == 'all' or 
+            (self.dump_message_mode == 'last' and epoch_index == self.epochs - 1) or
+            (self.dump_message_mode == 'when_hike' and is_perf_hike)
+            ):
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
