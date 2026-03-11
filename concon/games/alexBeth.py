@@ -417,7 +417,7 @@ class AlexBeth(Game):
                 "messages": [],
                 "predicate_ids": [],
                 "predicate_texts": [],
-                "candidate_texts": []
+                "candidate_texts": [] # TODO Est-ce que ce champ a vraiment un intérêt ?
             }
 
         iterator = range(nb_batch)

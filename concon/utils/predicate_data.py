@@ -139,8 +139,8 @@ class Predicate():
     # Outputs a bool.
     def hasEquivalentIn(self, others):
         for other in others:
-            if(self.isEquivalentTo(other)):
-                return True
+            if(self.isEquivalentTo(other)): return True
+
         return False
 
     def __repr__(self):
@@ -377,6 +377,7 @@ class GraphConverter:
 
         return (node_idx, edge_idx, graph_sizes)
 
+
 # A dataset contains properties and (property) values, but also mappings (to indices) used to tensories objects.
 class Dataset(SeqAsyncDataset):
     def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=2, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
@@ -385,7 +386,7 @@ class Dataset(SeqAsyncDataset):
         self.allow_indeterminate = allow_indeterminate
         self.num_candidates = num_candidates
         self.candidate_sampling = candidate_sampling
-
+    
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
         self.properties = list() # list[Property]
         self.values = list() # list[Value]
@@ -420,11 +421,10 @@ class Dataset(SeqAsyncDataset):
 
         # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
-
-        # TODO Predicate·s, Property·s and Value·s don't get serialised easily so don't record them as resources.
-        # Create a static method to generate them and give the method to the (asynchronous) workers.
+        
         super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter);
-
+        #super().__init__();
+    
     # Builds a fixed pool of instances. (Used for overfitting tests.)
     def init_overfit_pool(self, size=100):
         instances = [] # list[(int, Predicate, list[Candidate], list[int])]
@@ -445,22 +445,24 @@ class Dataset(SeqAsyncDataset):
     # min_depth: int
     # Outputs a ndarray[Predicate]
     def generateAllPredicates(self, max_depth, min_depth, nontrivial_only, no_negation, no_conjunction):
-        depth2predicates = [] # list[list[Predicate]]
-        depth2predicates.append([value for value in self.values if (not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
-
         # Upper-bound estimate (ignores equivalence + nontrivial pruning)
-        V = len(self.values)
-        est_by_depth = [0] * max_depth
-        est_by_depth[0] = V
+        est_by_depth = []
+        est_by_depth.append(len(self.values))
         for d in range(1, max_depth):
-            prev = est_by_depth[d-1]
-            total_prev = sum(est_by_depth[:d])
+            prev = est_by_depth[-1]
+            total_prev = sum(est_by_depth)
             neg = prev if not no_negation else 0
             conj = prev * total_prev if not no_conjunction else 0
-            est_by_depth[d] = neg + conj
+            est_by_depth.append(neg + conj)
         print("Upper-bound predicate counts by depth (pre-filter):", est_by_depth, "total:", sum(est_by_depth))
 
+        depth2predicates = [] # list[list[Predicate]]
+
+        print(f"Generating depth={len(depth2predicates)+1} predicates…")
+        depth2predicates.append([value for value in self.values if(not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
+
         while(len(depth2predicates) < max_depth):
+            print(f"Generating depth={len(depth2predicates)+1} predicates…")
             predicates = list() # list[Predicate]
 
             if(not no_negation):
@@ -486,7 +488,7 @@ class Dataset(SeqAsyncDataset):
             print(f"Depth: {len(depth2predicates)}: {len(predicates)} predicates")
 
         return np.array(list(itertools.chain.from_iterable(depth2predicates[min_depth-1:]))) # ndarray[Predicate]
-
+        
     def print_info(self):
         print(f"{len(self.properties)} properties:")
         #for prop in self.properties: print(f"{prop} (size {len(prop.values)})")
@@ -653,7 +655,6 @@ class Dataset(SeqAsyncDataset):
         truths.extend([1] * num_true)
 
         candidates.extend(Dataset._generateCandidatesTarget(predicate, -1, num_false, allow_indeterminate, properties))
-        # BCE expects labels 0/1
         truths.extend([0] * num_false)
 
         return (candidates, truths)
@@ -665,6 +666,7 @@ class Dataset(SeqAsyncDataset):
     def generateCandidates(self, predicate, num_candidates, allow_indeterminate):
         return self._generateCandidates(predicate, num_candidates, allow_indeterminate, self.properties)
 
+    # properties: list[Property]
     @staticmethod
     def _generateCandidates(predicate, num_candidates, allow_indeterminate, properties):
         candidates = [] # list[Candidate]
