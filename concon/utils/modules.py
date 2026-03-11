@@ -30,7 +30,7 @@ class MultiHeadsClassifier:
     def forward(self, batch): # Only the target messages will be used
         batch_img = batch.target_img(stack=True)
         activation = self.image_encoder(batch_img)
-        targets = batch.target_category(stack=True, f=self.get_head_targets).to(self.device)
+        targets = batch.target_category(stack=True, f=self.get_head_targets, device=self.device)
 
         losses = []
         hits = []
@@ -52,7 +52,7 @@ class MessageEncoder(nn.Module):
         super(MessageEncoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
-        self.lstm = nn.LSTM(embedding_dim, output_dim, 1, batch_first=True)
+        self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=output_dim, num_layers=1, batch_first=True)
         
         self.alphabet_size = self.symbol_embeddings.num_embeddings
 
@@ -60,21 +60,16 @@ class MessageEncoder(nn.Module):
         """
         Forward propagation.
         Input:
-            `message`, of shape [args.batch_size x <=MSG_LEN], signal produced by sender
-            `length`, of shape [args.batch_size x 1], length of signal produced by sender
+            `message`, of shape [args.batch_size, <=MSG_LEN], signal produced by sender
+            `length`, of shape [args.batch_size, 1], length of signal produced by sender
         Output:
-            encoded message, of shape [args.batch_size x output_dim]
+            encoded message, of shape [args.batch_size, output_dim]
         """
-        # Runs the LSTM on the signal.
-        embeddings = self.symbol_embeddings(message)
-        embeddings = self.lstm(embeddings)[0]
-
-        # select last step corresponding to message
-        # TODO This looks inefficient. LSTMs can do this themselves (see `pack_padded_sequence` and `pad_packed_sequence`).
-        index = torch.arange(message.size(-1)).expand_as(message).to(message.device)
-        output = embeddings.masked_select((index == (length-1)).unsqueeze(-1))
-
-        return output.view(embeddings.size(0), embeddings.size(-1))
+        embeddings = self.symbol_embeddings(message) # Shape: (batch size, message length, embedding_dim)
+        embeddings = torch.nn.utils.rnn.pack_padded_sequence(embeddings, length.squeeze(1).cpu(), batch_first=True, enforce_sorted=False)
+        _, (hidden, _) = self.lstm(embeddings) # Shape: (num_layers, batch size, output_dim)
+        
+        return hidden[-1] # Shape: (batch size, output_dim)
 
     @classmethod
     def from_args(cls, args, symbol_embeddings=None):
@@ -114,10 +109,9 @@ class MessageDecoder(nn.Module):
 
     # Returns a dictionary.
     # encoded: tensor of shape (batch size, encoding size)
-    # TODO Optimise with torch.jit.script.
     def forward(self, encoded):
         # Initialisation
-        last_symbol = torch.ones(encoded.size(0)).long().to(encoded.device) * self.bos_index
+        last_symbol = torch.full(size=(encoded.size(0),), fill_value=self.bos_index, device=encoded.device, dtype=torch.long)
         cell = self.cell_proj(encoded).unsqueeze(0)
         hidden = self.hidden_proj(encoded).unsqueeze(0)
         state = (cell, hidden)
@@ -127,43 +121,44 @@ class MessageDecoder(nn.Module):
         log_probs = []
         entropy = []
 
-        # Used in the stopping mechanism (when EOS has been produced)
-        has_stopped = torch.zeros(encoded.size(0)).bool().to(encoded.device)
-        has_stopped.requires_grad = False
+        # Used in the stopping mechanism (False·s become True·s when EOS is produced)
+        has_stopped = torch.zeros(encoded.size(0), device=encoded.device, dtype=torch.bool)
 
-        # Produces the messages
+        # Produces the messages.
         # TODO Je serais d'avis à ne pas utiliser de EOS. Si l'action EOS est choisie, le message serait terminé sans qu'aucun symbol ne soit ajouté (ou plus techniquement, on ajoute un padding symbol). En fait, ça revient plus ou moins à fusionner le EOS et le padding symbol. Cela permettrait d'éviter d'avoir un symbol spécial apparaissant souvent mais pas toujours dans les "vrais" messages, ce qui peut compliquer l'analyse.
         for _ in range(self.max_msg_len):
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
-            # Selects actions
-            probs = F.softmax(output, dim=-1) # Shape: (batch size, (alphabet size + 1))
-            dist = Categorical(probs)
-            action = dist.sample() if(self.training) else probs.argmax(dim=-1) # Shape: (batch size)
+            # Selects actions.
+            #probs = F.softmax(output, dim=-1) # Shape: (batch size, (alphabet size + 1))
+            #dist = Categorical(probs)
+            dist = Categorical(logits=output)
+            action = dist.sample() if(self.training) else output.argmax(dim=-1) # Shape: (batch size)
 
-            # Ignores prediction for completed messages
-            ent = dist.entropy() * (~has_stopped).float()
-            log_p = dist.log_prob(action) * (~has_stopped).float()
+            # Ignores prediction for completed messages.
+            active = (~has_stopped).float()
+            log_p = dist.log_prob(action) * active
+            ent = dist.entropy() * active
             log_probs.append(log_p)
             entropy.append(ent)
 
             action = action.masked_fill(has_stopped, self.padding_idx)
             message.append(action)
 
-            # Stops if all messages are complete
+            # Stops if all messages are complete.
             has_stopped = has_stopped | (action == self.eos_index)
             if has_stopped.all():
                 break
 
             last_symbol = action
 
-        # Converts output to tensor
+        # Converts output to tensor.
         message = torch.stack(message, dim=1) # Shape: (batch size, max msg length)
         message_len = (message != self.padding_idx).sum(dim=1)[:, None] # Shape: (batch size, 1)
         log_probs = torch.stack(log_probs, dim=1) # Shape: (batch size, max msg length)
 
-        # Average entropy over timesteps, hence ignore padding
+        # Averages entropy (over timesteps).
         entropy = torch.stack(entropy, dim=1) # Shape: (batch size, max msg length)
         entropy = entropy.sum(dim=1, keepdim=True) # Shape: (batch size, 1)
         entropy = entropy / message_len.float() # The average symbol distribution entropy over the message. Shape: (batch size, 1)
@@ -207,10 +202,11 @@ class CandidateNodeAverager(nn.Module):
     Rudimentary candidate encoder that averages embedded node ids.
     Turns graph tensors into a fixed-size vector per candidate by embedding every node ID and averaging.
     """
-    def __init__(self, node_vocab_size, hidden_size, padding_id):
+    def __init__(self, node_vocab_size, hidden_size, padding_idx):
         super().__init__()
-        self.node_emb = nn.Embedding(node_vocab_size, hidden_size, padding_idx=padding_id)
-        self.padding_id = padding_id
+
+        self.node_emb = nn.Embedding(node_vocab_size, hidden_size, padding_idx=padding_idx)
+        self.padding_idx = padding_idx
 
     def forward(self, node_idx, **_):
         '''
@@ -223,11 +219,12 @@ class CandidateNodeAverager(nn.Module):
             The output is the average, i.e. the sum over the number of non-padding nodes. 
             (This is done element-wise.)
         '''
-        emb = self.node_emb(node_idx)  # (batch, num_candidates, max_nodes, hidden)
-        mask = (node_idx != self.padding_id).unsqueeze(-1)
-        summed = (emb * mask).sum(dim=2)
-        counts = mask.sum(dim=2) #.clamp_min(1.0)
-        return summed / counts  # (batch, num_candidates, hidden)
+        emb = self.node_emb(node_idx) # (batch size, num candidates, max_nodes, hidden_size)
+        mask = (node_idx == self.padding_idx) # (batch size, num candidates, max_nodes)
+        emb = emb.masked_fill(mask.unsqueeze(-1), 0.0) # (batch size, num candidates, max_nodes, hidden_size)
+        summed = emb.sum(dim=2) # (batch size, num candidates, hidden_size)
+        counts = (~mask).sum(dim=2) # (batch size, num candidates)
+        return summed / counts.unsqueeze(-1) # (batch, num_candidates, hidden)
     
     
 class MultiHeadAttention(nn.Module):

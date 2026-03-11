@@ -79,12 +79,11 @@ class Batch():
     # Returns a list or a tensor of the original/target categories of the batch, possibly transformed by a function first.
     # stack: whether to return a tensor (True) or a list (False)
     # f: the function (if any) to apply to each category
-    def target_category(self, stack=False, f=None):
-        if(f is None): f = (lambda x: x)
+    def target_category(self, stack=False, f=None, device=None):
+        tmp = [x.category for x in self.target]
+        if(f is not None): tmp = [f(y) for y in tmp]
 
-        tmp = [f(x.category) for x in self.target]
-
-        if(stack): return torch.tensor(tmp)
+        if(stack): return torch.tensor(tmp, device=device)
         else: return tmp
 
     # TODO If there is no base distractor, then the function might fail (when asking to stack an empty list)

@@ -32,12 +32,12 @@ def do(args):
         if(nb_workers > 1): data_loader.turnAsynchronous(nb_workers=nb_workers, nb_prefetch=nb_prefetch)
 
         # Size of the message space (number of predicates).
-        # TIMOTHÉE Why do you have to inject so much stuff in `args`?
+        # TIMOTHÉE Why do you have to inject so much stuff in `args`? (TODO I think that you should not.)
         args.num_predicates = len(data_loader.predicates)
 
         # For candidate encoder
         args.node_vocab_size = len(data_loader.graph_converter.node_i2s)
-        args.node_padding_id = data_loader.graph_converter.node_s2i[data_loader.graph_converter.padding_token]
+        args.node_padding_idx = data_loader.graph_converter.node_s2i[data_loader.graph_converter.padding_token]
         args.edge_vocab_size = len(data_loader.graph_converter.edge_i2s)
         if(args.candidate_encoder == 'graph_transformer'):
             if(args.graph_d_model is None):
@@ -52,7 +52,7 @@ def do(args):
             if(args.graph_d_model % args.graph_num_heads != 0):
                 raise ValueError(f"graph_d_model ({args.graph_d_model}) % graph_num_heads ({args.graph_num_heads}) must == 0.")
             
-            # # Pick the largest divisor <= min(8, d_model) to avoid head mismatch.
+            # # Picks the largest divisor <= min(8, d_model) to avoid head mismatch.
             # max_heads = min(8, args.graph_d_model)
             # safe_heads = next((h for h in range(max_heads, 0, -1) if args.graph_d_model % h == 0), 1)
             # if not args.quiet:

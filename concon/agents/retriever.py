@@ -97,14 +97,14 @@ class Retriever(Agent):
     def from_args(cls, args, candidate_encoder=None, symbol_embeddings=None):
         has_shared_param = (candidate_encoder is not None) or (symbol_embeddings is not None)
         
-        if candidate_encoder is None:
-            if args.candidate_encoder == "node_averager":
+        if(candidate_encoder is None):
+            if(args.candidate_encoder == "node_averager"):
                 candidate_encoder = CandidateNodeAverager(
                     node_vocab_size=args.node_vocab_size, 
                     hidden_size=args.hidden_size, 
-                    padding_id=args.node_padding_id
+                    padding_idx=args.node_padding_idx
                 )
-            elif args.candidate_encoder == "graph_transformer":
+            elif(args.candidate_encoder == "graph_transformer"):
                 candidate_encoder = CandidateGraphEncoder(
                     node_vocab_size=args.node_vocab_size,
                     edge_vocab_size=args.edge_vocab_size,
@@ -115,7 +115,9 @@ class Retriever(Agent):
                     dropout=args.graph_dropout,
                     use_norm=not args.graph_no_norm
                 )
+        #candidate_encoder = torch.compile(candidate_encoder)
                 
         message_encoder = MessageEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        #message_encoder = torch.compile(message_encoder)
         
         return cls(candidate_encoder, message_encoder, args, has_shared_param)

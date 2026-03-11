@@ -67,5 +67,6 @@ class Asker(Agent):
         if(predicate_encoder is None): predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
 
         message_decoder = MessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        #message_decoder = torch.compile(message_decoder)
         
         return cls(predicate_encoder, message_decoder, args, has_shared_param)
