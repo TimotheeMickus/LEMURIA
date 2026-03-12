@@ -120,26 +120,39 @@ class Predicate():
         return self.isVerifiable() and self.isFalsifiable()
 
     # other: Predicate
+    # consider_indeterminate: bool
     # Outputs a bool.
-    def isAsStrongAs(self, other):
+    def isAsStrongAs(self, other, consider_indeterminate):
         for c in self.build(target=1):
             if(other.check(c) < 1): return False
+
+        if(not consider_indeterminate): return True
 
         for c in self.build(target=0):
             if(other.check(c) < 0): return False
 
+        for c in other.build(target=0):
+            if(self.check(c) > 0): return False
+        
+        for c in other.build(target=-1):
+            if(self.check(c) > -1): return False
+
         return True
     
     # other: Predicate
+    # consider_indeterminate: bool
     # Outputs a bool.
-    def isEquivalentTo(self, other):
-        return self.isAsStrongAs(other) and other.isAsStrongAs(self)
+    def isEquivalentTo(self, other, consider_indeterminate):
+        return self.isAsStrongAs(other, consider_indeterminate) and other.isAsStrongAs(self, consider_indeterminate)
 
     # others: iterable[Predicate]
+    # consider_indeterminate: bool
     # Outputs a bool.
-    def hasEquivalentIn(self, others):
+    def hasEquivalentIn(self, others, consider_indeterminate):
         for other in others:
-            if(self.isEquivalentTo(other)): return True
+            if(self.isEquivalentTo(other, consider_indeterminate)):
+                #print(f"{self} is equivalent with {other}") # DEBUG
+                return True
 
         return False
 
@@ -399,7 +412,7 @@ class Dataset(SeqAsyncDataset):
             self.values.extend(prop.values)
 
         # Generates predicates.
-        self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction) # ndarray[Predicate]
+        self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction, consider_indeterminate=allow_indeterminate) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules; TIMOTHÉE: be more specific
         self.nb_categories = len(self.predicates) 
 
@@ -444,9 +457,10 @@ class Dataset(SeqAsyncDataset):
     # nontrivial_only: bool, indicates whether all subpredicates should be nontrivial
     # max_depth: int (a single node is of depth one)
     # min_depth: int
+    # consider_indeterminate: bool
     # Outputs a ndarray[Predicate]
-    def generateAllPredicates(self, max_depth, min_depth, nontrivial_only, no_negation, no_conjunction):
-        # Upper-bound estimate (ignores equivalence + nontrivial pruning)
+    def generateAllPredicates(self, max_depth, min_depth, nontrivial_only, no_negation, no_conjunction, consider_indeterminate):
+        # Computes an upper-bound of the number of predicates (ignoring equivalence and non-trivial pruning).
         est_by_depth = []
         est_by_depth.append(len(self.values))
         for d in range(1, max_depth):
@@ -455,12 +469,43 @@ class Dataset(SeqAsyncDataset):
             neg = prev if not no_negation else 0
             conj = prev * total_prev if not no_conjunction else 0
             est_by_depth.append(neg + conj)
-        print("Upper-bound predicate counts by depth (pre-filter):", est_by_depth, "total:", sum(est_by_depth))
+        print(f"Upper-bound of the number of predicates by depth: {est_by_depth}; total: {sum(est_by_depth)}")
 
         depth2predicates = [] # list[list[Predicate]]
 
         print(f"Generating depth={len(depth2predicates)+1} predicates…")
         depth2predicates.append([value for value in self.values if(not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
+        print(f"Depth: {len(depth2predicates)+1}: {len(depth2predicates[-1])} predicates")
+
+        # In order to not include in the dataset two (syntactically) distinct predicates logically equivalent to each other, the equivalence of each new predicate with already generated predicates is checked. To speed up this process, a list of objects is used to compute a "logical signature" for each predicate. (Then, only the equivalence of predicates with the same signature is directly checked.) The signature of a predicate is the list of truth values of the predicate on a list of objects.
+        # Computes the list of objects used to compute signatures.
+        signature_items = [] # list[Candidate]
+        for value in self.values:
+            l = value.build(1) # list[Candidate]
+            assert (len(l) == 1)
+            signature_items.append(self.extendCandidate(candidate=l[0], allow_indeterminate=consider_indeterminate))
+
+        # pred: Predicate
+        # Outputs a tuple[int].
+        def computeSignature(pred):
+            return tuple(pred.check(item) for item in signature_items)
+
+        signatures = {} # dict[tuple[int], Set[Predicate]]
+
+        # pred: Predicate
+        # Outputs a bool.
+        def checkEquivalence(pred):
+            signature = computeSignature(pred)
+            #input((pred, signature)) # DEBUG
+            if((signature in signatures) and (pred.hasEquivalentIn(signatures[signature], consider_indeterminate))): return False
+            
+            signatures[signature] = signatures.get(signature, set())
+            signatures[signature].add(pred)
+
+            return True
+        
+        for pred in depth2predicates[0]: assert checkEquivalence(pred)
+
 
         while(len(depth2predicates) < max_depth):
             print(f"Generating depth={len(depth2predicates)+1} predicates…")
@@ -470,23 +515,29 @@ class Dataset(SeqAsyncDataset):
                 for predicate in depth2predicates[-1]:
                     pred = Negation(predicate=predicate)
 
-                    if(pred.hasEquivalentIn(itertools.chain(*depth2predicates, predicates))): continue
                     #if(nontrivial_only and (not pred.isNontrivial())): continue
+
+                    #if(pred.hasEquivalentIn(itertools.chain(*depth2predicates, predicates), consider_indeterminate)): continue
+                    if(not checkEquivalence(pred)): continue
 
                     predicates.append(pred)
              
             if(not no_conjunction):
                 for pred1 in depth2predicates[-1]:
                     for pred2 in itertools.chain.from_iterable(depth2predicates):
-                        pred = Conjunction(pred1=pred1, pred2=pred2)
+                        if(pred1 == pred2): break
 
-                        if(pred.hasEquivalentIn(itertools.chain(*depth2predicates, predicates))): continue
+                        pred = Conjunction(pred1=pred1, pred2=pred2)
+                        
                         if(nontrivial_only and (not pred.isNontrivial())): continue
+
+                        #if(pred.hasEquivalentIn(itertools.chain(*depth2predicates, predicates), consider_indeterminate)): continue
+                        if(not checkEquivalence(pred)): continue
 
                         predicates.append(pred)
 
             depth2predicates.append(predicates)
-            print(f"Depth: {len(depth2predicates)}: {len(predicates)} predicates")
+            print(f"Depth: {len(depth2predicates)+1}: {len(predicates)} predicates")
 
         return np.array(list(itertools.chain.from_iterable(depth2predicates[min_depth-1:]))) # ndarray[Predicate]
         
@@ -689,10 +740,18 @@ def get_data_loader(args):
     return dataset
 
 if(__name__ == "__main__"):
+    import time
+
     # Creates a dataset.
-    dataset = Dataset(device='cpu', batch_size=128, properties="4-4", max_depth=3, nontrivial_only=False, no_negation=False, no_conjunction=False)
+    t1 = time.time()
+    dataset = Dataset(device='cpu', batch_size=128, properties="1024", max_depth=2, nontrivial_only=True, no_negation=False, no_conjunction=True)
+    #dataset = Dataset(device='cpu', batch_size=128, properties="2-3", max_depth=3, nontrivial_only=False, no_negation=False, no_conjunction=False)
+    #dataset = Dataset(device='cpu', batch_size=128, properties="2-3", max_depth=3, nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=True)
+    #dataset = Dataset(device='cpu', batch_size=128, properties="5", max_depth=4, nontrivial_only=False, no_negation=False, no_conjunction=False)
+    t2 = time.time()
     print("\nDataset info: ")
     dataset.print_info()
+    print(f"(generation took {t2-t1}s)")
 
     # Estimates the probability that a random candidate satisfy a random predicate.
     print("\nSatisfaction probability test (logical)")
@@ -700,7 +759,7 @@ if(__name__ == "__main__"):
     for allow_indeterminate in [True, False]:
         counts = dict() # dict[int, int]
         for _ in range(nb):
-            _, predicate = dataset.selectPredicate() # FYI BUG_FIX: `predicate` is a tuple (idx, predicate@idx): select only predicate[-1]
+            _, predicate = dataset.selectPredicate()
             candidate = dataset.generateCandidate(allow_indeterminate=allow_indeterminate)
             truth_value = predicate.check(candidate)
             counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1
