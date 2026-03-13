@@ -77,8 +77,8 @@ class AlexBeth(Game):
         self.dump_message_mode = getattr(args, "dump_message", None)
         self.dump_predicate_perf = getattr(args, "dump_predicate_perf", False)
         self.dump_eval_metrics_enabled = getattr(args, "dump_eval_metrics", False)
-        # Trigger fancy language eval whenever messages are dumped.
-        self.run_fancy_lang_eval = bool(self.dump_message_mode)
+        # Fancy language eval is only needed for eval metrics.
+        self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
@@ -412,14 +412,24 @@ class AlexBeth(Game):
         neg_consistency_total = 0.0
         neg_consistency_count = 0
 
-        # Shared cache for message dump + language-level eval metrics.
-        eval_cache = None
-        if self.run_fancy_lang_eval:
-            eval_cache = {
+        # Cache for message dumps.
+        dump_cache = None
+        if self.dump_message_mode:
+            dump_cache = {
                 "messages": [],
                 "predicate_ids": [],
                 "predicate_texts": [],
-                "candidate_texts": [] # TODO Est-ce que ce champ a vraiment un intérêt ?
+                "candidate_texts": []
+            }
+
+        # Cache for language-level eval metrics.
+        eval_cache = None
+        if self.run_fancy_lang_eval:
+            eval_cache = dump_cache if dump_cache is not None else {
+                "messages": [],
+                "predicate_ids": [],
+                "predicate_texts": [],
+                "candidate_texts": []
             }
 
         iterator = range(nb_batch)
@@ -543,7 +553,7 @@ class AlexBeth(Game):
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
-            if eval_cache is not None:
+            if dump_cache is not None:
                 batch_messages = asker_outcome.action[0].detach().clone()
                 batch_lens = asker_outcome.action[1].detach().clone()
                 accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
@@ -553,26 +563,26 @@ class AlexBeth(Game):
                         continue # skip low accuracy items
                     # truncate padding away from signals
                     message = batch_messages[i].tolist()[:batch_lens[i].item()]
-                    eval_cache["messages"].append(message)
-                    eval_cache["predicate_ids"].append(int(batch.predicate_idx[i]))
+                    dump_cache["messages"].append(message)
+                    dump_cache["predicate_ids"].append(int(batch.predicate_idx[i]))
                     # TODO This was crashing
                     # eval_cache["predicate_texts"].append(str(batch.predicate[i]))
                     # eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
                     # ---- and with this it works now:
                     pred_list = getattr(batch, "predicate", None)
                     if pred_list is not None: 
-                        eval_cache["predicate_texts"].append(str(pred_list[i]))
+                        dump_cache["predicate_texts"].append(str(pred_list[i]))
                     else: 
-                        eval_cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
+                        dump_cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
                     cand_texts = getattr(batch, "candidate_texts", None)
                     if cand_texts is not None: 
-                        eval_cache["candidate_texts"].append(cand_texts[i])
+                        dump_cache["candidate_texts"].append(cand_texts[i])
                     else:  
                         cand_list = getattr(batch, "candidate", None)
                         if cand_list is not None:
-                            eval_cache["candidate_texts"].append(",".join(str(c) for c in cand_list[i]))
+                            dump_cache["candidate_texts"].append(",".join(str(c) for c in cand_list[i]))
                         else:
-                            eval_cache["candidate_texts"].append("")
+                            dump_cache["candidate_texts"].append("")
                     
         # TODO Also computes how much of the vocabulary is used (see vocabulary_counts somewhere, then (vocabulary_counts > 0).sum()).
 
@@ -720,7 +730,7 @@ class AlexBeth(Game):
                 raise RuntimeError(
                     "Missing eval metrics for epoch "
                     f"{epoch_index}: {', '.join(missing)}. "
-                    "Enable fancy eval with --dump_message."
+                    "Enable fancy eval with --dump_eval_metrics."
                 )
             self._eval_metrics_rows.append(row)
 
@@ -730,7 +740,7 @@ class AlexBeth(Game):
         is_perf_hike = (self._prev_eval_perf is not None) and (eval_perf > self._prev_eval_perf)
         self._prev_eval_perf = eval_perf
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
-        if self.message_dump_dir and eval_cache is not None and (
+        if self.message_dump_dir and dump_cache is not None and (
             self.dump_message_mode == 'all' or 
             (self.dump_message_mode == 'last' and epoch_index == self.epochs - 1) or
             (self.dump_message_mode == 'when_hike' and is_perf_hike)
@@ -740,10 +750,10 @@ class AlexBeth(Game):
                 writer = csv.writer(ostr)
                 _ = writer.writerow(['msg', 'pred_idx', 'pred_str', 'candidates'])
                 for msg, pred_idx, pred_text, cand_text in zip(
-                    eval_cache["messages"],
-                    eval_cache["predicate_ids"],
-                    eval_cache["predicate_texts"],
-                    eval_cache["candidate_texts"],
+                    dump_cache["messages"],
+                    dump_cache["predicate_ids"],
+                    dump_cache["predicate_texts"],
+                    dump_cache["candidate_texts"],
                 ):
                     msg = ' '.join(map(str, msg))
                     row = [msg, pred_idx, pred_text, cand_text]
