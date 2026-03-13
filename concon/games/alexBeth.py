@@ -185,6 +185,7 @@ class AlexBeth(Game):
             "eval/perf",
             "eval/retriever_entropy",
             "eval/msg_length",
+            "eval/vocab_used",
             "eval/c.e._verify",
             "eval/c.e._falsify",
             "eval/scrambling-resistance",
@@ -411,6 +412,8 @@ class AlexBeth(Game):
         # Mean negation consistency over matched (p, ¬p) rows.
         neg_consistency_total = 0.0
         neg_consistency_count = 0
+        # Count symbol usage across eval batches.
+        total_vocab_counts = None
 
         # Cache for message dumps.
         dump_cache = None
@@ -461,6 +464,22 @@ class AlexBeth(Game):
             entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item() # TODO Instead of adding 1e-8 factors, use something like torch.where((a != 0), (a * b), 0.).
             # Average symbol count for Alex's message in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
+            # Vocabulary usage: count symbols used in signals (excluding EOS and padding).
+            msg_tokens = asker_outcome.action[0]
+            msg_lens = asker_outcome.action[1].int()
+            max_len = msg_tokens.size(1)
+            positions = torch.arange(max_len, device=msg_tokens.device).unsqueeze(0)
+            # True for positions strictly before EOS in each signal.
+            in_message = positions < (msg_lens.unsqueeze(1) - 1)
+            if in_message.any():
+                used_tokens = msg_tokens[in_message]
+                vocab_counts = torch.bincount(used_tokens, minlength=self.full_alphabet_size).to("cpu")
+                vocab_counts[self.asker.eos_index] = 0
+                vocab_counts[self.asker.padding_idx] = 0
+                if total_vocab_counts is None:
+                    total_vocab_counts = vocab_counts
+                else:
+                    total_vocab_counts += vocab_counts
 
             # Store row-level performance for predicate diagnostics only when requested.
             if self.dump_predicate_perf:
@@ -594,11 +613,16 @@ class AlexBeth(Game):
         eval_perf = total_perf / total_items
         eval_retriever_entropy = total_entropy / total_items
         eval_msg_length = total_msg_length / total_items
+        if total_vocab_counts is None:
+            eval_vocab_used = 0.0
+        else:
+            eval_vocab_used = float((total_vocab_counts > 0).sum().item())
         log('eval/loss', eval_loss)
         log('eval/accuracy', eval_accuracy)
         log('eval/perf', eval_perf)
         log('eval/retriever_entropy', eval_retriever_entropy)
         log('eval/msg_length', eval_msg_length)  # Average number of symbols Alex produced.
+        log('eval/vocab_used', eval_vocab_used)
         avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
 
@@ -716,6 +740,7 @@ class AlexBeth(Game):
                 "eval/perf": float(eval_perf),
                 "eval/retriever_entropy": float(eval_retriever_entropy),
                 "eval/msg_length": float(eval_msg_length),
+                "eval/vocab_used": float(eval_vocab_used),
                 "eval/c.e._verify": verify_ratio,
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,
