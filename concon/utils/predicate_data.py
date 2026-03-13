@@ -116,6 +116,7 @@ class Predicate():
         return (len(self.build(target=-1)) > 0)
 
     # Outputs a bool.
+    # TODO To be trivial is to always have the same truth value so this function should check that at least two truth values are available (this matters when considering also a third truth value).
     def isNontrivial(self):
         return self.isVerifiable() and self.isFalsifiable()
 
