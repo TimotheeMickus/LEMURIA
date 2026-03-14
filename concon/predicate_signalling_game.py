@@ -29,7 +29,7 @@ def do(args):
         # Loads the data.
         data_loader = get_data_loader(args)
         nb_workers, nb_prefetch = (2, 2) # TODO There should be command line arguments for these.
-        if(nb_workers > 1): data_loader.turnAsynchronous(nb_workers=nb_workers, nb_prefetch=nb_prefetch)
+        if((nb_workers > 0) and (nb_prefetch > 0)): data_loader.turnAsynchronous(nb_workers=nb_workers, nb_prefetch=nb_prefetch)
 
         # Size of the message space (number of predicates).
         # TIMOTHÉE Why do you have to inject so much stuff in `args`? (TODO I think that you should not.)
