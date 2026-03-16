@@ -12,3 +12,4 @@ changelog.txt
 wandb/
 runs/
 *.swp
+predicate_games.ipynb
