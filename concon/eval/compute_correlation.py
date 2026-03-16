@@ -191,25 +191,60 @@ def pairwise_multiset_jaccard_distances(messages):
     if pair_count == 0:
         return np.empty(0, dtype=float)
 
-    max_symbol = max((max(msg) for msg in messages if len(msg) > 0), default=-1)
-    if max_symbol < 0:
+    msg_tuples = [tuple(msg) for msg in messages]
+    unique_msgs = []
+    unique_idx = np.empty(n, dtype=np.int32)
+    msg_to_idx = {}
+    for i, msg in enumerate(msg_tuples):
+        idx = msg_to_idx.get(msg)
+        if idx is None:
+            idx = len(unique_msgs)
+            msg_to_idx[msg] = idx
+            unique_msgs.append(msg)
+        unique_idx[i] = idx
+
+    m = len(unique_msgs)
+    if m <= 1:
         return np.zeros(pair_count, dtype=float)
 
-    # Count vectors (multiset representation).
-    counts = np.zeros((n, max_symbol + 1), dtype=np.float32)
-    for i, msg in enumerate(messages):
+    # Remap tokens to a compact alphabet for exact, faster counts.
+    token_set = set()
+    lengths = np.empty(m, dtype=np.float32)
+    for i, msg in enumerate(unique_msgs):
+        lengths[i] = len(msg)
+        token_set.update(msg)
+    if not token_set:
+        return np.zeros(pair_count, dtype=float)
+
+    token_to_idx = {t: i for i, t in enumerate(token_set)}
+    vocab = len(token_to_idx)
+    counts = np.zeros((m, vocab), dtype=np.float32)
+    for i, msg in enumerate(unique_msgs):
         if len(msg) > 0:
-            counts[i] = np.bincount(msg, minlength=max_symbol + 1)
+            idxs = [token_to_idx[t] for t in msg]
+            counts[i] = np.bincount(idxs, minlength=vocab)
 
     # For nonnegative count vectors:
     # union = (s_i + s_j + L1)/2, intersection = (s_i + s_j - L1)/2
     # => Jaccard distance = 1 - inter/union = 2*L1 / (s_i + s_j + L1)
     l1 = scipy.spatial.distance.pdist(counts, metric='cityblock')
-    lengths = np.array([len(msg) for msg in messages], dtype=np.float32)
-    triu_i, triu_j = np.triu_indices(n, k=1)
+    triu_i, triu_j = np.triu_indices(m, k=1)
     len_sums = lengths[triu_i] + lengths[triu_j]
     denom = len_sums + l1
-    return np.divide(2.0 * l1, denom, out=np.zeros_like(l1), where=(denom > 0))
+    du = np.divide(2.0 * l1, denom, out=np.zeros_like(l1), where=(denom > 0))
+
+    # Expand back to the original condensed form.
+    oi, oj = np.triu_indices(n, k=1)
+    ui = unique_idx[oi]
+    uj = unique_idx[oj]
+    same = (ui == uj)
+    out = np.zeros(pair_count, dtype=float)
+    if not same.all():
+        umin = np.minimum(ui, uj)
+        umax = np.maximum(ui, uj)
+        idx = umin * (m - 1) - (umin * (umin + 1) // 2) + (umax - umin - 1)
+        out[~same] = du[idx[~same]]
+    return out
 
 """
 @ft.lru_cache(maxsize=32768)

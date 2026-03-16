@@ -466,7 +466,7 @@ class AlexBeth(Game):
             msg_length = asker_outcome.action[1].float().mean().item()
             # Vocabulary usage: count symbols used in signals (excluding EOS and padding).
             msg_tokens = asker_outcome.action[0]
-            msg_lens = asker_outcome.action[1].int()
+            msg_lens = asker_outcome.action[1].int().view(-1)
             max_len = msg_tokens.size(1)
             positions = torch.arange(max_len, device=msg_tokens.device).unsqueeze(0)
             # True for positions strictly before EOS in each signal.
@@ -572,7 +572,8 @@ class AlexBeth(Game):
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
-            if dump_cache is not None:
+            cache = dump_cache if dump_cache is not None else eval_cache
+            if cache is not None:
                 batch_messages = asker_outcome.action[0].detach().clone()
                 batch_lens = asker_outcome.action[1].detach().clone()
                 accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
@@ -582,26 +583,26 @@ class AlexBeth(Game):
                         continue # skip low accuracy items
                     # truncate padding away from signals
                     message = batch_messages[i].tolist()[:batch_lens[i].item()]
-                    dump_cache["messages"].append(message)
-                    dump_cache["predicate_ids"].append(int(batch.predicate_idx[i]))
+                    cache["messages"].append(message)
+                    cache["predicate_ids"].append(int(batch.predicate_idx[i]))
                     # TODO This was crashing
                     # eval_cache["predicate_texts"].append(str(batch.predicate[i]))
                     # eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
                     # ---- and with this it works now:
                     pred_list = getattr(batch, "predicate", None)
                     if pred_list is not None: 
-                        dump_cache["predicate_texts"].append(str(pred_list[i]))
+                        cache["predicate_texts"].append(str(pred_list[i]))
                     else: 
-                        dump_cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
+                        cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
                     cand_texts = getattr(batch, "candidate_texts", None)
                     if cand_texts is not None: 
-                        dump_cache["candidate_texts"].append(cand_texts[i])
+                        cache["candidate_texts"].append(cand_texts[i])
                     else:  
                         cand_list = getattr(batch, "candidate", None)
                         if cand_list is not None:
-                            dump_cache["candidate_texts"].append(",".join(str(c) for c in cand_list[i]))
+                            cache["candidate_texts"].append(",".join(str(c) for c in cand_list[i]))
                         else:
-                            dump_cache["candidate_texts"].append("")
+                            cache["candidate_texts"].append("")
                     
         # TODO Also computes how much of the vocabulary is used (see vocabulary_counts somewhere, then (vocabulary_counts > 0).sum()).
 
