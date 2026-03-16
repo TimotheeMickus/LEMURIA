@@ -16,10 +16,18 @@ def get_datapoints(directory_name: str = None):
     datapoints = []
     super_directory = pathlib.Path('runs') / directory_name
 
-    for directory in super_directory:
+    for directory in super_directory.iterdir():
+        # Handle cases where directories are nested
+        if not (directory / "hparams.json").is_file():
+            subdirectories = [p for p in directory.iterdir() if p.is_dir()]
+            if len(subdirectories) == 1 and (subdirectories[0] / "hparams.json").is_file():
+                directory = subdirectories[0]
+            else:
+                print(f"Found weird directory in {super_directory}/{directory}.\n{subdirectories}.")
         # Depending on the run, we have several message dumps: store all
         messages_paths = []
         eval_path = None
+        pred_path = None
 
         # Pick up different CSVs: signals, evaluation, per-predicate metrics.
         for filename in os.listdir(directory):
@@ -30,9 +38,15 @@ def get_datapoints(directory_name: str = None):
             if filename.startswith('predicate'):
                 pred_path = os.path.join(directory, filename)
 
+        # Skip runs missing CSV summaries
+        if (eval_path is None) or (pred_path is None):
+            print(f"[WARN] {directory} at least one csv summary is missing. Skipping...")
+            continue
+
         datapoint = {}
         with open(os.path.join(directory, 'hparams.json')) as f:
             datapoint['config'] = json.load(f)
+
         datapoint['evaluation'] = pd.read_csv(eval_path)
         datapoint['predicates'] = pd.read_csv(pred_path)
         datapoint['languages'] = []

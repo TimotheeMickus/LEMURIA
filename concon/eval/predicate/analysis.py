@@ -11,3 +11,6 @@ if __name__ == "__main__":
 
     print(f"Found {len(datapoints)} datapoints.")
 
+    for d in datapoints:
+        print(d['evaluation'])
+        break
