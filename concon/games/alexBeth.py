@@ -656,7 +656,8 @@ class AlexBeth(Game):
 
             # Topographic similarity understood as the Hamming distance between candidate meanings as vectors and predicates
             if eval_cache is not None and len(eval_cache["messages"]) > 1:
-                sample_size = 1024
+                num_predicates = len(self._dataset.predicates)
+                sample_size = int(min(1024, max(128, 12 * np.sqrt(max(1, num_predicates)))))
                 # sample = [([s0, s1], id0), ([s2], id1), ...]
                 sample = list(zip(eval_cache["messages"], eval_cache["predicate_ids"]))
                 random.shuffle(sample)
