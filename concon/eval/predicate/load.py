@@ -32,27 +32,22 @@ def get_datapoints(directory_name: str = None):
         # Pick up different CSVs: signals, evaluation, per-predicate metrics.
         for filename in os.listdir(directory):
             if filename.startswith('msgs'):
-                messages_paths.append(os.path.join(directory, filename))
+                messages_paths.append((os.path.join(directory, filename), filename))
             if filename.startswith('eval'):
                 eval_path = os.path.join(directory, filename)
             if filename.startswith('predicate'):
                 pred_path = os.path.join(directory, filename)
 
-        # Skip runs missing CSV summaries
-        if (eval_path is None) or (pred_path is None):
-            print(f"[WARN] {directory} at least one csv summary is missing. Skipping...")
-            continue
-
         datapoint = {}
         with open(os.path.join(directory, 'hparams.json')) as f:
             datapoint['config'] = json.load(f)
 
-        datapoint['evaluation'] = pd.read_csv(eval_path)
-        datapoint['predicates'] = pd.read_csv(pred_path)
+        datapoint['evaluation'] = pd.read_csv(eval_path) if eval_path is not None else None
+        datapoint['predicates'] = pd.read_csv(pred_path) if pred_path is not None else None
         datapoint['languages'] = []
-        for msg_path in messages_paths:
-            datapoint['languages'].append({'epoch_number': int(msg_path.split('.')[1].split('e')[1]),
-                                           'language': pd.read_csv(msg_path)})
+        for msg_path, fname in messages_paths:
+            datapoint['languages'].append({'epoch_number': int(fname.split('.')[1].split('e')[1]),
+                                        'language': pd.read_csv(msg_path)})
 
         datapoints.append(datapoint)
 
