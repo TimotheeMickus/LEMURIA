@@ -765,16 +765,22 @@ class AlexBeth(Game):
         #                            #
         # -------------------------- #
         # Decide if there is a performance hike
-        if self.dump_message_mode == 'when_hike':
-            if(self._best_eval_perf is None): self._best_eval_perf = eval_perf
-            is_perf_hike = (eval_perf > self._best_eval_perf) # and (eval_perf > 0.9)
-            if(is_perf_hike): self._best_eval_perf = eval_perf
+        is_perf_hike = False
+        if self.dump_message_mode in ('when_hike', 'when_hike_strict'):
+            if self._best_eval_perf is None:
+                self._best_eval_perf = eval_perf
+            if self.dump_message_mode == 'when_hike_strict':
+                is_perf_hike = (eval_perf > self._best_eval_perf) and (eval_perf > 0.95)
+            else:
+                is_perf_hike = (eval_perf > self._best_eval_perf)
+            if is_perf_hike:
+                self._best_eval_perf = eval_perf
             self._prev_eval_perf = eval_perf
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
         if self.message_dump_dir and dump_cache is not None and (
             self.dump_message_mode == 'all' or 
             (self.dump_message_mode == 'last' and epoch_index == self.epochs - 1) or
-            (self.dump_message_mode == 'when_hike' and is_perf_hike)
+            (self.dump_message_mode in ('when_hike', 'when_hike_strict') and is_perf_hike)
             ):
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
