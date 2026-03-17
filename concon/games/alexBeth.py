@@ -85,6 +85,7 @@ class AlexBeth(Game):
         self.no_negation = getattr(args, "no_negation", False)
         # Used to decide whether to dump messages during a hike in performance
         self._prev_eval_perf = None
+        self._best_eval_perf = None
         self._predicate_negation_idx = self._build_negation_correspondence()
         # For topographic similarity: candidate id = position in list
         self._topsim_candidates = self._build_candidate_vector()
@@ -764,8 +765,11 @@ class AlexBeth(Game):
         #                            #
         # -------------------------- #
         # Decide if there is a performance hike
-        is_perf_hike = (self._prev_eval_perf is not None) and (eval_perf > self._prev_eval_perf)
-        self._prev_eval_perf = eval_perf
+        if self.dump_message_mode == 'when_hike':
+            if(self._best_eval_perf is None): self._best_eval_perf = eval_perf
+            is_perf_hike = (eval_perf > self._best_eval_perf) # and (eval_perf > 0.9)
+            if(is_perf_hike): self._best_eval_perf = eval_perf
+            self._prev_eval_perf = eval_perf
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
         if self.message_dump_dir and dump_cache is not None and (
             self.dump_message_mode == 'all' or 
