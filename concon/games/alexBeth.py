@@ -804,3 +804,6 @@ class AlexBeth(Game):
                     _ = writer.writerow(row)
         
         return
+
+    def test_visualize(self, data_loader, learning_rate):
+        print("No visualisation defined.")
