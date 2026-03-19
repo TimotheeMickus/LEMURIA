@@ -401,7 +401,7 @@ class AlexBeth(Game):
         total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
         total_entropy = 0.0
         total_msg_length = 0.0
-        total_perf = 0.0 # TODO Remove perf for now; in the end, we want communication effectiveness (the average probability assigned to the right answer).
+        total_perf = 0.0
         # Communication-efficiency split by truth label (model can be ex. good at positives and bad at negatives).
         total_verify_ce = 0.0 # verify: predicate true for candidate
         total_falsify_ce = 0.0 # falsify: predicate false for candidate.
@@ -605,7 +605,6 @@ class AlexBeth(Game):
                         else:
                             cache["candidate_texts"].append("")
                     
-        # TODO Also computes how much of the vocabulary is used (see vocabulary_counts somewhere, then (vocabulary_counts > 0).sum()).
 
         # --- logging and stdout --- #
         #                            #
@@ -655,7 +654,7 @@ class AlexBeth(Game):
                     neg_consistency_ratio = neg_consistency_total / neg_consistency_count
                 log('eval/neg_consistency', neg_consistency_ratio)
 
-            # Topographic similarity understood as the Hamming distance between candidate meanings as vectors and predicates
+            # Topographic similarity
             if eval_cache is not None and len(eval_cache["messages"]) > 1:
                 num_predicates = len(self._dataset.predicates)
                 sample_size = int(min(1024, max(128, 12 * np.sqrt(max(1, num_predicates)))))
@@ -686,15 +685,19 @@ class AlexBeth(Game):
                     # Intensional topsim: meaning distance is cosine distance between predicate embeddings.
                     asker_device = next(self.asker.parameters()).device
                     pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=asker_device)
+                    # sender_vecs: (n, d) predicate embeddings for intensional distance.
                     sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).detach().cpu().numpy()
                     # Compute each pairwise distance vector once, then reuse it for all 4 topsims.
                     # This avoids recomputing expensive Jaccard distances multiple times.
+                    # signal_strings: length-n list of message strings for Levenshtein.
                     signal_strings = [''.join(map(chr, msg)) for msg in sample_signals]
                     n = len(sample_signals)
                     pair_count = (n * (n - 1)) // 2
+                    # Condensed upper-triangle distance vectors.
                     msg_lev_d = np.empty(pair_count, dtype=float)
                     ext_d = np.empty(pair_count, dtype=float)
                     int_d = np.empty(pair_count, dtype=float)
+                    # msg_jac_d uses multiset Jaccard over token sequences (order-invariant).
                     msg_jac_d = compute_correlation.pairwise_multiset_jaccard_distances(sample_signals)
 
                     k = 0
@@ -703,23 +706,27 @@ class AlexBeth(Game):
                         ext_i = sample_cand_vecs[i]
                         vec_i = sender_vecs[i]
                         for j in range(i + 1, n):
-                            msg_lev_d[k] = compute_correlation.levenshtein(sig_i_str, signal_strings[j])
+                            # msg_lev_d: normalized Levenshtein (order-sensitive, normalize by length).
+                            msg_lev_d[k] = compute_correlation.levenshtein_normalised(sig_i_str, signal_strings[j])
+                            # ext_d: Hamming distance over candidate truth vectors
+                            # Hamming is equally sensitive to verify and falsify.
                             ext_d[k] = sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j]))
+                            # int_d: cosine distance between predicate embeddings (intensional meaning).
                             int_d[k] = float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j]))
                             k += 1
 
-                    def _safe_corr(x, y):
-                        x = x - x.mean()
-                        y = y - y.mean()
-                        denom = np.sqrt((x * x).sum() * (y * y).sum())
-                        if denom == 0:
+                    def _safe_spearman(x, y):
+                        # Spearman correlation on pairwise distance vectors; NaN if degenerate.
+                        if x.size == 0 or y.size == 0:
                             return float("nan")
-                        return float((x * y).sum() / denom)
+                        if np.all(x == x[0]) or np.all(y == y[0]):
+                            return float("nan")
+                        return float(scipy.stats.spearmanr(x, y).correlation)
 
-                    topsim_ext_levenshtein = _safe_corr(msg_lev_d, ext_d)
-                    topsim_ext_jaccard = _safe_corr(msg_jac_d, ext_d)
-                    topsim_int_levenshtein = _safe_corr(msg_lev_d, int_d)
-                    topsim_int_jaccard = _safe_corr(msg_jac_d, int_d)
+                    topsim_ext_levenshtein = _safe_spearman(msg_lev_d, ext_d)
+                    topsim_ext_jaccard = _safe_spearman(msg_jac_d, ext_d)
+                    topsim_int_levenshtein = _safe_spearman(msg_lev_d, int_d)
+                    topsim_int_jaccard = _safe_spearman(msg_jac_d, int_d)
 
                     log('eval/topsim_extensional_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_extensional_jaccard', topsim_ext_jaccard)
@@ -797,311 +804,3 @@ class AlexBeth(Game):
                     _ = writer.writerow(row)
         
         return
-        
-        # ----------------------------
-        # hic incipit quod neglegitur
-        # ----------------------------
-
-        # TODO above to run, the below is ignored for now
-        counts_matrix = np.zeros((data_loader.nb_categories, data_loader.nb_categories))
-        failure_matrix = np.zeros((data_loader.nb_categories, data_loader.nb_categories))
-
-        # We try to visit each pair of categories on average 8 times.
-        batch_size = 256
-        max_datapoints = 32768 # (2^15)
-        n = (8 * (data_loader.nb_categories**2))
-        #n = data_loader.size(data_type='test', no_evaluation=False)
-        n = min(max_datapoints, n)
-        nb_batch = int(np.ceil(n / batch_size))
-
-        messages = []
-        categories = []
-        input_ids = []
-        batch_numbers = range(nb_batch)
-        if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
-        success = [] # Binary
-        success_prob = [] # Probabilities
-        scrambled_success_prob = [] # Probabilities
-
-        for _ in batch_numbers:
-            self.start_episode(train_episode=False)
-
-            batch = data_loader.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True, keep_idx=True) # We use all categories and use only one distractor from a different category. The target image is selected in the same way as it is selected during training (equal to the original image vs a different one).
-
-            asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-
-            retriever_pointing = misc.pointing(retriever_outcome.scores, argmax=True)
-            success.append((retriever_pointing['action'] == 0).float())
-            success_prob.append(retriever_pointing['dist'].probs[:, 0]) # Probability of the target
-
-            target_category = [data_loader.category_idx(x.category) for x in batch.original]
-            distractor_category = [data_loader.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
-
-            failure = retriever_pointing['dist'].probs[:, 1].cpu().numpy() # Probability of the distractor
-            data_loader.failure_based_distribution.update(target_category, distractor_category, failure)
-
-            np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
-            np.add.at(failure_matrix, (target_category, distractor_category), failure)
-
-            scrambled_messages = asker_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
-            for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepares for scrambling
-                msg = asker_outcome.action[0][i]
-                msg_len = asker_outcome.action[1][i]
-                cat = datapoint.category
-
-                if((not self.correct_only) or (retriever_pointing['action'][i] == 0)):
-                    messages.append(msg.tolist()[:msg_len])
-                    categories.append(cat)
-                    input_ids.append(datapoint.idx)
-                # Scrambles the whole message, including the EOS (but not the padding symbols, of course)
-                l = msg_len.item()
-                scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
-
-            scrambled_retriever_outcome = self.retriever(self._beth_input(batch), message=scrambled_messages, length=asker_outcome.action[1])
-            scrambled_retriever_pointing = misc.pointing(scrambled_retriever_outcome.scores)
-            scrambled_success_prob.append(scrambled_retriever_pointing['dist'].probs[:, 0])
-
-        if(self.message_dump_dir is not None):
-            filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
-            with open(filename, 'w') as ostr:
-                writer = csv.writer(ostr)
-                _ = writer.writerow(['msg', 'cat', 'idx'])
-                for msg, cat, idx in zip(messages, categories, input_ids):
-                    msg = ' '.join(map(str, msg))
-                    cat = ' '.join(map(str, cat))
-                    row = [msg, cat, idx]
-                    _ = writer.writerow(row)
-
-        success_prob = torch.stack(success_prob)
-        scrambled_success_prob = torch.stack(scrambled_success_prob)
-        scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
-        log('eval/scrambling-resistance', scrambling_resistance)
-
-        # Here, we try to see how much the messages describe the categories and not the particular images
-        # To do so, we use the original image as target, and an image of the same category as distractor
-        abstractness = []
-        n = (32 * data_loader.nb_categories)
-        n = min(max_datapoints, n)
-        nb_batch = int(np.ceil(n / batch_size))
-        for _ in range(nb_batch):
-            self.start_episode(train_episode=False)
-
-            batch = data_loader.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['same'], target_is_original=True, keep_category=True) # We use only one "distractor" from a different category.
-
-            asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-
-            retriever_pointing = misc.pointing(retriever_outcome.scores)
-            abstractness.append(retriever_pointing['dist'].probs[:, 1] * 2.0)
-
-        abstractness = torch.stack(abstractness)
-        abstractness_rate = abstractness.mean().item()
-        log('eval/abstractness', abstractness_rate)
-
-        use_legacy_names = False # New (non-legacy) names are the ones used in the ACL submission.
-        if(not use_legacy_names):
-            name_acc = "accuracy"
-            name_c_e = "c.e."
-            name_base_c_e = "c.e._base" # Two base categories.
-            name_gen_c_e = "c.e._gen." # Two generalization categories.
-            name_mixed_c_e = "c.e._mixed" # One base category and one generalization category.
-            name_tgen_c_e = "c.e._t:gen" # At least one generalization category (target/original images).
-            name_dgen_c_e = "c.e._d:gen" # At least one generalization category (distractor).
-        else:
-            name_acc = "success_rate"
-            name_c_e = "accuracy"
-            name_base_c_e = "accuracy-train-td" # Two base categories.
-            name_gen_c_e = "accuracy-eval-td" # Two generalization categories.
-            name_mixed_c_e = "accuracy-one" # One base category and one generalization category.
-            name_tgen_c_e = "accuracy-eval-t" # At least one generalization category (target/original images).
-            name_dgen_c_e = "accuracy-eval-d" # At least one generalization category (distractor).
-
-        # Here, we compute the actual accuracy rate with argmax pointing, and not the mean expected accuracy based on probabilities like is done after (for communication efficiency).
-        success = torch.stack(success)
-        accuracy = success.mean().item()
-        log(f'eval/{name_acc}', accuracy)
-
-        # Computes the communication efficiency when the images are selected from all categories.
-        c_e = 1 - (failure_matrix.sum() / counts_matrix.sum())
-        log(f'eval/{name_c_e}', c_e)
-        if(not data_loader.same_img): main_perf = c_e
-
-        train_categories = data_loader.training_categories_idx
-        eval_categories = data_loader.evaluation_categories_idx
-        if(len(eval_categories) > 0):
-            # Computes the communication efficiency when both the target and the distractor are selected from training categories.
-            failure_matrix_train_td = failure_matrix[np.ix_(train_categories, train_categories)]
-            counts_matrix_train_td = counts_matrix[np.ix_(train_categories, train_categories)]
-
-            counts = counts_matrix_train_td.sum()
-            base_c_e = (1 - (failure_matrix_train_td.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_base_c_e}', base_c_e)
-
-            # Computes the communication efficiency when both the target and the distractor are selected from evaluation categories (never seen during training).
-            failure_matrix_eval_td = failure_matrix[np.ix_(eval_categories, eval_categories)]
-            counts_matrix_eval_td = counts_matrix[np.ix_(eval_categories, eval_categories)]
-
-            counts = counts_matrix_eval_td.sum()
-            gen_c_e = (1 - (failure_matrix_eval_td.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_gen_c_e}', gen_c_e)
-            
-            # Computes the communication efficiency when exactly one evaluation category (never seen during training) is used.
-            failure_matrix_tbase_dgen = failure_matrix[np.ix_(train_categories, eval_categories)]
-            counts_matrix_tbase_dgen = counts_matrix[np.ix_(train_categories, eval_categories)]
-            failure_matrix_tgen_dbase = failure_matrix[np.ix_(eval_categories, train_categories)]
-            counts_matrix_tgen_dbase = counts_matrix[np.ix_(eval_categories, train_categories)]
-
-            counts = counts_matrix_tbase_dgen.sum() + counts_matrix_tgen_dbase.sum()
-            mixed_c_e = (1 - ((failure_matrix_tbase_dgen.sum() + failure_matrix_tgen_dbase.sum()) / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_mixed_c_e}', mixed_c_e)
-
-            # Computes the communication efficiency when the target is selected from an evaluation category (never seen during training).
-            failure_matrix_eval_t = failure_matrix[eval_categories, :]
-            counts_matrix_eval_t = counts_matrix[eval_categories, :]
-
-            counts = counts_matrix_eval_t.sum()
-            tgen_c_e = (1 - (failure_matrix_eval_t.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_tgen_c_e}', tgen_c_e)
-
-            # Computes the communication efficiency when the distractor is selected from an evaluation category (never seen during training).
-            failure_matrix_eval_d = failure_matrix[:, eval_categories]
-            counts_matrix_eval_d = counts_matrix[:, eval_categories]
-
-            counts = counts_matrix_eval_d.sum()
-            dgen_c_e = (1 - (failure_matrix_eval_d.sum() / counts)) if(counts > 0.0) else -1
-            log(f'eval/{name_dgen_c_e}', dgen_c_e)
-
-        # If the "same_img" option is used, the communication efficiency is also computed without this feature.
-        if(data_loader.same_img):
-            success_prob = []
-            n = (32 * data_loader.nb_categories)
-            n = min(max_datapoints, n)
-            nb_batch = int(np.ceil(n / batch_size))
-            for batch_index in range(nb_batch):
-                self.start_episode(train_episode=False)
-
-                batch = data_loader.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], target_is_original=False, keep_category=True) # We use all categories and use only one distractor from a different category. The target image is selected uniformly from the original image's category.
-
-                asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-
-                retriever_pointing = misc.pointing(retriever_outcome.scores)
-                success_prob.append(retriever_pointing['dist'].probs[:, 0]) # Probability of the target.
-
-            success_prob = torch.stack(success_prob)
-            diff_tgt_c_e = success_prob.mean().item()
-            log(f'eval/{name_c_e}_diff_tgt', diff_tgt_c_e)
-            main_perf = diff_tgt_c_e
-
-        if(main_perf > self.max_perf): self.max_perf = main_perf
-
-        # Computes metrics related to symbol-order.
-        # First tries to rank each symbol according to its average relative position in messages.
-        rel_positions = {} # From symbol to list of relative positions
-        for message in messages:
-            for pos, sym in enumerate(message[:-1]): # For each symbol except the EOS
-                if(sym not in rel_positions): rel_positions[sym] = []
-                rel_positions[sym].append(pos / len(message)) # Relative position of the symbol in the message
-
-        avg_positions = [(np.mean(l), sym) for (sym, l) in rel_positions.items()]
-        avg_positions.sort()
-        mapping = {sym: i for (i, (_, sym)) in enumerate(avg_positions)} # From symbol to rank
-
-        # Then builds the two lists that we want to test the correlation of.
-        value_list = []
-        position_list = []
-        for message in messages:
-            for pos, sym in enumerate(message[:-1]): # For each symbol except the EOS
-                value_list.append(mapping[sym])
-                position_list.append(pos / len(message)) # Relative position of the symbol in the message
-
-        res_spearman = scipy.stats.spearmanr(value_list, position_list)
-        log('eval/sym-order-corr', res_spearman.correlation)
-        log('eval/sym-order-pval', res_spearman.pvalue) # Should be compared to the factorial of the size of the vocabulary (the number of possible ordering of the symbols)
-
-
-        # Computes compositionality measures
-        # First selects a sample of (message, category) pairs
-        size_sample = 1024
-
-        sample = list(zip(messages, categories))
-        random.shuffle(sample)
-        sample = sample[:size_sample]
-        # (To sample from each category instead, start with: d = misc.group_by(messages, categories))
-
-        # Checks that the sample contains at least two different categories and two differents messages
-        ok = False
-        mes = set()
-        cat = set()
-        for m, c in sample:
-            mes.add(tuple(m))
-            cat.add(tuple(c))
-            if((len(mes) > 1) and (len(cat) > 1)):
-                ok = True
-                break
-
-        if(ok == False):
-            print(f'Compositionality measures cannot be computed ({len(mes)} messages and {len(cat)} categories in the sample).') # Unique messages and unique categories.
-        else:
-            sample_messages, sample_categories = zip(*sample)
-            sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
-
-            l_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, correl_only=True)
-            log('FM_corr/Lev-based comp', l_cor)
-            #log('FM_corr/Lev-based comp (z-score)', l_cor_n)
-            #log('FM_corr/Lev-based comp (random)', l_cor_rd)
-
-            l_n_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised, correl_only=True)
-            log('FM_corr/Normalised Lev-based comp', l_n_cor)
-            #log('FM_corr/Normalised Lev-based comp (z-score)', l_n_cor_n)
-            #log('FM_corr/Normalised Lev-based comp (random)', l_n_cor_rd)
-
-            j_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False, correl_only=True)
-            log('FM_corr/Jaccard-based comp', j_cor)
-            #log('FM_corr/Jaccard-based comp (z-score)', j_cor_n)
-            #log('FM_corr/Jaccard-based comp (random)', j_cor_rd)
-
-            if(l_n_cor > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (j_cor / l_n_cor))
-
-            minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_messages, sample_categories, base=2)
-            log('FM_corr/min Entropy category per msgs', minH)
-            log('FM_corr/mean Entropy category per msgs', meanH)
-            log('FM_corr/med Entropy category per msgs', medH)
-            log('FM_corr/max Entropy category per msgs', maxH)
-            log('FM_corr/var Entropy category per msgs', varH)
-
-        # Decision tree stuff
-        alphabet_size = (self.base_alphabet_size + 1) # with EOS
-        gram_size = 1 # Max size of n-grams to consider
-        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_loader.concepts, gram_size)
-        (full_tree, full_tree_accuracy) = tmp['full_tree']
-        conceptual_trees = tmp['conceptual_trees']
-
-        n_leaves, depth = full_tree.get_n_leaves(), full_tree.get_depth()
-        log('decision_tree/full_accuracy', full_tree_accuracy)
-        log('decision_tree/full_n_leaves', n_leaves)
-        log('decision_tree/full_depth', depth)
-
-        for i, (tree, accuracy) in conceptual_trees:
-            name = data_loader.concept_names[i]
-
-            n_leaves, depth = tree.get_n_leaves(), tree.get_depth()
-            log(('decision_tree/%s_accuracy' % name), accuracy)
-            log(('decision_tree/%s_n_leaves' % name), n_leaves)
-            log(('decision_tree/%s_depth' % name), depth)
-
-        prod_conceptual_accuracy = np.array([accuracy for (_, (_, accuracy)) in conceptual_trees]).prod()
-        if(prod_conceptual_accuracy > 0.0):
-            tree_accuracy_ratio = (full_tree_accuracy / prod_conceptual_accuracy)
-            log('decision_tree/accuracy_ratio', tree_accuracy_ratio)
-
-        prod_conceptual_n_leaves = np.array([tree.get_n_leaves() for (_, (tree, _)) in conceptual_trees]).prod()
-        if(prod_conceptual_n_leaves > 0):
-            tree_n_leaves_ratio = (full_tree.get_n_leaves() / prod_conceptual_n_leaves)
-            log('decision_tree/n_leaves_ratio', tree_n_leaves_ratio)
-
-        sum_conceptual_depth = sum([tree.get_depth() for (_, (tree, _)) in conceptual_trees])
-        if(sum_conceptual_depth > 0):
-            tree_depth_ratio = (full_tree.get_depth() / sum_conceptual_depth)
-            log('decision_tree/depth_ratio', tree_depth_ratio)
-    
-    def test_visualize(self, data_loader, learning_rate):
-        print("No visualisation defined.")
