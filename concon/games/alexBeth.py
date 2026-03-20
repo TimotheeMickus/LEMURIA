@@ -773,6 +773,7 @@ class AlexBeth(Game):
         # -------------------------- #
         # Decide if there is a performance hike
         is_perf_hike = False
+        # TODO define hike as 10% of current performance or something
         if self.dump_message_mode in ('when_hike', 'when_hike_strict'):
             if self._best_eval_perf is None:
                 self._best_eval_perf = eval_perf
