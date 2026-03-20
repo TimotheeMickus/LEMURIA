@@ -285,36 +285,83 @@ class Candidate():
         return str(self)
 
 
-class failureBasedDistribution():
-    def __init__(self, nb_categories, momentum_factor=0.99, smoothing_factor=1.0):
-        raise NotImplementedError
+class FailureBasedDistribution:
+    # nb_predicates: int
+    # momentum_factor: float (∈ [0,1[)
+    # smoothing_factor: float (> 0)
+    # from_shared_memory: (str, str) | None
+    def __init__(self, nb_predicates, momentum_factor=0.99, smoothing_factor=1.0, from_shared_memory=None):
         self.momentum_factor = momentum_factor
 
-        # Initialisation with smoothing
-        self.counts_matrix = np.full((nb_categories, nb_categories), smoothing_factor)
-        self.failure_matrix = np.full((nb_categories, nb_categories), (0.5 * smoothing_factor))
-        np.fill_diagonal(self.failure_matrix, 0.0)
+        self.shared_memory = [0, ()] # RMK: A list and not a tuple because I want a mutable type.
 
-    def update(self, target_category_idx, distractor_category_idx, failure):
-        # Note: if the same pair (target, distractor) appears multiple time, the momentum factor would still be applied only once
-        self.counts_matrix[target_category_idx, distractor_category_idx] *= self.momentum_factor
-        np.add.at(self.counts_matrix, (target_category_idx, distractor_category_idx), 1.0)
-        self.failure_matrix[target_category_idx, distractor_category_idx] *= self.momentum_factor
-        np.add.at(self.failure_matrix, (target_category_idx, distractor_category_idx), failure)
+        if(from_shared_memory is None):
+            # Initialisation with smoothing
+            self.counts_vector = np.full((nb_predicates,), smoothing_factor)
+            self.failure_vector = self.counts_vector / 2
+        else:
+            self.counts_vector_shm = shared_memory.SharedMemory(name=from_shared_memory[0])
+            self.counts_vector = np.ndarray((nb_predicates,), dtype=np.float64, buffer=self.counts_vector_shm.buf)
+            
+            self.failure_vector_shm = shared_memory.SharedMemory(name=from_shared_memory[1])
+            self.failure_vector = np.ndarray((nb_predicates,), dtype=np.float64, buffer=self.failure_vector_shm.buf)
 
-    def distribution(self, category_idx, allowed_categories_idx=None):
-        if(allowed_categories_idx is None): unnormalised_dist = (self.failure_matrix[category_idx] / self.counts_matrix[category_idx])
-        else: unnormalised_dist = (self.failure_matrix[category_idx, allowed_categories_idx] / self.counts_matrix[category_idx, allowed_categories_idx])
+            self.shared_memory[0] = -1
+            self.shared_memory[1] = from_shared_memory
+
+    def to_shared_memory(self):
+        status, names = self.shared_memory
+        assert (status == 0)
+
+        self.counts_vector_shm = shared_memory.SharedMemory(create=True, size=self.counts_vector.size * self.counts_vector[0].nbytes)
+        counts_vector = np.ndarray(self.counts_vector.shape, dtype=np.float64, buffer=self.counts_vector_shm.buf)
+        counts_vector[:] = self.counts_vector
+        self.count_vectors = counts_vector
+
+        self.failure_vector_shm = shared_memory.SharedMemory(create=True, size=self.faiture_vector.size * self.failure_vector[0].nbytes)
+        failure_vector = np.ndarray(self.failure_vector.shape, dtype=np.float64, buffer=self.failure_vector_shm.buf)
+        failure_vector[:] = self.failure_vector
+        self.failure_vectors = failure_vector
+
+        self.shared_memory[0] = 1
+        self.shared_memory[1] = (self.counts_vector_shm.name, self.failure_vector_shm.name)
+
+    def close(self):
+        status, names = self.shared_memory
+        if(status == -1):
+            self.counts_vector_shm.close()
+            self.failure_vector_shm.close()
+        elif(status == 1):
+            self.counts_vector_shm.close()
+            self.counts_vector_shm.unlink()
+            self.failure_vector_shm.close()
+            self.failure_vector_shm.unlink()
+
+    # predicate_idx: np.array[int]
+    # failure: np.array[bool]
+    def update(self, predicate_idx, failure):
+        # Note: if the same predicate appeared multiple time, the momentum factor would still be applied only once
+        self.counts_vector[predicate_idx] *= self.momentum_factor
+        np.add.at(self.counts_vector, predicate_idx, 1.0)
+        self.failure_vector[predicate_idx] *= self.momentum_factor
+        np.add.at(self.failure_vector, predicate_idx, failure)
+
+    # Returns a probability distribution over (a subset of the) predicate indices.
+    # allowed_predicates_idx: np.array[int] | None
+    def distribution(self, allowed_predicates_idx=None):
+        if(allowed_predicates_idx is None): unnormalised_dist = (self.failure_vector / self.counts_vector)
+        else: unnormalised_dist = (self.failure_vector[allowed_predicates_idx] / self.counts_vector[allowed_predicates_idx])
 
         return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
 
-    # Returns a distractor category based on an original/target category.
-    def sample(self, category_idx, allowed_categories_idx=None):
-        dist = self.distribution(category_idx, allowed_categories_idx)
+    # Returns a predicate index.
+    # allowed_predicates_idx: np.array[int] | None
+    def sample(self, allowed_predicates_idx=None):
+        dist = self.distribution(allowed_predicates_idx)
 
-        if(allowed_categories_idx is None): allowed_categories_idx = range(dist.shape[0])
+        if(allowed_predicates_idx is None): allowed_predicates_idx = range(dist.shape[0])
 
-        return np.random.choice(a=allowed_categories_idx, p=dist)
+        return np.random.choice(a=allowed_predicates_idx, p=dist)
 
 class GraphConverter:
     object_token='<obj>'
@@ -413,6 +460,7 @@ class Dataset(SeqAsyncDataset):
             self.values.extend(prop.values)
 
         # Generates predicates.
+        assert (nontrivial_only or candidate_sampling != "balanced"), "It is impossible to garantee the existence of both positive and negative candidates if there exists trivial predicates."
         self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction, consider_indeterminate=allow_indeterminate) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules; TIMOTHÉE: be more specific
         self.nb_categories = len(self.predicates) 
@@ -435,6 +483,10 @@ class Dataset(SeqAsyncDataset):
 
         # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
+        
+        # A momentum factor of 0.99 means that each cell of the failure vector contains a statistics over 100 examples.
+        #self.failure_based_distribution = FailureBasedDistribution(len(self.predicates), momentum_factor=0.99, smoothing_factor=10.0)
+        # TODO self.failure_based_distribution.shared_memory is a resource that the dataset workers need in order to reconstruct the FailureBasedDistribution via a new static method workerUpdateResources.
         
         super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter);
         #super().__init__();
