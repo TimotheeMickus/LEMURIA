@@ -13,3 +13,5 @@ wandb/
 runs/
 *.swp
 predicate_games.ipynb
+concon/eval/predicate/analysis.py
+concon/eval/predicate/tests.py

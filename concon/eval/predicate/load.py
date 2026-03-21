@@ -14,7 +14,8 @@ def get_datapoints(directory_name: str = None):
         - languages (list[dict[epoch_number: int, DataFrame]])
     '''
     datapoints = []
-    super_directory = pathlib.Path('runs') / directory_name
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    super_directory = repo_root / "runs" / directory_name
 
     for directory in super_directory.iterdir():
         # Handle cases where directories are nested
