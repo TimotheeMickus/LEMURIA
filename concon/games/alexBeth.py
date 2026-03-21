@@ -773,15 +773,27 @@ class AlexBeth(Game):
         # -------------------------- #
         # Decide if there is a performance hike
         is_perf_hike = False
-        # TODO define hike as 10% of current performance or something
+
+        def _min_jump(best):
+                if best < 0.50: return 0.10
+                if best < 0.70: return 0.05
+                if best < 0.90: return 0.01
+                if best < 0.95: return 0.005
+                return 0.001
+        
         if self.dump_message_mode in ('when_hike', 'when_hike_strict'):
             if self._best_eval_perf is None:
                 self._best_eval_perf = eval_perf
-            if self.dump_message_mode == 'when_hike_strict':
-                is_perf_hike = (eval_perf > self._best_eval_perf) and (eval_perf > 0.95)
+            if eval_perf >= 1.0 and eval_perf > self._best_eval_perf:
+                is_perf_hike = True
             else:
-                is_perf_hike = (eval_perf > self._best_eval_perf)
-            if is_perf_hike:
+                delta_min = _min_jump(self._best_eval_perf)
+                if self.dump_message_mode == 'when_hike_strict':
+                    is_perf_hike = (eval_perf > self._best_eval_perf + delta_min) and (eval_perf > 0.95)
+                else:
+                    is_perf_hike = (eval_perf > self._best_eval_perf + delta_min)
+
+            if is_perf_hike and eval_perf > self._best_eval_perf:
                 self._best_eval_perf = eval_perf
             self._prev_eval_perf = eval_perf
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
