@@ -277,17 +277,28 @@ if __name__ == "__main__":
         print("Exhaustive negation:", exhaustive_negation)
 
     else:
-        def _run_find_negation(lang, label):
+        def _run_find_negation(lang, label, vocab_used=None):
+            #DEBUG 
+            print(f"[DEBUG] Running negation check for: {label}")
             print(f"\n=== {label} | rows={len(lang)} ===")
             neg_greedy = find_negation(lang, max_size=4, mode="greedy", min_purity=1.0, min_coverage=1.0)
+            #DEBUG 
+            print(f"[DEBUG] Greedy negation result for {label}: {neg_greedy}")
             print("Greedy negation:", neg_greedy)
-            # Exhaustive can be expensive; guard by vocab size.
-            tokenized, vocab = _tokenize_messages(lang)
-            if len(vocab) <= 12:
+            if vocab_used is None:
+                tokenized, vocab = _tokenize_messages(lang)
+                vocab_used = len(vocab)
+            #DEBUG 
+            print(f"[DEBUG] vocab_used={vocab_used}")
+            if vocab_used <= 12:
+                #DEBUG 
+                print(f"[DEBUG] Vocab size {vocab_used} <= 12; running exhaustive.")
                 neg_full = find_negation(lang, max_size=4, mode="full", min_purity=1.0, min_coverage=1.0)
                 print("Exhaustive negation:", neg_full)
             else:
-                print(f"Skipping exhaustive negation (vocab size={len(vocab)}).")
+                #DEBUG 
+                print(f"[DEBUG] Vocab size {vocab_used} > 12; skipping exhaustive.")
+                print(f"Skipping exhaustive negation (vocab size={vocab_used}).")
 
         # If a CSV path is provided, load that single language file.
         if path.endswith(".csv"):
@@ -303,6 +314,23 @@ if __name__ == "__main__":
             # Use the latest language snapshot for each run.
             for idx, d in enumerate(datapoints):
                 if not d["languages"]:
+                    #DEBUG 
+                    print(f"[DEBUG] Run {idx}: no languages, skipping.")
+                    continue
+                cfg = d.get("config", {})
+                if cfg.get("no_negation", False):
+                    #DEBUG 
+                    print(f"[DEBUG] Run {idx}: negation disabled, skipping.")
                     continue
                 latest = max(d["languages"], key=lambda x: x["epoch_number"])
-                _run_find_negation(latest["language"], f"Run {idx} | epoch {latest['epoch_number']}")
+                #DEBUG 
+                print(f"[DEBUG] Run {idx}: using epoch {latest['epoch_number']}.")
+                eval_df = d.get("evaluation")
+                vocab_used = None
+                if eval_df is not None and "eval/vocab_used" in eval_df.columns:
+                    vocab_used = int(eval_df["eval/vocab_used"].iloc[-1])
+                _run_find_negation(
+                    latest["language"],
+                    f"Run {idx} | epoch {latest['epoch_number']}",
+                    vocab_used=vocab_used,
+                )
