@@ -20,17 +20,7 @@ def build_run_name(args, run_index):
         f"props={_sanitize_run_part(args.properties)}",
         f"d={args.min_depth}-{args.max_depth}",
         f"cand={args.num_candidates}",
-        f"bs={args.batch_size}",
         f"enc={_sanitize_run_part(args.candidate_encoder)}",
-        f"alpha={args.base_alphabet_size}",
-        f"mlen={args.max_len}",
-        f"lr={args.learning_rate}",
-        f"ba={args.beta_asker}",
-        f"br={args.beta_retriever}",
-        f"pen={args.len_penalty}",
-        f"ep={args.epochs}",
-        f"spe={args.steps_per_epoch}",
-        f"gc={args.grad_clipping}",
         f"cs={_sanitize_run_part(args.candidate_sampling)}",
     ]
     if args.candidate_encoder == "graph_transformer":
@@ -42,6 +32,9 @@ def build_run_name(args, run_index):
                 f"gl={args.graph_num_layers}",
             ]
         )
+    run_tag = getattr(args, "run_tag", None)
+    if run_tag:
+        parts.append(f"t={_sanitize_run_part(run_tag)}")
     parts.append(f"run={run_index}")
     return "__".join(parts)
 

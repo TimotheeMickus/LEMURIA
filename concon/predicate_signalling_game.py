@@ -17,6 +17,8 @@ def main(global_args=None, remaining_args=None):
 def do(args):
     summary_dir = path_replace(args.summary, '[now]', datetime.now().strftime('%Y-%m-%d_%H-%M-%S')) # PosixPath
     models_dir = path_replace(args.models, '[summary]', summary_dir) # PosixPath
+    # Tag used in run folder names to avoid collisions across launches.
+    args.run_tag = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
     for run in range(args.runs):
         print(f'Run {run}', flush=True)
