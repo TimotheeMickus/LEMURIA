@@ -1,5 +1,6 @@
 import os, pathlib
 from load import get_datapoints
+import negation_tests
 
 if __name__ == "__main__":
     # Ask for experimental data
@@ -28,3 +29,12 @@ if __name__ == "__main__":
         if d['languages']:
             has_lang += 1
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
+    print()
+
+    for d in datapoints:
+        if d['languages']:
+            languages = d["languages"]
+            for lang in languages:
+                if len(lang['language']['msg'].unique()) > 1:
+                    negation_tests.find_negation(languages[0]["language"])
+                    break
