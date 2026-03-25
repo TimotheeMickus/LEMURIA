@@ -4,6 +4,7 @@ from sklearn.metrics import mutual_info_score
 import re
 from load import get_datapoints
 import os
+from tqdm import tqdm
 
 def _tokenize_messages(language: pd.DataFrame):
     assert "msg" in language.columns, "language must have a 'msg' column"
@@ -27,7 +28,7 @@ def _evaluate_per_token_disjunctions(current_item, vocab_features, y, max_size, 
     if current_item['size'] >= max_size:
         return
 
-    for tok, feat in vocab_features.items():
+    for tok, feat in tqdm(vocab_features.items(), total=len(vocab_features), desc="MI disjunctions"):
         if tok in current_item['tokens']: # Avoid adding tokens already in the disjunction set
             continue
 
@@ -51,7 +52,7 @@ def mi_maximizing_disjunctions(language, max_size=None):
     '''For all elements in the language's vocabulary, recursively build disjunctions up to max_size elements and record MI(disj ; predicates).'''
     tokenized, vocab = _tokenize_messages(language)
     X = _build_presence_matrix(tokenized, vocab)
-    y = language['pred_str'].to_numpy() # preicate label per signal
+    y = language['pred_str'].to_numpy() # predicate label per signal
 
     # Set max_size to length of vocabulary unless specified.
     if(max_size is None): max_size = len(vocab)
@@ -87,7 +88,7 @@ def mi_maximizing_disjunctions_greedy(language, max_size=None):
     # Pick the token with the highest MI.
     best_j = None
     best_mi = None
-    for j in range(len(vocab)):
+    for j in tqdm(range(len(vocab)), desc="MI greedy seed"):
         mi = mutual_info_score(X[:, j], y) / np.log(2)
         if best_mi is None or mi > best_mi:
             best_mi = mi
@@ -107,7 +108,7 @@ def mi_maximizing_disjunctions_greedy(language, max_size=None):
         best_gain = None
         best_idx = None
         best_feat = None
-        for j in remaining:
+        for j in tqdm(remaining, desc="MI greedy expand", leave=False):
             disj = (current_feat | X[:, j].astype(bool)) # candidate disjunction is (current set | token j)
             mi = mutual_info_score(disj.astype(int), y) / np.log(2)
             gain = mi - best_mi
@@ -133,7 +134,7 @@ def mi_maximizing_disjunctions_greedy(language, max_size=None):
     return pd.DataFrame(rows).sort_values('mi_bits', ascending=False).reset_index(drop=True)
 
 def xor_coverage(language: pd.DataFrame, disjunctions: pd.DataFrame):
-    '''For each disjunction and all predicates v, compute if it verifies v ⊕ ¬v, and for how many predicates.'''
+    '''For each disjunction and presence of negation v, compute if it verifies v ⊕ ¬v, and for how many predicates.'''
     if("name" not in disjunctions.columns): raise KeyError("disjunctions missing column 'name'")
 
     # Map (pred: {v: [tok], ¬v: [tok]}).
@@ -190,16 +191,35 @@ def xor_coverage(language: pd.DataFrame, disjunctions: pd.DataFrame):
 
 def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy', min_purity: float = 1.0, min_coverage: float = 1.0):
     assert mode in ['greedy', 'full'], "Choose either \"greedy\" or \"full\" mode."
+    #DEBUG
+    _, voc = _tokenize_messages(language)
+    print(f"Vocabulary has {len(voc)} elements.")
     if mode == 'greedy':
+        #DEBUG
+        print("Building disjunctions")
         greedy_disjunctions = mi_maximizing_disjunctions_greedy(language, max_size=max_size)
+        #DEBUG
+        print("Finding coverage.")
         df = xor_coverage(language, greedy_disjunctions)
+        #DEBUG
     if mode == 'full':
+        #DEBUG
+        print("Building disjunctions")
         all_disjunctions = mi_maximizing_disjunctions(language, max_size=max_size)
+        #DEBUG
+        print("Finding coverage.")
         df = xor_coverage(language, all_disjunctions)
+    if df.empty:
+        print("No candidate lexeme fits the XOR criteria.\n")
+        return None
     mask = (df["neg_purity"] >= min_purity) & (df["neg_coverage"] >= min_coverage)
     if not mask.any():
+        print(f"No candidates pass thresholds. max purity={df['neg_purity'].max():.3f}, max coverage={df['neg_coverage'].max():.3f}\n")
         return None
+    #DEBUG
+    print("Finding best disjunction.")
     best = df[mask].sort_values(["neg_purity", "neg_coverage"], ascending=False).iloc[0]
+    #DEBUG
     return best["name"], best["¬v"]
 
 # def symbol_predicate_mi(language: pd.DataFrame):
@@ -286,7 +306,7 @@ if __name__ == "__main__":
             print(f"[DEBUG] Greedy negation result for {label}: {neg_greedy}")
             print("Greedy negation:", neg_greedy)
             if vocab_used is None:
-                tokenized, vocab = _tokenize_messages(lang)
+                _, vocab = _tokenize_messages(lang)
                 vocab_used = len(vocab)
             #DEBUG 
             print(f"[DEBUG] vocab_used={vocab_used}")

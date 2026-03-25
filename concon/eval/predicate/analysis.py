@@ -1,6 +1,6 @@
 import os, pathlib
-from load import get_datapoints
-import negation_tests
+import load
+import negation
 
 if __name__ == "__main__":
     # Ask for experimental data
@@ -10,31 +10,40 @@ if __name__ == "__main__":
     runs_dir = repo_root / "runs"
     print(f"Available experiments: {os.listdir(runs_dir)}")
     experiment_path = input("Experiment name: ")
-    datapoints = get_datapoints(experiment_path)
 
     # ----- DEBUG / TESTING ONLY -----
 
-    print(f"Found {len(datapoints)} datapoints.")
-
     has_eval, has_pred, has_lang = 0, 0, 0
-    print(f"Data structure:")
-    print(datapoints[0].keys())
-    for k, v in datapoints[0].items():
-        print(f"{k}: {type(v)}")
-    for d in datapoints:
+    total = 0
+    first = None
+    for d in load.get_datapoints(experiment_path):
+        total += 1
+        if first is None:
+            first = d
         if d['evaluation'] is not None:
             has_eval += 1
         if d['predicates'] is not None:
             has_pred += 1
         if d['languages']:
             has_lang += 1
+    print(f"Found {total} datapoints.")
+    if first is not None:
+        print(f"Data structure:")
+        print(first.keys())
+        for k, v in first.items():
+            print(f"{k}: {type(v)}")
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print()
 
-    for d in datapoints:
-        if d['languages']:
+    for d in load.iter_datapoints(experiment_path):
+        if not d['languages']:
+            print(f"no languages found in {d['config']}\n")
+        else:
             languages = d["languages"]
             for lang in languages:
                 if len(lang['language']['msg'].unique()) > 1:
-                    negation_tests.find_negation(languages[0]["language"])
+                    _, vocab = negation._tokenize_messages(lang["language"])
+                    max_size = min(6, max(2, len(vocab) // 5))  # e.g. 20% of vocab, capped
+                    print(negation.find_negation(languages[0]["language"], min_purity=0, min_coverage=0, mode='greedy'))
+                    print()
                     break

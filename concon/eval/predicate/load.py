@@ -4,16 +4,30 @@ import pandas as pd
 
 def get_datapoints(directory_name: str = None):
     '''
+    List-returning wrapper around iter_datapoints.
     Input:
     - directory_name (string): folder found in 'concon/runs'
     Output:
-    - datapoints (list[dict]) of runs with keys: 
+    - datapoints (list[dict]) of runs with keys:
         - config (dict), 
         - evaluation (DataFrame), 
         - predicates (DataFrame),
         - languages (list[dict[epoch_number: int, DataFrame]])
     '''
-    datapoints = []
+    return list(iter_datapoints(directory_name))
+
+
+def iter_datapoints(directory_name: str = None):
+    '''
+    Input:
+    - directory_name (string): folder found in 'concon/runs'
+    Output:
+    - yields datapoints (dict) with keys:
+        - config (dict), 
+        - evaluation (DataFrame), 
+        - predicates (DataFrame),
+        - languages (list[dict[epoch_number: int, DataFrame]])
+    '''
     repo_root = pathlib.Path(__file__).resolve().parents[3]
     super_directory = repo_root / "runs" / directory_name
 
@@ -50,6 +64,4 @@ def get_datapoints(directory_name: str = None):
             datapoint['languages'].append({'epoch_number': int(fname.split('.')[1].split('e')[1]),
                                         'language': pd.read_csv(msg_path)})
 
-        datapoints.append(datapoint)
-
-    return datapoints
+        yield datapoint
