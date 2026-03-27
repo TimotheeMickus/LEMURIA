@@ -11,7 +11,10 @@ if __name__ == "__main__":
     repo_root = pathlib.Path(__file__).resolve().parents[3]
     runs_dir = repo_root / "runs"
     print(f"Available experiments: {os.listdir(runs_dir)}")
-    experiment_path = input("Experiment name: ")
+    if len(sys.argv) > 1:
+        experiment_path = sys.argv[1]
+    else:
+        experiment_path = input("Experiment name: ")
 
     # ----- DEBUG / TESTING ONLY -----
 
@@ -58,17 +61,17 @@ if __name__ == "__main__":
     # Borderline but feasible combinations:
     # max_size = None, max_vocab_for_full = 20,
     # max_size = 4,    max_vocab_for_full = 80.
-    neg_df = negation.compare_greedy_exhaustive_negation_search(
-        datapoints_list,
-        max_size=4,
-        min_purity=1.0,
-        min_coverage=1.0,
-        max_vocab_for_full=12,
-    )
-    out_dir = pathlib.Path(__file__).resolve().parent / "outputs"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"negation_analysis_{experiment_path}.csv"
-    neg_df.to_csv(out_path, index=False)
-    print(f"Saved negation analysis to: {out_path}")
-    if not neg_df.empty:
-        print(neg_df.head())
+    # neg_df = negation.compare_greedy_exhaustive_negation_search(
+    #     datapoints_list,
+    #     max_size=None,
+    #     min_purity=0.9,
+    #     min_coverage=0.9,
+    #     max_vocab_for_full=20,
+    # )
+    # out_dir = pathlib.Path(__file__).resolve().parent / "outputs"
+    # out_dir.mkdir(parents=True, exist_ok=True)
+    # out_path = out_dir / f"negation_analysis_{experiment_path}.csv"
+    # neg_df.to_csv(out_path, index=False)
+    # print(f"Saved negation analysis to: {out_path}")
+    # if not neg_df.empty:
+    #     print(neg_df.head())
