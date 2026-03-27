@@ -1,6 +1,7 @@
 import os, pathlib
 import json
 import pandas as pd
+from tqdm import tqdm
 
 def get_datapoints(directory_name: str = None):
     '''
@@ -31,7 +32,8 @@ def iter_datapoints(directory_name: str = None):
     repo_root = pathlib.Path(__file__).resolve().parents[3]
     super_directory = repo_root / "runs" / directory_name
 
-    for directory in super_directory.iterdir():
+    directories = list(super_directory.iterdir())
+    for directory in tqdm(directories, desc="Loading datapoints"):
         # Handle cases where directories are nested
         if not (directory / "hparams.json").is_file():
             subdirectories = [p for p in directory.iterdir() if p.is_dir()]

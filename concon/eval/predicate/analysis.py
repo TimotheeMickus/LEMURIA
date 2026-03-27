@@ -1,6 +1,7 @@
 import os, pathlib
 import load
 import negation
+import plots
 
 if __name__ == "__main__":
     # Ask for experimental data
@@ -16,7 +17,9 @@ if __name__ == "__main__":
     has_eval, has_pred, has_lang = 0, 0, 0
     total = 0
     first = None
-    for d in load.get_datapoints(experiment_path):
+    print("Loading datapoints...")
+    datapoints_list = load.get_datapoints(experiment_path)
+    for d in datapoints_list:
         total += 1
         if first is None:
             first = d
@@ -34,6 +37,9 @@ if __name__ == "__main__":
             print(f"{k}: {type(v)}")
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print()
+
+    # Plot: epochs to max accuracy/performance
+    # plots.ComplexityMemory(datapoints_list, name=experiment_path).plot_time_to_max_accuracy()
 
     for d in load.iter_datapoints(experiment_path):
         if not d['languages']:
