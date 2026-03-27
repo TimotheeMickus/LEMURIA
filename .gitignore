@@ -14,3 +14,4 @@ runs/
 *.swp
 predicate_games.ipynb
 concon/eval/predicate/plots
+concon/eval/predicate/outputs
