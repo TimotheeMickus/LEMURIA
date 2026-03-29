@@ -65,7 +65,7 @@ if __name__ == "__main__":
     # Borderline but feasible combinations:
     # max_size = None, max_vocab_for_full = 20,
     # max_size = 4,    max_vocab_for_full = 80.
-    n_jobs = min(4, os.cpu_count() or 1)
+    n_jobs = os.cpu_count() or 1
     neg_df = negation.compare_greedy_exhaustive_negation_search(
         datapoints_list,
         max_size=4,
