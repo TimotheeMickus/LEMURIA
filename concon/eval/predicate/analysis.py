@@ -1,4 +1,4 @@
-import os, pathlib
+import os, pathlib, sys
 import pickle
 import load
 import negation
@@ -53,25 +53,37 @@ if __name__ == "__main__":
             has_lang += 1
     print(f"Found {total} datapoints.")
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
-    print(f"Used vocab: {vocab_sum/vocab_count}")
+    print(f"Average vocab length: {vocab_sum/vocab_count}")
 
     # Plot: epochs to max accuracy/performance
-    plots.ComplexityMemory(datapoints_list, name=experiment_path).plot_time_to_max_accuracy()
+    cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
+    cm.plot_time_to_max_accuracy()
+    cm.plot_message_compression(group_by=("negation",))
+    cm.plot_message_compression(group_by=("hidden_size",))
+    # cm.plot_message_compression(group_by=("negation","properties"))
 
     # Borderline but feasible combinations:
     # max_size = None, max_vocab_for_full = 20,
     # max_size = 4,    max_vocab_for_full = 80.
-    # neg_df = negation.compare_greedy_exhaustive_negation_search(
-    #     datapoints_list,
-    #     max_size=None,
-    #     min_purity=0.9,
-    #     min_coverage=0.9,
-    #     max_vocab_for_full=20,
-    # )
-    # out_dir = pathlib.Path(__file__).resolve().parent / "outputs"
-    # out_dir.mkdir(parents=True, exist_ok=True)
-    # out_path = out_dir / f"negation_analysis_{experiment_path}.csv"
-    # neg_df.to_csv(out_path, index=False)
-    # print(f"Saved negation analysis to: {out_path}")
-    # if not neg_df.empty:
-    #     print(neg_df.head())
+    n_jobs = min(4, os.cpu_count() or 1)
+    neg_df = negation.compare_greedy_exhaustive_negation_search(
+        datapoints_list,
+        max_size=4,
+        min_purity=0.0,
+        min_coverage=0.0,
+        min_exclusive_rate=0.0,
+        max_vocab_for_full=80,
+        n_jobs=n_jobs,
+    )
+    out_dir = pathlib.Path(__file__).resolve().parent / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"negation_analysis_{experiment_path}.csv"
+    neg_df.to_csv(out_path, index=False)
+    print(f"Saved negation analysis to: {out_path}")
+    if not neg_df.empty:
+        print(neg_df.head())
+
+    cm.plot_negation_scores(mode="greedy")
+    cm.plot_negation_scores(mode="full")
+    cm.summarize_negation_by_complexity(mode="greedy", threshold=0.0)
+    cm.summarize_negation_by_complexity(mode="full", threshold=0.0)

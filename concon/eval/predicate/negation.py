@@ -6,12 +6,9 @@ import sys
 from load import get_datapoints
 import os
 from tqdm import tqdm
+import multiprocessing as mp
 
 TQDM_ENABLED = sys.stderr.isatty() # reasonable outputs in IDE
-
-#
-# ------ Private functions ------ 
-#
 
 def _tokenize_messages(language: pd.DataFrame):
     assert "msg" in language.columns, "language must have a 'msg' column"
@@ -55,20 +52,155 @@ def _evaluate_per_token_disjunctions(current_item, vocab_features, y, max_size, 
             results.append(new_item)
             _evaluate_per_token_disjunctions(new_item, vocab_features, y, max_size, results)
 
-def _filter_xor_candidates(disjunctions: pd.DataFrame, language: pd.DataFrame, *, min_purity: float, min_coverage: float):
-    '''Take `xor_coverage` output and pass/fail candidates based on purity and coverage.
+def _filter_candidates(
+    merged: pd.DataFrame,
+    *,
+    min_purity: float,
+    min_coverage: float,
+    min_exclusive_rate: float = 1.0,
+):
+    '''Filter candidates by purity/coverage/exclusivity thresholds.
     This helper is used in both greedy and full searches.'''
-    df = xor_coverage(language, disjunctions)
-    if(df.empty): return df, {"status": "no_xor_candidates", "max_purity": None, "max_coverage": None}
-    max_purity, max_coverage = float(df["neg_purity"].max()), float(df["neg_coverage"].max())
-    df = df[(df["neg_purity"] >= min_purity) & (df["neg_coverage"] >= min_coverage)] # Apply purity/coverage mask to dataframe
-    if(df.empty): return df, {"status": "below_threshold", "max_purity": max_purity, "max_coverage": max_coverage}
-    return df, {"status": "pass", "max_purity": max_purity, "max_coverage": max_coverage}
+    if merged.empty:
+        return merged, {"status": "no_candidates", "max_purity": None, "max_coverage": None}
+    max_purity = float(merged["neg_purity"].max())
+    max_coverage = float(merged["neg_coverage"].max())
+    max_exclusive = float(merged["exclusive_rate"].max())
+    merged = merged[
+        (merged["neg_purity"] >= min_purity)
+        & (merged["neg_coverage"] >= min_coverage)
+        & (merged["exclusive_rate"] >= min_exclusive_rate)
+    ]
+    if merged.empty:
+        return merged, {"status": "below_threshold", "max_purity": max_purity, "max_coverage": max_coverage, "max_exclusive_rate": max_exclusive}
+    return merged, {"status": "pass", "max_purity": max_purity, "max_coverage": max_coverage, "max_exclusive_rate": max_exclusive}
 
+def _coverage_stats(language: pd.DataFrame, disjunctions: pd.DataFrame):
+    '''Compute purity, coverage, and exclusivity rate for each feature.'''
+    if("name" not in disjunctions.columns): raise KeyError("disjunctions missing column 'name'")
 
-#
-# ------ Main functions. ------
-#
+    # Map (pred: {v: [tok], ¬v: [tok]}).
+    base_map = {}
+    for _, row in language.iterrows():
+        pred_str = str(row["pred_str"])
+        msg = str(row["msg"])
+        tokens = [t for t in msg.split() if t != "0"]
+        is_neg = "¬" in pred_str
+        base = pred_str.replace("(", "").replace(")", "").replace("¬", "")
+        entry = base_map.setdefault(base, {"pos": [], "neg": []})
+        entry["neg" if is_neg else "pos"].append(tokens)
+
+    rows = []
+    for item in disjunctions["name"]:
+        tok_set = set(re.findall(r"[A-Za-z0-9_]+", str(item))) # parse disjunction string ("(a ∨ b)" --> {"a","b"})
+        present_in_v = []
+        present_in_not_v = []
+        both_count = 0
+
+        for base, entry in base_map.items():
+            # Check whether the disjunction appears in v-messages or ¬v-messages.
+            present_v = any(any(t in tok_set for t in toks) for toks in entry["pos"])
+            present_not_v = any(any(t in tok_set for t in toks) for toks in entry["neg"])
+            if(present_v): present_in_v.append(base)
+            if(present_not_v): present_in_not_v.append(f"¬{base}")
+            if(present_v and present_not_v): both_count += 1
+
+        # any_present counts bases where the disjunction appears in either v or ¬v.
+        v_only_count = len(present_in_v) - both_count
+        not_v_only_count = len(present_in_not_v) - both_count
+        any_present = v_only_count + not_v_only_count + both_count
+        # neg_purity: among bases where it appears, how often is it only ¬v?
+        neg_purity = (not_v_only_count / any_present) if any_present else 0.0
+        # neg_coverage: fraction of all bases where it marks ¬v.
+        neg_coverage = (not_v_only_count / len(base_map)) if len(base_map) else 0.0
+        # exclusive_rate: fraction of predicates where the feature does not appear on both sides.
+        exclusive_rate = (1.0 - (both_count / any_present)) if any_present else 0.0
+
+        rows.append({
+            "name": item,
+            "v": present_in_v,
+            "¬v": present_in_not_v,
+            "neg_purity": neg_purity,
+            "neg_coverage": neg_coverage,
+            "exclusive_rate": exclusive_rate,
+        })
+
+    return pd.DataFrame(rows)
+
+def _process_run(args):
+    # Avoid noisy nested progress bars in worker processes.
+    global TQDM_ENABLED
+    TQDM_ENABLED = False
+    run_idx, datapoint, best_language, mode, max_size, min_purity, min_coverage, min_exclusive_rate, max_vocab_for_full = args
+    config = datapoint.get("config", {})
+    language_df = best_language["language"]
+    _, vocab = _tokenize_messages(language_df)
+    vocab_size = len(vocab)
+
+    # Build candidate disjunctions using one search strategy.
+    disjunctions = None
+    if mode == "greedy":
+        disjunctions = mi_maximizing_disjunctions_greedy(language_df, max_size=max_size)
+    else:
+        if vocab_size <= max_vocab_for_full:
+            disjunctions = mi_maximizing_disjunctions(language_df, max_size=max_size)
+        else:
+            disjunctions = None
+
+    if disjunctions is None or disjunctions.empty:
+        passed = pd.DataFrame()
+        stats = {
+            "status": "skipped_vocab" if mode == "full" and vocab_size > max_vocab_for_full else "no_disjunctions",
+            "max_purity": None,
+            "max_coverage": None,
+        }
+        score_mi, score_xor, score_purity = None, None, None
+    else:
+        score_mi = float(disjunctions["mi_bits"].max())
+        merged = disjunctions.merge(_coverage_stats(language_df, disjunctions), on="name", how="inner")
+        score_xor = float(merged["exclusive_rate"].max()) if not merged.empty else None
+        score_purity = float(merged["neg_purity"].max()) if not merged.empty else None
+        passed, stats = _filter_candidates(
+            merged,
+            min_purity=min_purity,
+            min_coverage=min_coverage,
+            min_exclusive_rate=min_exclusive_rate,
+        )
+
+    # Keep all passing candidates and note the best one for comparison.
+    candidates = ";".join(passed["name"].astype(str).tolist()) if not passed.empty else ""
+    best_candidate, best_purity, best_coverage = None, None, None
+    if not passed.empty:
+        best_row = passed.sort_values(["neg_purity", "neg_coverage"], ascending=False).iloc[0]
+        best_candidate = best_row["name"]
+        best_purity = float(best_row["neg_purity"])
+        best_coverage = float(best_row["neg_coverage"])
+
+    return {
+        "run_idx": run_idx,
+        "run_name": f"{config.get('properties')}_{config.get('run_tag')}",
+        "epoch": int(best_language.get("epoch_number", -1)),
+        "complexity": config.get("num_predicates"),
+        "properties": config.get("properties"),
+        "hidden_size": config.get("hidden_size"),
+        "vocab_size": vocab_size,
+        "n_messages": int(len(language_df)),
+        "n_predicates": int(language_df["pred_str"].nunique()),
+        "n_neg_predicates": int(language_df["pred_str"].astype(str).str.contains("¬").sum()),
+
+        "status": stats.get("status"),
+        "max_purity": stats.get("max_purity"),
+        "max_coverage": stats.get("max_coverage"),
+        "max_exclusive_rate": stats.get("max_exclusive_rate"),
+        "n_pass": int(len(passed)),
+        "candidates": candidates,
+        "best_candidate": best_candidate,
+        "best_purity": best_purity,
+        "best_coverage": best_coverage,
+        "score_mi": score_mi,
+        "score_xor": score_xor,
+        "score_purity": score_purity,
+    }
 
 def mi_maximizing_disjunctions(language, max_size=None):
     '''For all elements in the language's vocabulary, recursively build disjunctions up to max_size elements and record I(disj ; predicates).'''
@@ -155,108 +287,70 @@ def mi_maximizing_disjunctions_greedy(language, max_size=None):
 
 def xor_coverage(language: pd.DataFrame, disjunctions: pd.DataFrame):
     '''For each feature (disjunction) and presence of negation v, compute if it verifies v ⊕ ¬v, and for how many predicates.'''
-    if("name" not in disjunctions.columns): raise KeyError("disjunctions missing column 'name'")
-
-    # Map (pred: {v: [tok], ¬v: [tok]}).
-    base_map = {}
-    for _, row in language.iterrows():
-        pred_str = str(row["pred_str"])
-        msg = str(row["msg"])
-        tokens = [t for t in msg.split() if t != "0"]
-        is_neg = "¬" in pred_str
-        base = pred_str.replace("(", "").replace(")", "").replace("¬", "")
-        entry = base_map.setdefault(base, {"pos": [], "neg": []})
-        entry["neg" if is_neg else "pos"].append(tokens)
-
-    rows = []
-    for item in disjunctions["name"]:
-        tok_set = set(re.findall(r"[A-Za-z0-9_]+", str(item))) # parse disjunction string ("(a ∨ b)" --> {"a","b"})
-        present_in_v = []
-        present_in_not_v = []
-        both_count = 0
-
-        for base, entry in base_map.items():
-            # Check whether the disjunction appears in v-messages or ¬v-messages.
-            present_v = any(any(t in tok_set for t in toks) for toks in entry["pos"])
-            present_not_v = any(any(t in tok_set for t in toks) for toks in entry["neg"])
-            if present_v:
-                present_in_v.append(base)
-            if present_not_v:
-                present_in_not_v.append(f"¬{base}")
-            if present_v and present_not_v:
-                both_count += 1
-
-        # any_present counts bases where the disjunction appears in either v or ¬v.
-        v_only_count = len(present_in_v) - both_count
-        not_v_only_count = len(present_in_not_v) - both_count
-        any_present = v_only_count + not_v_only_count + both_count
-        # neg_purity: among bases where it appears, how often is it only ¬v?
-        neg_purity = (not_v_only_count / any_present) if any_present else 0.0
-        # neg_coverage: fraction of all bases where it marks ¬v.
-        neg_coverage = (not_v_only_count / len(base_map)) if len(base_map) else 0.0
-
-        rows.append({
-            "name": item,
-            "v": present_in_v,
-            "¬v": present_in_not_v,
-            "neg_purity": neg_purity,
-            "neg_coverage": neg_coverage,
-        })
-
-    stats_df = pd.DataFrame(rows)
+    stats_df = _coverage_stats(language, disjunctions)
     # Keep only disjunctions that mark exactly v ⊕ ¬v.
     has_xor = stats_df["v"].str.len().gt(0) ^ stats_df["¬v"].str.len().gt(0)
     stats_df = stats_df[has_xor]
     return disjunctions.merge(stats_df, on="name", how="inner")
 
-def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy', min_purity: float = 1.0, min_coverage: float = 1.0):
+def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy', min_purity: float = 1.0, min_coverage: float = 1.0, min_exclusive_rate: float = 1.0):
     '''In a language, find a feature that behaves like a negation marker. Returns single best candidate.'''
     assert mode in ['greedy', 'full'], "Choose either \"greedy\" or \"full\" mode."
 
     if mode == 'greedy':
-        greedy_disjunctions = mi_maximizing_disjunctions_greedy(language, max_size=max_size)
-        df = xor_coverage(language, greedy_disjunctions)
+        disjunctions = mi_maximizing_disjunctions_greedy(language, max_size=max_size)
     elif mode == 'full':
-        all_disjunctions = mi_maximizing_disjunctions(language, max_size=max_size)
-        df = xor_coverage(language, all_disjunctions)
+        disjunctions = mi_maximizing_disjunctions(language, max_size=max_size)
 
-    if df.empty:
-        print("No candidate feature fits the XOR criteria.\n")
+    merged = disjunctions.merge(_coverage_stats(language, disjunctions), on="name", how="inner")
+    if merged.empty:
+        print("No candidate features found.\n")
         return None
     
-    mask = (df["neg_purity"] >= min_purity) & (df["neg_coverage"] >= min_coverage)
-    if not mask.any():
-        print(f"No candidates pass thresholds. max purity={df['neg_purity'].max():.3f}, max coverage={df['neg_coverage'].max():.3f}\n")
+    passed, stats = _filter_candidates(
+        merged,
+        min_purity=min_purity,
+        min_coverage=min_coverage,
+        min_exclusive_rate=min_exclusive_rate,
+    )
+    if passed.empty:
+        print(f"No candidates pass thresholds. max purity={stats['max_purity']:.3f}, max coverage={stats['max_coverage']:.3f}\n")
         return None
     
-    best = df[mask].sort_values(["neg_purity", "neg_coverage"], ascending=False).iloc[0]
+    best = passed.sort_values(["neg_purity", "neg_coverage"], ascending=False).iloc[0]
     return best["name"], best["¬v"]
 
 
-def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_purity=1.0, min_coverage=1.0, max_vocab_for_full=12):
+def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4):
     '''Applies negation search using greedy and exhaustive approaches and compares them.'''
-    greedy_df, skipped, n_eligible = run_negation_search(
+    greedy_df = run_negation_search(
         datapoints,
         mode="greedy",
         max_size=max_size,
         min_purity=min_purity,
         min_coverage=min_coverage,
+        min_exclusive_rate=min_exclusive_rate,
         max_vocab_for_full=max_vocab_for_full,
+        n_jobs=n_jobs,
     )
-    full_df, _, _ = run_negation_search(
+    full_df = run_negation_search(
         datapoints,
         mode="full",
         max_size=max_size,
         min_purity=min_purity,
         min_coverage=min_coverage,
+        min_exclusive_rate=min_exclusive_rate,
         max_vocab_for_full=max_vocab_for_full,
+        n_jobs=n_jobs,
     )
 
-    print(f"Negation analysis: {n_eligible}/{len(datapoints)} eligible "
-          f"(no_negation={skipped['no_negation']})\n")
-
     key_cols = ["run_idx", "run_name", "epoch", "complexity", "properties", "hidden_size", "vocab_size", "n_messages", "n_predicates", "n_neg_predicates"]
-    metric_cols = ["status", "max_purity", "max_coverage", "n_pass", "candidates", "best_candidate", "best_purity", "best_coverage"]
+    metric_cols = [
+        "status", "max_purity", "max_coverage", "max_exclusive_rate",
+        "n_pass", "candidates",
+        "best_candidate", "best_purity", "best_coverage",
+        "score_mi", "score_xor", "score_purity",
+    ]
 
     greedy_df = greedy_df.rename(columns={c: f"greedy_{c}" for c in metric_cols})
     full_df = full_df.rename(columns={c: f"full_{c}" for c in metric_cols})
@@ -271,12 +365,13 @@ def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_pur
     return merged
 
 
-def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0, min_coverage=1.0, max_vocab_for_full=12):
+def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4):
     '''
     Run a single negation-search mode across all datapoints and return a per-run summary.
     - mode="greedy": heuristic search over disjunctions
     - mode="full": exhaustive (until vocab_size > max_vocab_for_full) disjunction search
-    Filters candidates by XOR purity/coverage and records all passing candidates plus the best one.
+    Filters candidates by purity/coverage/exclusivity thresholds and records all passing candidates plus the best one.
+    Returns DataFrame.
     '''
     assert mode in ["greedy", "full"], "mode must be 'greedy' or 'full'"
     eligible_runs = []
@@ -292,59 +387,18 @@ def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0
     print(f"Negation search ({mode}): {len(eligible_runs)}/{len(datapoints)} eligible "
           f"(no_negation={skipped['no_negation']})\n")
 
-    rows = []
-    for run_idx, (datapoint, best_language) in enumerate(tqdm(eligible_runs, desc=f"Negation search ({mode})")):
-        config = datapoint.get("config", {})
-        language_df = best_language["language"]
-        _, vocab = _tokenize_messages(language_df)
-        vocab_size = len(vocab)
-
-        # Build candidate disjunctions using one search strategy.
-        if mode == "greedy":
-            passed, stats = _filter_xor_candidates(
-                mi_maximizing_disjunctions_greedy(language_df, max_size=max_size), 
-                language_df, min_purity=min_purity, min_coverage=min_coverage
-                )
-        else:
-            if vocab_size <= max_vocab_for_full:
-                passed, stats = _filter_xor_candidates(
-                    mi_maximizing_disjunctions(language_df, max_size=max_size), 
-                    language_df, min_purity=min_purity, min_coverage=min_coverage
-                    )
-            else:
-                passed = pd.DataFrame()
-                stats = {"status": "skipped_vocab", "max_purity": None, "max_coverage": None}
-
-        # Keep all passing candidates and note the best one for comparison.
-        candidates = ";".join(passed["name"].astype(str).tolist()) if not passed.empty else ""
-        best_candidate, best_purity, best_coverage = None, None, None
-        if not passed.empty:
-            best_row = passed.sort_values(["neg_purity", "neg_coverage"], ascending=False).iloc[0]
-            best_candidate = best_row["name"]
-            best_purity = float(best_row["neg_purity"])
-            best_coverage = float(best_row["neg_coverage"])
-
-        rows.append({
-            "run_idx": run_idx,
-            "run_name": f"{config.get('properties')}_{config.get('run_tag')}",
-            "epoch": int(best_language.get("epoch_number", -1)),
-            "complexity": config.get("num_predicates"),
-            "properties": config.get("properties"),
-            "hidden_size": config.get("hidden_size"),
-            "vocab_size": vocab_size,
-            "n_messages": int(len(language_df)),
-            "n_predicates": int(language_df["pred_str"].nunique()),
-            "n_neg_predicates": int(language_df["pred_str"].astype(str).str.contains("¬").sum()),
-
-            "status": stats.get("status"),
-            "max_purity": stats.get("max_purity"),
-            "max_coverage": stats.get("max_coverage"),
-            "n_pass": int(len(passed)),
-            "candidates": candidates,
-            "best_candidate": best_candidate,
-            "best_purity": best_purity,
-            "best_coverage": best_coverage,
-        })
+    args = [
+        (run_idx, datapoint, best_language, mode, max_size, min_purity, min_coverage, min_exclusive_rate, max_vocab_for_full)
+        for run_idx, (datapoint, best_language) in enumerate(eligible_runs)
+    ]
+    if n_jobs and n_jobs > 1:
+        with mp.Pool(processes=n_jobs) as pool:
+            rows = list(tqdm(pool.imap(_process_run, args), total=len(args), desc=f"Negation search ({mode}, {n_jobs} jobs)"))
+    else:
+        rows = [
+            _process_run(arg)
+            for arg in tqdm(args, desc=f"Negation search ({mode})")
+        ]
 
     return pd.DataFrame(rows)
 
@@ -397,12 +451,12 @@ if __name__ == "__main__":
         print()
 
         print("XOR/coverage stats for greedy MI disjunctions:")
-        mi_greedy_stats = xor_coverage(toy_set, greedy_mi, item_col="name")
+        mi_greedy_stats = xor_coverage(toy_set, greedy_mi)
         print(mi_greedy_stats.head(10))
         print()
 
         print("XOR/coverage stats for exhaustive MI disjunctions:")
-        mi_exhaustive_stats = xor_coverage(toy_set, exhaustive_mi, item_col="name")
+        mi_exhaustive_stats = xor_coverage(toy_set, exhaustive_mi)
         print(mi_exhaustive_stats.sort_values("neg_purity", ascending=False).head(10))
         print()
 
