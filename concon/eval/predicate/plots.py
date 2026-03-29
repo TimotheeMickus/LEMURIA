@@ -345,11 +345,10 @@ class ComplexityMemory:
                 epochs = eval_df["epoch"].to_numpy()
 
             cfg = dp.get("config", {})
-            N = int(cfg.get("properties"))
+            N = int(cfg.get("num_predicates"))
             has_neg = not cfg.get("no_negation", False)
-            M = 2 * N if has_neg else N
-            A = 2 * N + 1
-            theoretical_min = math.log(M, A) if M > 1 else 1.0
+            A = int(cfg.get("base_alphabet_size"))
+            theoretical_min = math.log(N, A) if N > 1 else 1.0
             normed = eval_df["eval/msg_length"].to_numpy(dtype=float) / theoretical_min
 
             key = tuple(cfg.get(k) if k not in ("negation", "conjunction") else None for k in group_by)
