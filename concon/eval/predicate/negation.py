@@ -323,6 +323,11 @@ def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy'
 
 def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4):
     '''Applies negation search using greedy and exhaustive approaches and compares them.'''
+    # Check if there are any eligible runs at all
+    if all(dp.get("config", {}).get("no_negation", False) or not dp.get("languages") for dp in datapoints):
+        print("No eligible runs for negation analysis; skipping.")
+        return pd.DataFrame()
+
     greedy_df = run_negation_search(
         datapoints,
         mode="greedy",
