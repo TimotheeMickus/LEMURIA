@@ -85,6 +85,8 @@ if __name__ == "__main__":
         print(f"Saved negation analysis to: {out_path}")
         if not neg_df.empty:
             print(neg_df.head())
+    else:
+        print("No negations to analyse.")
 
     cm.plot_negation_scores(mode="greedy")
     cm.plot_negation_scores(mode="full")
