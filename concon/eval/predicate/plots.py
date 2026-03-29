@@ -69,7 +69,7 @@ class ComplexityMemory:
         else:
             xtick_labels = []
             for c in xticks:
-                props = plot_df.loc[plot_df["complexity"] == c, "properties"].dropna().astype(int).unique()
+                props = plot_df.loc[plot_df["complexity"] == c, "properties"].dropna().unique()
                 props_str = props[0] if len(props) else "?"
                 xtick_labels.append(f"{c}: {props_str}")
         return xticks, xtick_labels
@@ -136,7 +136,7 @@ class ComplexityMemory:
         xticks = sorted(plot_df['complexity'].unique())
         xtick_labels = []
         for c in xticks:
-            props = plot_df.loc[plot_df["complexity"] == c, "properties"].dropna().astype(int).unique()
+            props = plot_df.loc[plot_df["complexity"] == c, "properties"].dropna().unique()
             props_str = props[0] if len(props) else "?"
             xtick_labels.append(str(props_str))
         plt.xscale("log", base=2)
