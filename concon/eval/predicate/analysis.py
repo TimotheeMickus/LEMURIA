@@ -84,11 +84,10 @@ if __name__ == "__main__":
         neg_df.to_csv(out_path, index=False)
         print(f"Saved negation analysis to: {out_path}")
         if not neg_df.empty:
-            print(neg_df.head())
+            print(neg_df.head())  
+        cm.plot_negation_scores(mode="greedy")
+        cm.plot_negation_scores(mode="full")
+        cm.summarize_negation_by_complexity(mode="greedy", threshold=0.0)
+        cm.summarize_negation_by_complexity(mode="full", threshold=0.0)
     else:
         print("No negations to analyse.")
-
-    cm.plot_negation_scores(mode="greedy")
-    cm.plot_negation_scores(mode="full")
-    cm.summarize_negation_by_complexity(mode="greedy", threshold=0.0)
-    cm.summarize_negation_by_complexity(mode="full", threshold=0.0)
