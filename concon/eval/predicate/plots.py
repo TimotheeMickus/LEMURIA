@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pathlib
 import math
+import negation
 
 # ------ complexity - memory interactions ------
 
@@ -263,6 +264,7 @@ class ComplexityMemory:
                 return
             neg_df = pd.read_csv(csv_path)
 
+        neg_df = negation.normalize_negation_df(neg_df, mode)
         filename = f"negation_scores_{mode}_{self.name}.png"
         self._plot_negation_scores_generic(
             neg_df,
@@ -281,6 +283,7 @@ class ComplexityMemory:
                 return None
             neg_df = pd.read_csv(csv_path)
 
+        neg_df = negation.normalize_negation_df(neg_df, mode)
         prefix = f"{mode}_"
         score_cols = [f"{prefix}score_mi", f"{prefix}score_xor", f"{prefix}score_purity"]
         required = ["complexity", "properties"] + score_cols

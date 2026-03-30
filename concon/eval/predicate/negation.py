@@ -131,7 +131,7 @@ def _process_run(args):
     # Avoid noisy nested progress bars in worker processes.
     global TQDM_ENABLED
     TQDM_ENABLED = False
-    run_idx, datapoint, best_language, mode, max_size, min_purity, min_coverage, min_exclusive_rate, max_vocab_for_full = args
+    run_idx, datapoint, best_language, mode, max_size, min_purity, min_coverage, min_exclusive_rate, max_vocab_for_full, greedy_top_k = args
     config = datapoint.get("config", {})
     language_df = best_language["language"]
     _, vocab = _tokenize_messages(language_df)
@@ -140,7 +140,7 @@ def _process_run(args):
     # Build candidate disjunctions using one search strategy.
     disjunctions = None
     if mode == "greedy":
-        disjunctions = mi_maximizing_disjunctions_greedy(language_df, max_size=max_size)
+        disjunctions = mi_maximizing_disjunctions_greedy(language_df, max_size=max_size, top_k=greedy_top_k)
     else:
         if vocab_size <= max_vocab_for_full:
             disjunctions = mi_maximizing_disjunctions(language_df, max_size=max_size)
@@ -231,59 +231,64 @@ def mi_maximizing_disjunctions(language, max_size=None):
 
     return pd.DataFrame(results).drop(columns=['feat', 'tokens']).sort_values('mi_bits', ascending=False).drop_duplicates('name')
 
-def mi_maximizing_disjunctions_greedy(language, max_size=None):
-    '''Start from the highest-MI token, then iteratively add the largest-MI gain token.'''
+def mi_maximizing_disjunctions_greedy(language, max_size=None, top_k=1):
+    '''Start from the top-k MI tokens, then iteratively add the largest-MI gain token.'''
     tokenized, vocab = _tokenize_messages(language)
     X = _build_presence_matrix(tokenized, vocab)
     y = language['pred_str'].to_numpy()
 
     if(max_size is None): max_size = len(vocab)
 
-    # Pick the token with the highest MI.
-    best_j = None
-    best_mi = None
+    mi_per_tok = []
     for j in tqdm(range(len(vocab)), desc="MI greedy seed", disable=not TQDM_ENABLED, leave=False):
         mi = mutual_info_score(X[:, j], y) / np.log(2)
-        if best_mi is None or mi > best_mi:
-            best_mi = mi
-            best_j = j
+        mi_per_tok.append(mi)
 
-    if(best_j is None): return pd.DataFrame(columns=["name", "mi_bits", "size"])
+    if(not mi_per_tok): return pd.DataFrame(columns=["name", "mi_bits", "size"])
 
-    selected = [best_j]
-    rows = [{"name": vocab[best_j], "mi_bits": best_mi, "size": 1}]
+    top_k = max(1, min(int(top_k), len(vocab)))
+    seeds = np.argsort(mi_per_tok)[::-1][:top_k]
 
-    # Record which signals are covered by the current disjunction.
-    remaining = [j for j in range(len(vocab)) if j not in selected]
-    current_feat = X[:, best_j].astype(bool)
+    rows = []
+    for seed in seeds:
+        best_mi = mi_per_tok[seed]
+        selected = [seed]
+        rows.append({"name": vocab[seed], "mi_bits": best_mi, "size": 1})
 
-    # Iteratively add the token with the largest MI gain.
-    while remaining and len(selected) < max_size:
-        best_gain = None
-        best_idx = None
-        best_feat = None
-        for j in tqdm(remaining, desc="MI greedy expand", disable=not TQDM_ENABLED, leave=False):
-            disj = (current_feat | X[:, j].astype(bool)) # candidate disjunction is (current set | token j)
-            mi = mutual_info_score(disj.astype(int), y) / np.log(2)
-            gain = mi - best_mi
-            if best_gain is None or gain > best_gain:
-                best_gain, best_idx, best_feat = gain, j, disj
+        # Record which signals are covered by the current disjunction.
+        remaining = [j for j in range(len(vocab)) if j not in selected]
+        current_feat = X[:, seed].astype(bool)
 
-        if(best_gain is None): break # Halt if no improvement.
+        # Iteratively add the token with the largest MI gain.
+        while remaining and len(selected) < max_size:
+            best_gain, best_ids, best_feat = None, None, None
+            for j in tqdm(remaining, desc="MI greedy expand", disable=not TQDM_ENABLED, leave=False):
+                disj = (current_feat | X[:, j].astype(bool)) # candidate disjunction is (current set | token j)
+                mi = mutual_info_score(disj.astype(int), y) / np.log(2)
+                gain = mi - best_mi
+                if best_gain is None or gain > best_gain:
+                    best_gain, best_idx, best_feat = gain, j, disj
 
-        selected.append(best_idx)
-        remaining.remove(best_idx)
-        best_mi = best_mi + best_gain
-        current_feat = best_feat
+            if(best_gain is None): break
 
-        # Log the best disjunction at this size.
-        rows.append({
-            "name": f"({' ∨ '.join(sorted(vocab[i] for i in selected))})",
-            "mi_bits": best_mi,
-            "size": len(selected),
-        })
+            selected.append(best_idx)
+            remaining.remove(best_idx)
+            best_mi = best_mi + best_gain
+            current_feat = best_feat
 
-    return pd.DataFrame(rows).sort_values('mi_bits', ascending=False).reset_index(drop=True)
+            # Log the best disjunction at this size.
+            rows.append({
+                "name": f"({' ∨ '.join(sorted(vocab[i] for i in selected))})",
+                "mi_bits": best_mi,
+                "size": len(selected),
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("mi_bits", ascending=False)
+        .drop_duplicates("name")
+        .reset_index(drop=True)
+    )
 
 def xor_coverage(language: pd.DataFrame, disjunctions: pd.DataFrame):
     '''For each feature (disjunction) and presence of negation v, compute if it verifies v ⊕ ¬v, and for how many predicates.'''
@@ -293,12 +298,12 @@ def xor_coverage(language: pd.DataFrame, disjunctions: pd.DataFrame):
     stats_df = stats_df[has_xor]
     return disjunctions.merge(stats_df, on="name", how="inner")
 
-def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy', min_purity: float = 1.0, min_coverage: float = 1.0, min_exclusive_rate: float = 1.0):
+def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy', min_purity: float = 1.0, min_coverage: float = 1.0, min_exclusive_rate: float = 1.0, greedy_top_k: int = 1):
     '''In a language, find a feature that behaves like a negation marker. Returns single best candidate.'''
     assert mode in ['greedy', 'full'], "Choose either \"greedy\" or \"full\" mode."
 
     if mode == 'greedy':
-        disjunctions = mi_maximizing_disjunctions_greedy(language, max_size=max_size)
+        disjunctions = mi_maximizing_disjunctions_greedy(language, max_size=max_size, top_k=greedy_top_k)
     elif mode == 'full':
         disjunctions = mi_maximizing_disjunctions(language, max_size=max_size)
 
@@ -321,7 +326,7 @@ def find_negation(language: pd.DataFrame, max_size=None, *, mode: str = 'greedy'
     return best["name"], best["¬v"]
 
 
-def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4):
+def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4, greedy_top_k: int = 1):
     '''Applies negation search using greedy and exhaustive approaches and compares them.'''
     # Check if there are any eligible runs at all
     if all(dp.get("config", {}).get("no_negation", False) or not dp.get("languages") for dp in datapoints):
@@ -337,6 +342,7 @@ def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_pur
         min_exclusive_rate=min_exclusive_rate,
         max_vocab_for_full=max_vocab_for_full,
         n_jobs=n_jobs,
+        greedy_top_k=greedy_top_k,
     )
     full_df = run_negation_search(
         datapoints,
@@ -370,7 +376,7 @@ def compare_greedy_exhaustive_negation_search(datapoints, *, max_size=4, min_pur
     return merged
 
 
-def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4):
+def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0, min_coverage=1.0, min_exclusive_rate=1.0, max_vocab_for_full=12, n_jobs=4, greedy_top_k: int = 1):
     '''
     Run a single negation-search mode across all datapoints and return a per-run summary.
     - mode="greedy": heuristic search over disjunctions
@@ -393,7 +399,7 @@ def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0
           f"(no_negation={skipped['no_negation']})\n")
 
     args = [
-        (run_idx, datapoint, best_language, mode, max_size, min_purity, min_coverage, min_exclusive_rate, max_vocab_for_full)
+        (run_idx, datapoint, best_language, mode, max_size, min_purity, min_coverage, min_exclusive_rate, max_vocab_for_full, greedy_top_k)
         for run_idx, (datapoint, best_language) in enumerate(eligible_runs)
     ]
     if n_jobs and n_jobs > 1:
@@ -416,6 +422,26 @@ def run_negation_search(datapoints, *, mode="greedy", max_size=4, min_purity=1.0
 #     # MI per single token (bits)
 #     mi = [{"token": tok, "mi_bits": mutual_info_score(y, X[:, j]) / np.log(2)} for j, tok in enumerate(vocab)]
 #     return pd.DataFrame(mi).sort_values("mi_bits", ascending=False).reset_index(drop=True)
+
+def normalize_negation_df(neg_df: pd.DataFrame, mode: str) -> pd.DataFrame:
+    """
+    Ensure negation analysis frames have mode-prefixed columns for plotting.
+    If prefixed columns already exist, returns a copy unchanged; otherwise
+    adds prefixed aliases for base columns when present.
+    """
+    prefix = f"{mode}_"
+    base_cols = [
+        "status", "max_purity", "max_coverage", "max_exclusive_rate", "n_pass", "candidates",
+        "best_candidate", "best_purity", "best_coverage", "score_mi", "score_xor", "score_purity"
+        ]
+    df = neg_df.copy()
+    # If at least one prefixed col exists, only fill missing prefixed cols.
+    for base in base_cols:
+        pref = f"{prefix}{base}"
+        if pref not in df.columns and base in df.columns:
+            df[pref] = df[base]
+    return df
+
 
 if __name__ == "__main__":
     path = input("Input language path or \"demo\" for demonstration: ")
