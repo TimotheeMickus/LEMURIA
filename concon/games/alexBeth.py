@@ -393,6 +393,8 @@ class AlexBeth(Game):
         # Use the dataset batch size but cap the number of batches to keep eval fast.
         batch_size = data_loader.batch_size
         max_batches = 128
+        # TODO: consider stratified eval with a fixed number of occurrences per predicate
+        # (e.g., 8 each) instead of random nb_batch sampling for more uniform coverage.
         nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
 
         # Epoch-level totals (we aggregate batch by batch, then normalize once at the end).

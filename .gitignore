@@ -15,3 +15,5 @@ runs/
 predicate_games.ipynb
 concon/eval/predicate/plots
 concon/eval/predicate/outputs
+concon/eval/predicate/verify_n_cm.txt
+concon/eval/predicate/verify_n-n_cm.txt
