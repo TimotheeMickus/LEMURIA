@@ -15,6 +15,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", nargs="?", help="experiment name under runs/")
     parser.add_argument("--negation-mode", choices=["greedy", "full", "combined"], default=None, help="which negation search to run (omit to skip)")
+    parser.add_argument("--plots", action="store_true", help="generate plots")
     args = parser.parse_args()
     experiment_path = args.experiment or input("Experiment name: ")
 
@@ -57,11 +58,16 @@ if __name__ == "__main__":
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print(f"Average vocab length: {vocab_sum/vocab_count}")
 
-    # Plot: epochs to max accuracy/performance
+    run_plots = args.plots or (args.negation_mode is None)
+
     cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
-    cm.plot_time_to_max_accuracy()
-    cm.plot_message_compression(group_by=("negation",))
-    cm.plot_message_compression(group_by=("hidden_size",))
+    if run_plots:
+        # Plot: epochs to max accuracy/performance
+        cm.plot_time_to_max_accuracy()
+        if args.negation_mode:
+            cm.plot_message_compression(group_by=("negation",))
+        cm.plot_message_compression(group_by=("properties",))
+        cm.plot_message_compression(group_by=("hidden_size",))
     # cm.plot_message_compression(group_by=("negation","properties"))
 
     # Borderline but feasible combinations:

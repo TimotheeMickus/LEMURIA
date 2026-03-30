@@ -70,9 +70,17 @@ class ComplexityMemory:
         else:
             xtick_labels = []
             for c in xticks:
-                props = plot_df.loc[plot_df["complexity"] == c, "properties"].dropna().unique()
-                props_str = props[0] if len(props) else "?"
-                xtick_labels.append(f"{c}: {props_str}")
+                props = (
+                    plot_df.loc[plot_df["complexity"] == c, "properties"]
+                    .dropna()
+                    .astype(int)
+                    .unique()
+                )
+                props_str = "/".join(str(p) for p in sorted(props)) if len(props) else "?"
+                if label_mode == "properties":
+                    xtick_labels.append(props_str)
+                else:
+                    xtick_labels.append(f"{c}: {props_str}")
         return xticks, xtick_labels
 
     def _plot_epochs_generic(self, plot_df, *, hue=None, filename="", label_mode="full", out_dir="plots"):
@@ -129,17 +137,12 @@ class ComplexityMemory:
                     label=label,
                 )
 
-        plt.title('epochs until convergence by number of predicates', fontweight='bold')
-        plt.xlabel('number of predicates')
+        plt.title('epochs until convergence by game complexity', fontweight='bold')
+        plt.xlabel('game complexity')
         plt.ylabel('epochs to max')
         plt.grid(True, alpha=0.3)
         plt.legend()
-        xticks = sorted(plot_df['complexity'].unique())
-        xtick_labels = []
-        for c in xticks:
-            props = plot_df.loc[plot_df["complexity"] == c, "properties"].dropna().unique()
-            props_str = props[0] if len(props) else "?"
-            xtick_labels.append(str(props_str))
+        xticks, xtick_labels = self._tick_labels(plot_df, label_mode=label_mode)
         plt.xscale("log", base=2)
         plt.xticks(xticks, xtick_labels, rotation=45, ha="right")
 
@@ -219,7 +222,7 @@ class ComplexityMemory:
             plot_df,
             hue="negation",
             filename=f"epoch_to_max_acc_by_negation_{self.name}.png",
-            label_mode="complexity",
+            label_mode="full",
             out_dir=out_dir,
         )
 
@@ -228,7 +231,7 @@ class ComplexityMemory:
             plot_df,
             hue="conjunction",
             filename=f"epoch_to_max_acc_by_conjunction_{self.name}.png",
-            label_mode="complexity",
+            label_mode="full",
             out_dir=out_dir,
         )
 
@@ -239,7 +242,7 @@ class ComplexityMemory:
             plot_df,
             hue="neg_conj",
             filename=f"epoch_to_max_acc_by_neg_conj_{self.name}.png",
-            label_mode="complexity",
+            label_mode="full",
             out_dir=out_dir,
         )
 
@@ -367,8 +370,25 @@ class ComplexityMemory:
             print(f"[WARN] No message length data found for {self.name}.")
             return
 
+        def _sort_key(key):
+            norm = []
+            for v in key:
+                if v is None:
+                    norm.append((1, ""))
+                else:
+                    try:
+                        norm.append((0, int(v)))
+                    except (TypeError, ValueError):
+                        norm.append((0, str(v)))
+            return tuple(norm)
+
+        ordered_keys = sorted(groups.keys(), key=_sort_key)
+        palette = sns.color_palette("viridis", n_colors=len(ordered_keys))
+        color_map = {k: palette[i] for i, k in enumerate(ordered_keys)}
+
         fig = plt.figure(figsize=(10, 6))
-        for key, curves in groups.items():
+        for key in ordered_keys:
+            curves = groups[key]
             curves = np.array(curves)
             mean_y = curves.mean(axis=0)
             median_y = np.median(curves, axis=0)
@@ -376,8 +396,8 @@ class ComplexityMemory:
             max_y = curves.max(axis=0)
 
             label = ", ".join(f"{k}={v}" for k, v in zip(group_by, key))
-            p = plt.plot(epochs, mean_y, label=f"{label} (mean)", alpha=0.9, linewidth=2)
-            color = p[0].get_color()
+            color = color_map.get(key)
+            plt.plot(epochs, mean_y, label=f"{label} (mean)", alpha=0.9, linewidth=2, color=color)
             plt.plot(epochs, median_y, color=color, linestyle=":", alpha=0.7, label=f"{label} (median)")
             plt.fill_between(epochs, min_y, max_y, color=color, alpha=0.15)
 
