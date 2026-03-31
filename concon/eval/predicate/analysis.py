@@ -14,7 +14,7 @@ if __name__ == "__main__":
     print(f"Available experiments: {os.listdir(runs_dir)}")
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", nargs="?", help="experiment name under runs/")
-    parser.add_argument("--negation-mode", choices=["greedy", "full", "combined"], default=None, help="which negation search to run (omit to skip)")
+    parser.add_argument("--negation", action="store_true", help="run negation analysis")
     parser.add_argument("--plots", action="store_true", help="generate plots")
     args = parser.parse_args()
     experiment_path = args.experiment or input("Experiment name: ")
@@ -58,8 +58,10 @@ if __name__ == "__main__":
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print(f"Average vocab length: {vocab_sum/vocab_count}")
 
-    run_plots = args.plots or (args.negation_mode is None)
+    if args.negation:
+        pass
 
+    run_plots = args.plots or (args.negation is None)
     cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
     if run_plots:
         # Plot: epochs to max accuracy/performance
@@ -69,58 +71,3 @@ if __name__ == "__main__":
         cm.plot_message_compression(group_by=("properties",))
         cm.plot_message_compression(group_by=("hidden_size",))
     # cm.plot_message_compression(group_by=("negation","properties"))
-
-    # Borderline but feasible combinations:
-    # max_size = None, max_vocab_for_full = 20,
-    # max_size = 4,    max_vocab_for_full = 80.
-    if args.negation_mode:
-        n_jobs = min(16, os.cpu_count() or 1)
-        mode = args.negation_mode
-        has_neg = any(not d.get("config", {}).get("no_negation", False) for d in datapoints_list)
-        if not has_neg:
-            print("No negations to analyse.")
-            sys.exit(0)
-        avg_vocab = (vocab_sum / vocab_count) if vocab_count else 0.0
-        max_size = 2 if avg_vocab >= 200 else 3 if avg_vocab >= 100 else 4
-        greedy_top_k = max(1, min(6, int(avg_vocab // 100) + 1))
-        max_vocab_for_full = 30 if avg_vocab <= 150 else 20
-        if mode == "combined":
-            neg_df = negation.compare_greedy_exhaustive_negation_search(
-                datapoints_list,
-                max_size=max_size,
-                min_purity=0.0,
-                min_coverage=0.0,
-                min_exclusive_rate=0.0,
-                max_vocab_for_full=max_vocab_for_full,
-                n_jobs=n_jobs,
-                greedy_top_k=greedy_top_k,
-            )
-        else:
-            neg_df = negation.run_negation_search(
-                datapoints_list,
-                mode=mode,
-                max_size=max_size,
-                min_purity=0.0,
-                min_coverage=0.0,
-                min_exclusive_rate=0.0,
-                max_vocab_for_full=max_vocab_for_full,
-                n_jobs=n_jobs,
-                greedy_top_k=greedy_top_k,
-            )
-        out_dir = pathlib.Path(__file__).resolve().parent / "outputs"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"negation_analysis_{mode}_{experiment_path}.csv"
-        neg_df.to_csv(out_path, index=False)
-        print(f"Saved negation analysis to: {out_path}")
-        if not neg_df.empty:
-            print(neg_df.head())
-            if mode == "combined":
-                cm.plot_negation_scores(neg_df=neg_df, mode="greedy")
-                cm.plot_negation_scores(neg_df=neg_df, mode="full")
-                cm.summarize_negation_by_complexity(neg_df=neg_df, mode="greedy", threshold=0.0)
-                cm.summarize_negation_by_complexity(neg_df=neg_df, mode="full", threshold=0.0)
-            else:
-                cm.plot_negation_scores(neg_df=neg_df, mode=mode)
-                cm.summarize_negation_by_complexity(neg_df=neg_df, mode=mode, threshold=0.0)
-    else:
-        print("Negation analysis skipped (no --negation-mode).")
