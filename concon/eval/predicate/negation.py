@@ -238,3 +238,446 @@ stats = pd.DataFrame(rows).sort_values(
 ).reset_index(drop=True)
 
 print(stats[["name_str", "xor_score", "precision", "recall", "homogeneity"]].to_string(index=False))
+
+# TODO what's below is generated for ad hoc usability
+
+import pathlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+def _compute_standalone_negation_stats(language: pd.DataFrame,
+                                       expansion_rounds: int = 3,
+                                       max_disjunction_size: int = None,
+                                       token_top_k: int = None,
+                                       show_inner_progress: bool = True,
+                                       max_active_per_round: int = None,
+                                       max_candidates_total: int = None) -> pd.DataFrame:
+    """
+    Reproduce the standalone metric computation from this file for one language dataframe.
+    """
+    assert "pred_str" in language.columns, "language must have a 'pred_str' column"
+    tokenized, vocab = _tokenize_messages(language)
+    X = _build_presence_matrix(tokenized, vocab)
+
+    features = {("tok", t): X[:, j].astype(bool) for j, t in enumerate(vocab)}
+
+    vs, is_neg = [], []
+    for s in language["pred_str"]:
+        b, n = parse_pred(s)
+        vs.append(b)
+        is_neg.append(n)
+    vs = np.array(vs, dtype=object)
+    is_neg = np.array(is_neg, dtype=bool)
+    v_types = sorted(set(vs))
+
+    v_pos_idx = []
+    v_neg_idx = []
+    for v in v_types:
+        v_mask = (vs == v)
+        v_pos_idx.append(np.flatnonzero(v_mask & (~is_neg)))
+        v_neg_idx.append(np.flatnonzero(v_mask & is_neg))
+    # Convert each token feature into predicate-level (pos_present, neg_present) profiles.
+    # This avoids rescanning message rows for each candidate disjunction.
+    token_profiles = {}
+    for feature_name, f in features.items():
+        pos_profile = np.array(
+            [np.any(f[pos_idx]) if len(pos_idx) else False for pos_idx in v_pos_idx],
+            dtype=bool,
+        )
+        neg_profile = np.array(
+            [np.any(f[neg_idx]) if len(neg_idx) else False for neg_idx in v_neg_idx],
+            dtype=bool,
+        )
+        token_profiles[feature_name] = (pos_profile, neg_profile)
+
+    # NAND prune on predicate-level profiles.
+    kept = {}
+    for feature_name, (pos_profile, neg_profile) in token_profiles.items():
+        nand_hits = np.count_nonzero((~pos_profile) | (~neg_profile))
+        if nand_hits == len(v_types):
+            kept[feature_name] = (pos_profile, neg_profile)
+
+    features = kept
+
+    def _xor_score_fast(pos_profile, neg_profile):
+        return float(np.mean(np.logical_xor(pos_profile, neg_profile))) if len(v_types) else 0.0
+
+    def _feature_row(name, pos_profile, neg_profile):
+        if name[0] == "tok":
+            name_str = name[1]
+        else:
+            name_str = "(" + " ∨ ".join(name[1]) + ")"
+        present_in_v = [v for v, present in zip(v_types, pos_profile) if present]
+        present_in_not_v = [f"¬{v}" for v, present in zip(v_types, neg_profile) if present]
+        pos_hits = int(np.count_nonzero(pos_profile))
+        neg_hits = int(np.count_nonzero(neg_profile))
+        any_hits = pos_hits + neg_hits
+        n_v = len(v_types)
+        precision = (neg_hits / any_hits) if any_hits else 0.0
+        recall = (neg_hits / n_v) if n_v else 0.0
+        homogeneity = max((pos_hits / n_v) if n_v else 0.0,
+                          (neg_hits / n_v) if n_v else 0.0)
+        f1_pr = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        return {
+            "name": name,
+            "name_str": name_str,
+            "v": present_in_v,
+            "¬v": present_in_not_v,
+            "xor_score": _xor_score_fast(pos_profile, neg_profile),
+            "precision": precision,
+            "recall": recall,
+            "homogeneity": homogeneity,
+            "f1_pr": f1_pr,
+        }
+
+    if token_top_k is not None:
+        token_top_k = max(1, int(token_top_k))
+        ranked_tokens = sorted(
+            [
+                (name, pos_profile, neg_profile, _xor_score_fast(pos_profile, neg_profile))
+                for name, (pos_profile, neg_profile) in features.items()
+                if name[0] == "tok"
+            ],
+            key=lambda x: x[3],
+            reverse=True,
+        )
+        ranked_tokens = ranked_tokens[:token_top_k]
+        features = {name: (pos_profile, neg_profile) for name, pos_profile, neg_profile, _ in ranked_tokens}
+    if max_active_per_round is not None:
+        max_active_per_round = max(1, int(max_active_per_round))
+    if max_candidates_total is not None:
+        max_candidates_total = max(1, int(max_candidates_total))
+
+    all_rows = {}
+    active = {}
+    seen_names = set()
+    for feature_name, (pos_profile, neg_profile) in features.items():
+        all_rows[feature_name] = _feature_row(feature_name, pos_profile, neg_profile)
+        active[feature_name] = (pos_profile, neg_profile)
+        seen_names.add(feature_name)
+
+    effective_rounds = int(expansion_rounds)
+    if max_disjunction_size is not None:
+        max_disjunction_size = max(1, int(max_disjunction_size))
+        effective_rounds = min(effective_rounds, max(0, max_disjunction_size - 1))
+    expansion_iter = range(effective_rounds)
+    if show_inner_progress:
+        expansion_iter = tqdm(
+            expansion_iter,
+            desc="  XOR expansion",
+            leave=False,
+        )
+    for _ in expansion_iter:
+        new_active = {}
+        hit_candidate_cap = False
+        for parent_name, (parent_pos_profile, parent_neg_profile) in active.items():
+            parent_score = all_rows[parent_name]["xor_score"]
+            if parent_name[0] == "tok":
+                parent_tokens = {parent_name[1]}
+            else:
+                parent_tokens = set(parent_name[1])
+            if max_disjunction_size is not None and len(parent_tokens) >= max_disjunction_size:
+                continue
+
+            for tok_name, (tok_pos_profile, tok_neg_profile) in features.items():
+                if tok_name[0] != "tok":
+                    continue
+                t = tok_name[1]
+                if t in parent_tokens:
+                    continue
+                child_tokens = tuple(sorted(parent_tokens | {t}))
+                if max_disjunction_size is not None and len(child_tokens) > max_disjunction_size:
+                    continue
+                child_name = ("or", child_tokens)
+                if child_name in seen_names:
+                    continue
+                child_pos_profile = parent_pos_profile | tok_pos_profile
+                child_neg_profile = parent_neg_profile | tok_neg_profile
+                child_score = _xor_score_fast(child_pos_profile, child_neg_profile)
+                if child_score + 1e-12 >= parent_score:
+                    if max_candidates_total is not None and len(all_rows) >= max_candidates_total:
+                        hit_candidate_cap = True
+                        break
+                    all_rows[child_name] = _feature_row(child_name, child_pos_profile, child_neg_profile)
+                    seen_names.add(child_name)
+                    new_active[child_name] = (child_pos_profile, child_neg_profile)
+            if hit_candidate_cap:
+                break
+        if hit_candidate_cap:
+            break
+        if max_active_per_round is not None and len(new_active) > max_active_per_round:
+            kept = sorted(
+                new_active.keys(),
+                key=lambda n: (
+                    all_rows[n]["xor_score"],
+                    all_rows[n]["homogeneity"],
+                    all_rows[n]["f1_pr"],
+                ),
+                reverse=True,
+            )[:max_active_per_round]
+            new_active = {k: new_active[k] for k in kept}
+        if not new_active:
+            break
+        active = new_active
+
+    rows = list(all_rows.values())
+
+    if not rows:
+        return pd.DataFrame(columns=["name", "name_str", "v", "¬v", "xor_score", "precision", "recall", "homogeneity", "f1_pr"])
+
+    return pd.DataFrame(rows).sort_values(
+        ["xor_score", "homogeneity", "f1_pr"],
+        ascending=False
+    ).reset_index(drop=True)
+
+def _infer_folder_name(datapoint: dict, run_idx: int, explicit_run_names=None):
+    if explicit_run_names is not None and run_idx < len(explicit_run_names):
+        v = explicit_run_names[run_idx]
+        if v is not None and str(v):
+            return str(v)
+
+    for k in ("run_name", "folder_name", "source_folder", "source_dir", "run_dir", "directory"):
+        if k in datapoint and datapoint[k]:
+            return pathlib.Path(str(datapoint[k])).name
+
+    cfg = datapoint.get("config", {})
+    if isinstance(cfg, dict):
+        for k in ("run_name", "folder_name", "run_dir", "save_dir", "log_dir"):
+            if cfg.get(k):
+                return pathlib.Path(str(cfg[k])).name
+        run_tag = cfg.get("run_tag")
+        run_id = cfg.get("run_id", cfg.get("run"))
+        props = cfg.get("properties")
+        if run_tag is not None and run_id is not None:
+            return f"props={props}__t={run_tag}__run={run_id}" if props is not None else f"{run_tag}__run={run_id}"
+        if run_tag is not None:
+            return str(run_tag)
+
+    return f"run_{run_idx}"
+
+def _compact_run_label(run_name: str, run_idx: int) -> str:
+    run_name = str(run_name)
+    m_props = re.search(r"props=(\d+)", run_name)
+    m_run = re.search(r"__run=(\d+)", run_name)
+    m_tag = re.search(r"__t=([0-9]{4}-[0-9]{2}-[0-9]{2})", run_name)
+    if m_props and m_run:
+        tag = f"-{m_tag.group(1)}" if m_tag else ""
+        return f"p{m_props.group(1)}-r{m_run.group(1)}{tag}"
+    if len(run_name) > 24:
+        return run_name[:24]
+    return run_name or f"run{run_idx}"
+
+def _search_limits_from_vocab(vocab_size: int, profile: str = "fast"):
+    """
+    Adaptive bounds for search complexity by vocabulary size and profile.
+    Returns (max_disjunction_size, token_top_k, max_active_per_round, max_candidates_total).
+    """
+    v = int(vocab_size)
+    p = str(profile).strip().lower()
+    if p == "slow":
+        # More permissive search, still bounded by structural caps.
+        if v >= 2000:
+            return 6, 48, 7000, 140000
+        if v >= 800:
+            return 7, 64, 10000, 220000
+        if v >= 300:
+            return 8, 80, 14000, 320000
+        if v >= 120:
+            return 10, 96, 20000, 450000
+        return 11, 120, 26000, 600000
+
+    # Fast baseline profile.
+    if v >= 1200:
+        return 2, 16, 1200, 12000
+    if v >= 400:
+        return 3, 16, 1600, 16000
+    if v >= 150:
+        return 4, 20, 2000, 22000
+    return 5, 24, 2600, 28000
+
+def _analyze_single_datapoint_for_export(run_idx: int,
+                                         datapoint: dict,
+                                         run_names,
+                                         expansion_rounds: int,
+                                         top_k: int,
+                                         show_inner_progress: bool,
+                                         bin_profile: str = "fast"):
+    cfg = datapoint.get("config", {}) if isinstance(datapoint, dict) else {}
+    folder_name = _infer_folder_name(datapoint, run_idx, explicit_run_names=run_names)
+    base_row = {
+        "run_idx": run_idx,
+        "run_name": folder_name,
+        "properties": cfg.get("properties"),
+        "hidden_size": cfg.get("hidden_size"),
+        "num_predicates_cfg": cfg.get("num_predicates"),
+        "no_negation": cfg.get("no_negation"),
+        "no_conjunction": cfg.get("no_conjunction"),
+    }
+
+    languages = datapoint.get("languages") if isinstance(datapoint, dict) else None
+    if not languages:
+        return [], {**base_row, "status": "missing_language"}
+
+    latest_lang = max(languages, key=lambda x: x.get("epoch_number", -1))
+    epoch_number = latest_lang.get("epoch_number", -1)
+    language = latest_lang.get("language")
+    if language is None or len(language) == 0:
+        return [], {**base_row, "epoch": epoch_number, "status": "empty_language"}
+    if "msg" not in language.columns or "pred_str" not in language.columns:
+        return [], {**base_row, "epoch": epoch_number, "status": "missing_msg_or_pred_str"}
+
+    vocab_size = len({t for msg in language["msg"] for t in str(msg).split() if t != "0"})
+    max_disjunction_size, token_top_k, max_active_per_round, max_candidates_total = _search_limits_from_vocab(
+        vocab_size,
+        profile=bin_profile,
+    )
+    try:
+        stats = _compute_standalone_negation_stats(
+            language,
+            expansion_rounds=expansion_rounds,
+            max_disjunction_size=max_disjunction_size,
+            token_top_k=token_top_k,
+            show_inner_progress=show_inner_progress,
+            max_active_per_round=max_active_per_round,
+            max_candidates_total=max_candidates_total,
+        )
+    except Exception as e:
+        return [], {**base_row, "epoch": epoch_number, "status": f"error: {e}"}
+
+    n_messages = len(language)
+    n_predicates = len({parse_pred(s)[0] for s in language["pred_str"]})
+    base_row = {
+        **base_row,
+        "epoch": epoch_number,
+        "n_messages": n_messages,
+        "n_predicates": n_predicates,
+        "vocab_size": vocab_size,
+        "max_disjunction_size": max_disjunction_size,
+        "token_top_k": token_top_k,
+        "max_active_per_round": max_active_per_round,
+        "max_candidates_total": max_candidates_total,
+        "bin_profile": bin_profile,
+    }
+
+    if stats.empty:
+        return [], {**base_row, "status": "no_candidates"}
+
+    analysis_rows = []
+    top_stats = stats.head(top_k).reset_index(drop=True)
+    for rank, row in enumerate(top_stats.to_dict(orient="records"), start=1):
+            analysis_rows.append({
+                **base_row,
+                "rank": rank,
+                "name_str": row["name_str"],
+                "xor_score": row["xor_score"],
+                "precision": row["precision"],
+                "recall": row["recall"],
+                "homogeneity": row["homogeneity"],
+                "f1_pr": row["f1_pr"],
+                "v": row["v"],
+                "¬v": row["¬v"],
+            })
+
+    best = top_stats.iloc[0].to_dict()
+    summary_row = {
+        **base_row,
+        "status": "ok",
+        "n_candidates_total": len(stats),
+        "name_str": best["name_str"],
+        "xor_score": best["xor_score"],
+        "precision": best["precision"],
+        "recall": best["recall"],
+        "homogeneity": best["homogeneity"],
+        "f1_pr": best["f1_pr"],
+        "v": best["v"],
+        "¬v": best["¬v"],
+    }
+    return analysis_rows, summary_row
+
+def export_negation_metrics_csvs(datapoints_list,
+                                 *,
+                                 top_k: int = 10,
+                                 out_dir: str = None,
+                                 experiment_name: str = "experiment",
+                                 run_names=None,
+                                 expansion_rounds: int = 3,
+                                 n_jobs: int = 1,
+                                 bin_profile: str = "fast"):
+    """
+    Compute standalone negation metrics for the latest language in each datapoint and export:
+    1) analysis CSV with top-k items per datapoint,
+    2) summary CSV with only the top item per datapoint.
+    Returns (analysis_df, summary_df, analysis_path, summary_path).
+    """
+    top_k = max(1, int(top_k))
+    n_jobs = min(4, max(1, int(n_jobs)))
+    out_dir_path = pathlib.Path(out_dir) if out_dir is not None else pathlib.Path(__file__).resolve().parent / "outputs"
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+
+    analysis_rows = []
+    summary_rows = []
+
+    datapoints_seq = list(datapoints_list)
+    total_runs = len(datapoints_seq)
+
+    if n_jobs == 1:
+        run_iter = tqdm(
+            enumerate(datapoints_seq),
+            total=total_runs,
+            desc="Negation analysis",
+        )
+        for run_idx, datapoint in run_iter:
+            run_iter.set_postfix_str(_infer_folder_name(datapoint, run_idx, explicit_run_names=run_names))
+            run_analysis_rows, run_summary = _analyze_single_datapoint_for_export(
+                run_idx,
+                datapoint,
+                run_names=run_names,
+                expansion_rounds=expansion_rounds,
+                top_k=top_k,
+                show_inner_progress=True,
+                bin_profile=bin_profile,
+            )
+            analysis_rows.extend(run_analysis_rows)
+            if run_summary is not None:
+                summary_rows.append(run_summary)
+    else:
+        progress = tqdm(total=total_runs, desc=f"Negation analysis ({n_jobs} jobs)")
+        with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+            futures = {
+                executor.submit(
+                    _analyze_single_datapoint_for_export,
+                    run_idx,
+                    datapoint,
+                    run_names,
+                    expansion_rounds,
+                    top_k,
+                    False,
+                    bin_profile,
+                ): run_idx
+                for run_idx, datapoint in enumerate(datapoints_seq)
+            }
+            for future in as_completed(futures):
+                run_analysis_rows, run_summary = future.result()
+                analysis_rows.extend(run_analysis_rows)
+                if run_summary is not None:
+                    summary_rows.append(run_summary)
+                    short_name = _compact_run_label(run_summary.get("run_name", ""), int(run_summary.get("run_idx", -1)))
+                    progress.set_postfix_str(short_name)
+                progress.update(1)
+        progress.close()
+
+    analysis_df = pd.DataFrame(analysis_rows).sort_values(
+        ["run_idx", "rank"], ascending=[True, True]
+    ).reset_index(drop=True) if analysis_rows else pd.DataFrame()
+    summary_df = pd.DataFrame(summary_rows).sort_values(
+        ["run_idx"], ascending=[True]
+    ).reset_index(drop=True) if summary_rows else pd.DataFrame()
+
+    analysis_path = out_dir_path / f"negation_analysis_topk_{experiment_name}.csv"
+    summary_path = out_dir_path / f"negation_summary_top1_{experiment_name}.csv"
+    analysis_df.to_csv(analysis_path, index=False)
+    summary_df.to_csv(summary_path, index=False)
+
+    print(f"Saved analysis CSV: {analysis_path}")
+    print(f"Saved summary CSV:  {summary_path}")
+    return analysis_df, summary_df, analysis_path, summary_path
