@@ -410,8 +410,9 @@ def _compute_standalone_negation_stats(language: pd.DataFrame,
                 new_active.keys(),
                 key=lambda n: (
                     all_rows[n]["xor_score"],
+                    all_rows[n]["precision"],
+                    all_rows[n]["recall"],
                     all_rows[n]["homogeneity"],
-                    all_rows[n]["f1_pr"],
                 ),
                 reverse=True,
             )[:max_active_per_round]
@@ -426,7 +427,7 @@ def _compute_standalone_negation_stats(language: pd.DataFrame,
         return pd.DataFrame(columns=["name", "name_str", "v", "¬v", "xor_score", "precision", "recall", "homogeneity", "f1_pr"])
 
     return pd.DataFrame(rows).sort_values(
-        ["xor_score", "homogeneity", "f1_pr"],
+        ["xor_score", "precision", "recall", "homogeneity"],
         ascending=False
     ).reset_index(drop=True)
 
