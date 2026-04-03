@@ -52,7 +52,7 @@ class AlexBeth(Game):
 
             parameters = askerRetriever.parameters()
         
-            assert (self._asker.alphabet_size == self._retriever.alphabet_size) # The asker and the retreiver have the exact same vocabulary.
+            assert (self._asker.alphabet_size == self._retriever.alphabet_size) # The asker and the retriever have the exact same vocabulary.
         else:
             self._asker = Asker.from_args(args)
             self._retriever = Retriever.from_args(args)
@@ -209,7 +209,7 @@ class AlexBeth(Game):
             wandb_run.log_artifact(artifact)
     
     # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
-    def _compute_truth_targets(self, batch, device):
+    def _compute_truth_targets(self, batch):
         """
         Returns a float tensor of shape (batch size,) where 1.0 denotes that the
         predicate holds for the candidate, and 0.0 otherwise.
@@ -254,7 +254,7 @@ class AlexBeth(Game):
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
         asker_outcome, retriever_outcome = self(batch)
-        truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device)
+        truth_targets = self._compute_truth_targets(batch)
 
         # Alex's part
         (asker_loss, asker_perf, asker_rewards) = self.compute_asker_loss(asker_outcome, retriever_outcome.scores, truth_targets)
@@ -448,11 +448,16 @@ class AlexBeth(Game):
             batch = data_loader.get_batch(size=batch_size, data_type='test')
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-            truth_targets = self._compute_truth_targets(batch, device=retriever_outcome.scores.device) # Shape: (batch, n_candidates)
+            truth_targets = self._compute_truth_targets(batch) # Shape: (batch, n_candidates)
 
             # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
             logits = retriever_outcome.scores # Shape: (batch, num_candidates)
             probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
+           
+            num_candidates = retriever_outcome.scores.shape[-1]
+            predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch * num_candidates)
+            failure = ((1.0 - truth_targets) * probs + truth_targets * (1.0 - probs)).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
+            data_loader.failure_based_distribution.update(predicate_idx, failure)
 
             # Scalar BCE averaged over the batch (used for logging only).
             loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()

@@ -3,6 +3,8 @@ import torch
 import itertools
 import random
 
+from multiprocessing import shared_memory
+
 try:
     from .dataset import SeqAsyncDataset # When loading this file from outside of its directory.
 except:
@@ -289,7 +291,7 @@ class FailureBasedDistribution:
     # nb_predicates: int
     # momentum_factor: float (∈ [0,1[)
     # smoothing_factor: float (> 0)
-    # from_shared_memory: (str, str) | None
+    # from_shared_memory: [int, tuple[str]] | None
     def __init__(self, nb_predicates, momentum_factor=0.99, smoothing_factor=1.0, from_shared_memory=None):
         self.momentum_factor = momentum_factor
 
@@ -300,14 +302,18 @@ class FailureBasedDistribution:
             self.counts_vector = np.full((nb_predicates,), smoothing_factor)
             self.failure_vector = self.counts_vector / 2
         else:
-            self.counts_vector_shm = shared_memory.SharedMemory(name=from_shared_memory[0])
+            _, names = from_shared_memory
+
+            self.counts_vector_shm = shared_memory.SharedMemory(name=names[0])
             self.counts_vector = np.ndarray((nb_predicates,), dtype=np.float64, buffer=self.counts_vector_shm.buf)
             
-            self.failure_vector_shm = shared_memory.SharedMemory(name=from_shared_memory[1])
+            self.failure_vector_shm = shared_memory.SharedMemory(name=names[1])
             self.failure_vector = np.ndarray((nb_predicates,), dtype=np.float64, buffer=self.failure_vector_shm.buf)
 
             self.shared_memory[0] = -1
-            self.shared_memory[1] = from_shared_memory
+            self.shared_memory[1] = names
+
+        self.info = {"nb_predicates": nb_predicates, "momentum_factor": momentum_factor, "smoothing_factor": smoothing_factor, "from_shared_memory": self.shared_memory}
 
     def to_shared_memory(self):
         status, names = self.shared_memory
@@ -316,16 +322,17 @@ class FailureBasedDistribution:
         self.counts_vector_shm = shared_memory.SharedMemory(create=True, size=self.counts_vector.size * self.counts_vector[0].nbytes)
         counts_vector = np.ndarray(self.counts_vector.shape, dtype=np.float64, buffer=self.counts_vector_shm.buf)
         counts_vector[:] = self.counts_vector
-        self.count_vectors = counts_vector
+        self.counts_vector = counts_vector
 
-        self.failure_vector_shm = shared_memory.SharedMemory(create=True, size=self.faiture_vector.size * self.failure_vector[0].nbytes)
+        self.failure_vector_shm = shared_memory.SharedMemory(create=True, size=self.failure_vector.size * self.failure_vector[0].nbytes)
         failure_vector = np.ndarray(self.failure_vector.shape, dtype=np.float64, buffer=self.failure_vector_shm.buf)
         failure_vector[:] = self.failure_vector
-        self.failure_vectors = failure_vector
+        self.failure_vector = failure_vector
 
         self.shared_memory[0] = 1
         self.shared_memory[1] = (self.counts_vector_shm.name, self.failure_vector_shm.name)
 
+    # Might be important to avoid memory leaks.
     def close(self):
         status, names = self.shared_memory
         if(status == -1):
@@ -338,7 +345,7 @@ class FailureBasedDistribution:
             self.failure_vector_shm.unlink()
 
     # predicate_idx: np.array[int]
-    # failure: np.array[bool]
+    # failure: np.array[float]
     def update(self, predicate_idx, failure):
         # Note: if the same predicate appeared multiple time, the momentum factor would still be applied only once
         self.counts_vector[predicate_idx] *= self.momentum_factor
@@ -441,11 +448,12 @@ class GraphConverter:
 
 # A dataset contains properties and (property) values, but also mappings (to indices) used to tensories objects.
 class Dataset(SeqAsyncDataset):
-    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=2, candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
+    def __init__(self, device='cpu', batch_size=128, properties="3-4", max_depth=2, min_depth=1, num_candidates=2, predicate_sampling='random', candidate_sampling='random', nontrivial_only=False, no_negation=False, no_conjunction=False, allow_indeterminate=False, overfit=False):
         self.device = device
         self.batch_size = batch_size
         self.allow_indeterminate = allow_indeterminate
         self.num_candidates = num_candidates
+        self.predicate_sampling = predicate_sampling
         self.candidate_sampling = candidate_sampling
     
         # Generates the properties and the values ("3-4" means a 3-valued property and a 4-valued one).
@@ -484,13 +492,26 @@ class Dataset(SeqAsyncDataset):
         # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
         
-        # A momentum factor of 0.99 means that each cell of the failure vector contains a statistics over 100 examples.
-        #self.failure_based_distribution = FailureBasedDistribution(len(self.predicates), momentum_factor=0.99, smoothing_factor=10.0)
-        # TODO self.failure_based_distribution.shared_memory is a resource that the dataset workers need in order to reconstruct the FailureBasedDistribution via a new static method workerUpdateResources.
+        # (THIS IS INCORRECT) A momentum factor of 0.99 means that each cell of the failure vector contains a statistics over 100 examples.
+        self.failure_based_distribution = FailureBasedDistribution(len(self.predicates), momentum_factor=0.99, smoothing_factor=1.0)
         
-        super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter);
+        super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter, failure_based_distribution_info=self.failure_based_distribution.info);
         #super().__init__();
-    
+   
+    def turnAsynchronous(self, *args, **kwargs):
+        self.failure_based_distribution.to_shared_memory()
+        
+        super(Dataset, self).turnAsynchronous(*args, **kwargs) 
+
+    def _close(self):
+        self.failure_based_distribution.close()
+
+    # failure_based_distribution_shared_memory: [1, (str, str)]
+    @staticmethod
+    def _additional_resources(failure_based_distribution_info, **kwargs): 
+        #print(failure_based_distribution_info) # DEBUG
+        return {"failure_based_distribution": FailureBasedDistribution(**failure_based_distribution_info)}
+
     # Builds a fixed pool of instances. (Used for overfitting tests.)
     def init_overfit_pool(self, size=100):
         instances = [] # list[(int, Predicate, list[Candidate], list[int])]
@@ -500,6 +521,8 @@ class Dataset(SeqAsyncDataset):
             if(self.candidate_sampling == 'balanced'):
                 candidates, truths = self.generateCandidatesBalanced(predicate, self.num_candidates, self.allow_indeterminate)
             else:
+                assert (self.candidate_sampling == 'random')
+
                 candidates, truths = self.generateCandidates(predicate, self.num_candidates, self.allow_indeterminate)
 
             instances.append((pred_idx, predicate, candidates, truths))
@@ -616,7 +639,7 @@ class Dataset(SeqAsyncDataset):
 
     # Generates a batch.
     # Outputs a Batch with candidate list(s) and aligned truth labels.
-    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, num_candidates=None, candidate_sampling=None, device=None, pin_memory=False, **kwargs):
+    def get_batch(self, size=None, data_type='any', allow_indeterminate=None, num_candidates=None, predicate_sampling=None, candidate_sampling=None, device=None, pin_memory=False, **kwargs):
         """Generates a batch as a Batch object.
         size: int, the size of the batch.
         data_type: string ("train", "test" or "any"), indicates from what part the candidates are selected.
@@ -625,9 +648,12 @@ class Dataset(SeqAsyncDataset):
         if(size is None): size = self.batch_size
         if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
         if(num_candidates is None): num_candidates = self.num_candidates
+        if(predicate_sampling is None): predicate_sampling = self.predicate_sampling
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
-        batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, candidate_sampling=candidate_sampling, **kwargs);
+        #print(self.failure_based_distribution.failure_vector / self.failure_based_distribution.counts_vector) # DEBUG
+        
+        batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, predicate_sampling=predicate_sampling, candidate_sampling=candidate_sampling, **kwargs);
 
         batch.predicate = [self.predicates[pred_idx] for pred_idx in batch.predicate_idx]
         
@@ -642,10 +668,12 @@ class Dataset(SeqAsyncDataset):
 
     @staticmethod
     def _generate_batch(
-        size, data_type, allow_indeterminate, num_candidates, candidate_sampling, # request arguments
-        overfit_pool, predicates, properties, graph_converter, # resource arguments
+        size, data_type, allow_indeterminate, num_candidates, predicate_sampling, candidate_sampling, # request arguments
+        overfit_pool, predicates, properties, graph_converter, failure_based_distribution, # resource arguments
         **kwargs
     ):
+        #print(failure_based_distribution.failure_vector / failure_based_distribution.counts_vector) # DEBUG
+        
         batch = []
         for _ in range(size):
             if(overfit_pool is not None): # Specific procedure for overfitting mode.
@@ -654,13 +682,15 @@ class Dataset(SeqAsyncDataset):
                 continue
 
             # Selects a predicate.
-            pred_idx, predicate = Dataset._selectPredicate(predicates)
+            pred_idx, predicate = Dataset._selectPredicate(predicates, predicate_sampling, failure_based_distribution)
 
             # Samples `num_candidates` candidates.
             if(candidate_sampling == 'balanced'):
                 # At some point, it might be interesting to test against balanced distributions TMOTHÉE: What is the point of this comment?
                 candidates, truths = Dataset._generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, properties)
             else:
+                assert (self.candidate_sampling == 'random')
+
                 candidates, truths = Dataset._generateCandidates(predicate, num_candidates, allow_indeterminate, properties)
 
             batch.append((pred_idx, predicate, candidates, truths))
@@ -671,15 +701,25 @@ class Dataset(SeqAsyncDataset):
 
         return Batch(size=size, predicate=predicate, predicate_idx=predicate_idx, candidate=candidates, node_idx=node_idx, edge_idx=edge_idx, graph_sizes=graph_sizes, candidate_truth=truths)
 
+    # predicate_sampling: str
     # Outputs a (int, Predicate).
-    def selectPredicate(self):
-        return self._selectPredicate(self.predicates)
+    def selectPredicate(self, predicate_sampling):
+        return self._selectPredicate(self.predicates, predicate_sampling, self.failure_based_distribution)
 
     # predicates: list[Predicate]
+    # predicate_sampling: str
+    # failure_based_distribution: FailureBasedDistribution
     @staticmethod
-    def _selectPredicate(predicates):
-        idx = np.random.randint(0, len(predicates))
-        return (idx, predicates[idx])
+    def _selectPredicate(predicates, predicate_sampling, failure_based_distribution):
+        if(predicate_sampling == "random"):
+            idx = np.random.randint(0, len(predicates))
+            return (idx, predicates[idx])
+        
+        if(predicate_sampling == "difficulty"):
+            idx = failure_based_distribution.sample()
+            return (idx, predicates[idx])
+
+        assert False, f"Predicate sampling strategy unknown: {predicate_sampling}."
 
     # candidate: Candidate
     # allow_indeterminate
@@ -787,7 +827,7 @@ class Dataset(SeqAsyncDataset):
 
 
 def get_data_loader(args):
-    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, min_depth=args.min_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
+    dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, min_depth=args.min_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, predicate_sampling=args.predicate_sampling, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
     dataset.print_info()
 
     return dataset
@@ -812,7 +852,7 @@ if(__name__ == "__main__"):
     for allow_indeterminate in [True, False]:
         counts = dict() # dict[int, int]
         for _ in range(nb):
-            _, predicate = dataset.selectPredicate()
+            _, predicate = dataset.selectPredicate(predicate_sampling='random')
             candidate = dataset.generateCandidate(allow_indeterminate=allow_indeterminate)
             truth_value = predicate.check(candidate)
             counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1

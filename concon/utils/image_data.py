@@ -175,6 +175,8 @@ class FailureBasedDistribution():
         self.failure_matrix = np.full((nb_categories, nb_categories), (0.5 * smoothing_factor))
         np.fill_diagonal(self.failure_matrix, 0.0)
 
+    # target_category_idx, distractor_category_idx: list[int]
+    # failure: list[float]
     def update(self, target_category_idx, distractor_category_idx, failure):
         # Note: if the same pair (target, distractor) appears multiple time, the momentum factor would still be applied only once
         self.counts_matrix[target_category_idx, distractor_category_idx] *= self.momentum_factor
@@ -465,7 +467,7 @@ class SimpleDataset(Dataset):
             categories[img.category].append(img)
         self.categories = {k: np.array(v) for (k, v) in categories.items()} # dict[tuple[int], np.array[DataPoint]]
 
-        # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
+        # (THIS IS INCORRECT) A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
         # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
         self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
 
@@ -623,7 +625,7 @@ class PairDataset(Dataset):
         self.training_categories_idx = np.array([self.category_idx(category) for category in self.training_categories])
         self.evaluation_categories_idx = np.array([self.category_idx(category) for category in self.evaluation_categories])
         
-        # A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
+        # (THIS IS INCORRECT) A momentum factor of 0.99 means that each cell of the failure matrix contains a statistics over 100 examples.
         # In our setting, each evaluation phase updates each cell 10 times, so the matrix is renewed every 10 epochs.
         self.failure_based_distribution = FailureBasedDistribution(self.nb_categories, momentum_factor=0.99, smoothing_factor=10.0)
 

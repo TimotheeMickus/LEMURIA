@@ -13,6 +13,7 @@ class SeqAsyncDataset:
         self.asynchronous = False
 
         self._resources = resources
+
         self.close = self._synchronous_close
         self._get_batch = self._synchronous_get_batch
 
@@ -29,7 +30,7 @@ class SeqAsyncDataset:
         self.result_queue = multiprocessing.Queue() # multiprocessing.Queue[(tuple[(str, ?)], ?)]
         self.results = dict() # dict[tuple[(str, ?)], queue.SimpleQueue[?]]
         
-        self.workers = [multiprocessing.Process(target=self._worker, args=(self.task_queue, self.result_queue, self.__class__._generate_batch), kwargs=self._resources) for _ in range(nb_workers)]
+        self.workers = [multiprocessing.Process(target=self._worker, args=(self.task_queue, self.result_queue, self.__class__._generate_batch, self.__class__._additional_resources), kwargs=self._resources) for _ in range(nb_workers)]
         for worker in self.workers: worker.start()
 
         self.close = self._asynchronous_close
@@ -41,7 +42,7 @@ class SeqAsyncDataset:
         raise NotImplementedError("Method `_generate_batch` must be overriden.")
     
     def _synchronous_close(self):
-        pass
+        self._close()
     
     def _asynchronous_close(self):
         # Requests the workers to stop.
@@ -49,6 +50,8 @@ class SeqAsyncDataset:
 
         # Waits for the workers to stop.
         for worker in self.workers: worker.join()
+
+        self._close()
 
     # RMK: This method is replaced during initialisation.
     def _get_batch(self, **kwargs):
@@ -61,9 +64,11 @@ class SeqAsyncDataset:
     # result_queue = multiprocessing.Queue[(tuple[(str, ?)], ?)]
     # `resources` describes the structures that the worker needs to work.
     @staticmethod
-    def _worker(task_queue, result_queue, fn, **resources):
+    def _worker(task_queue, result_queue, fn, gen_fn, **resources):
         print("Dataset worker started.")
         result_queue.cancel_join_thread() # So that the worker can really stop even if there is data in the queue.
+
+        resources.update(gen_fn(**resources))
         
         while(True):
             request = task_queue.get() # tuple[(str, ?)]; blocking
