@@ -12,7 +12,7 @@ from .misc import compute_entropy
 def _sanitize_run_part(value):
     text = str(value).strip().replace(" ", "")
     allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.="
-    return "".join(c if c in allowed else "-" for c in text)
+    return "".join((c if(c in allowed) else "-") for c in text)
 
 
 def build_run_name(args, run_index):
@@ -20,8 +20,18 @@ def build_run_name(args, run_index):
         f"props={_sanitize_run_part(args.properties)}",
         f"d={args.min_depth}-{args.max_depth}",
         f"cand={args.num_candidates}",
-        f"enc={_sanitize_run_part(args.candidate_encoder)}",
         f"cs={_sanitize_run_part(args.candidate_sampling)}",
+        f"enc={_sanitize_run_part(args.candidate_encoder)}",
+        f"asize={args.base_alphabet_size}",
+        f"mlen={args.max_len}",
+        f"lr={args.learning_rate}",
+        f"ba={args.beta_asker}",
+        f"br={args.beta_retriever}",
+        f"lenpen={args.len_penalty}",
+        f"vocpen={args.voc_penalty}",
+        f"spe={args.steps_per_epoch}",
+        f"bs={args.batch_size}",
+        f"gc={args.grad_clipping}",
     ]
     if args.candidate_encoder == "graph_transformer":
         parts.extend(
