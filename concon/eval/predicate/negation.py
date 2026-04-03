@@ -330,96 +330,13 @@ def _compute_standalone_negation_stats(language: pd.DataFrame,
             "f1_pr": f1_pr,
         }
 
-    if token_top_k is not None:
-        token_top_k = max(1, int(token_top_k))
-        ranked_tokens = sorted(
-            [
-                (name, pos_profile, neg_profile, _xor_score_fast(pos_profile, neg_profile))
-                for name, (pos_profile, neg_profile) in features.items()
-                if name[0] == "tok"
-            ],
-            key=lambda x: x[3],
-            reverse=True,
-        )
-        ranked_tokens = ranked_tokens[:token_top_k]
-        features = {name: (pos_profile, neg_profile) for name, pos_profile, neg_profile, _ in ranked_tokens}
-    if max_active_per_round is not None:
-        max_active_per_round = max(1, int(max_active_per_round))
-    if max_candidates_total is not None:
-        max_candidates_total = max(1, int(max_candidates_total))
-
-    all_rows = {}
-    active = {}
-    seen_names = set()
-    for feature_name, (pos_profile, neg_profile) in features.items():
-        all_rows[feature_name] = _feature_row(feature_name, pos_profile, neg_profile)
-        active[feature_name] = (pos_profile, neg_profile)
-        seen_names.add(feature_name)
-
-    effective_rounds = int(expansion_rounds)
-    if max_disjunction_size is not None:
-        max_disjunction_size = max(1, int(max_disjunction_size))
-        effective_rounds = min(effective_rounds, max(0, max_disjunction_size - 1))
-    expansion_iter = range(effective_rounds)
-    if show_inner_progress:
-        expansion_iter = tqdm(
-            expansion_iter,
-            desc="  XOR expansion",
-            leave=False,
-        )
-    for _ in expansion_iter:
-        new_active = {}
-        hit_candidate_cap = False
-        for parent_name, (parent_pos_profile, parent_neg_profile) in active.items():
-            parent_score = all_rows[parent_name]["xor_score"]
-            if parent_name[0] == "tok":
-                parent_tokens = {parent_name[1]}
-            else:
-                parent_tokens = set(parent_name[1])
-            if max_disjunction_size is not None and len(parent_tokens) >= max_disjunction_size:
-                continue
-
-            for tok_name, (tok_pos_profile, tok_neg_profile) in features.items():
-                if tok_name[0] != "tok":
-                    continue
-                t = tok_name[1]
-                if t in parent_tokens:
-                    continue
-                child_tokens = tuple(sorted(parent_tokens | {t}))
-                if max_disjunction_size is not None and len(child_tokens) > max_disjunction_size:
-                    continue
-                child_name = ("or", child_tokens)
-                if child_name in seen_names:
-                    continue
-                child_pos_profile = parent_pos_profile | tok_pos_profile
-                child_neg_profile = parent_neg_profile | tok_neg_profile
-                child_score = _xor_score_fast(child_pos_profile, child_neg_profile)
-                if child_score + 1e-12 >= parent_score:
-                    if max_candidates_total is not None and len(all_rows) >= max_candidates_total:
-                        hit_candidate_cap = True
-                        break
-                    all_rows[child_name] = _feature_row(child_name, child_pos_profile, child_neg_profile)
-                    seen_names.add(child_name)
-                    new_active[child_name] = (child_pos_profile, child_neg_profile)
-            if hit_candidate_cap:
-                break
-        if hit_candidate_cap:
-            break
-        if max_active_per_round is not None and len(new_active) > max_active_per_round:
-            kept = sorted(
-                new_active.keys(),
-                key=lambda n: (
-                    all_rows[n]["xor_score"],
-                    all_rows[n]["precision"],
-                    all_rows[n]["recall"],
-                    all_rows[n]["homogeneity"],
-                ),
-                reverse=True,
-            )[:max_active_per_round]
-            new_active = {k: new_active[k] for k in kept}
-        if not new_active:
-            break
-        active = new_active
+    # Single-symbol mode: evaluate only token features, no disjunction expansion.
+    # Keep compatibility with the function signature by ignoring expansion/search caps.
+    all_rows = {
+        feature_name: _feature_row(feature_name, pos_profile, neg_profile)
+        for feature_name, (pos_profile, neg_profile) in features.items()
+        if feature_name[0] == "tok"
+    }
 
     rows = list(all_rows.values())
 
@@ -502,7 +419,7 @@ def _analyze_single_datapoint_for_export(run_idx: int,
                                          expansion_rounds: int,
                                          top_k: int,
                                          show_inner_progress: bool,
-                                         bin_profile: str = "fast"):
+                                         bin_profile: str = "single_symbol"):
     cfg = datapoint.get("config", {}) if isinstance(datapoint, dict) else {}
     folder_name = _infer_folder_name(datapoint, run_idx, explicit_run_names=run_names)
     base_row = {
@@ -528,19 +445,15 @@ def _analyze_single_datapoint_for_export(run_idx: int,
         return [], {**base_row, "epoch": epoch_number, "status": "missing_msg_or_pred_str"}
 
     vocab_size = len({t for msg in language["msg"] for t in str(msg).split() if t != "0"})
-    max_disjunction_size, token_top_k, max_active_per_round, max_candidates_total = _search_limits_from_vocab(
-        vocab_size,
-        profile=bin_profile,
-    )
     try:
         stats = _compute_standalone_negation_stats(
             language,
-            expansion_rounds=expansion_rounds,
-            max_disjunction_size=max_disjunction_size,
-            token_top_k=token_top_k,
+            expansion_rounds=0,
+            max_disjunction_size=1,
+            token_top_k=None,
             show_inner_progress=show_inner_progress,
-            max_active_per_round=max_active_per_round,
-            max_candidates_total=max_candidates_total,
+            max_active_per_round=None,
+            max_candidates_total=None,
         )
     except Exception as e:
         return [], {**base_row, "epoch": epoch_number, "status": f"error: {e}"}
@@ -553,11 +466,12 @@ def _analyze_single_datapoint_for_export(run_idx: int,
         "n_messages": n_messages,
         "n_predicates": n_predicates,
         "vocab_size": vocab_size,
-        "max_disjunction_size": max_disjunction_size,
-        "token_top_k": token_top_k,
-        "max_active_per_round": max_active_per_round,
-        "max_candidates_total": max_candidates_total,
-        "bin_profile": bin_profile,
+        "candidate_mode": "single_symbol",
+        "max_disjunction_size": 1,
+        "token_top_k": None,
+        "max_active_per_round": None,
+        "max_candidates_total": None,
+        "bin_profile": "single_symbol",
     }
 
     if stats.empty:
@@ -603,11 +517,12 @@ def export_negation_metrics_csvs(datapoints_list,
                                  run_names=None,
                                  expansion_rounds: int = 3,
                                  n_jobs: int = 1,
-                                 bin_profile: str = "fast"):
+                                 bin_profile: str = "single_symbol"):
     """
     Compute standalone negation metrics for the latest language in each datapoint and export:
     1) analysis CSV with top-k items per datapoint,
     2) summary CSV with only the top item per datapoint.
+    Candidates are restricted to single vocabulary symbols (no disjunction expansion).
     Returns (analysis_df, summary_df, analysis_path, summary_path).
     """
     top_k = max(1, int(top_k))

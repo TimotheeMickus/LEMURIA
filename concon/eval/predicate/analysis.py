@@ -70,10 +70,6 @@ if __name__ == "__main__":
 
     analysis_df = None
     summary_df = None
-    analysis_df_fast = None
-    summary_df_fast = None
-    analysis_df_slow = None
-    summary_df_slow = None
     if args.negation:
         negation_datapoints = [
             d for d in datapoints_list
@@ -82,56 +78,27 @@ if __name__ == "__main__":
         print(f"Negation-enabled runs: {len(negation_datapoints)}/{len(datapoints_list)}")
         n_jobs = min(4, max(1, int(args.n_jobs)))
         print(f"Negation n_jobs: {n_jobs} (cap=4)")
-        print("Running negation export profile: fast")
-        analysis_df_fast, summary_df_fast, analysis_path_fast, summary_path_fast = negation.export_negation_metrics_csvs(
+        print("Running negation export (single-symbol mode)")
+        analysis_df, summary_df, analysis_path, summary_path = negation.export_negation_metrics_csvs(
             negation_datapoints,
             top_k=5,
             out_dir=cache_dir,
-            experiment_name=f"{experiment_path}_fast",
-            expansion_rounds=4,
+            experiment_name=experiment_path,
+            expansion_rounds=0,
             n_jobs=n_jobs,
-            bin_profile="fast",
+            bin_profile="single_symbol",
         )
-        print(f"Saved negation top-k analysis to: {analysis_path_fast}")
-        print(f"Saved negation top-1 summary to: {summary_path_fast}")
-        print(f"Rows: analysis={len(analysis_df_fast)}, summary={len(summary_df_fast)}")
+        print(f"Saved negation top-k analysis to: {analysis_path}")
+        print(f"Saved negation top-1 summary to: {summary_path}")
+        print(f"Rows: analysis={len(analysis_df)}, summary={len(summary_df)}")
 
         if args.plots:
             out_dir = pathlib.Path(__file__).resolve().parent / "plots"
-            cm_fast = plots.ComplexityMemory(datapoints_list, name=f"{experiment_path}_fast")
-            cm_fast.plot_negation_metrics_by_complexity(summary_df_fast, out_dir=out_dir)
-            cm_fast.plot_negation_metric_slopes(summary_df_fast, profile_tag="fast", out_dir=out_dir)
-            cm_fast.plot_topsim_vs_negation(summary_df_fast, profile_tag="fast", out_dir=out_dir)
-            cm_fast.plot_topsim_interaction_xor(summary_df_fast, profile_tag="fast", out_dir=out_dir)
-
-        print("Running negation export profile: slow")
-        analysis_df_slow, summary_df_slow, analysis_path_slow, summary_path_slow = negation.export_negation_metrics_csvs(
-            negation_datapoints,
-            top_k=5,
-            out_dir=cache_dir,
-            experiment_name=f"{experiment_path}_slow",
-            expansion_rounds=10,
-            n_jobs=n_jobs,
-            bin_profile="slow",
-        )
-        print(f"Saved negation top-k analysis to: {analysis_path_slow}")
-        print(f"Saved negation top-1 summary to: {summary_path_slow}")
-        print(f"Rows: analysis={len(analysis_df_slow)}, summary={len(summary_df_slow)}")
-
-        if args.plots:
-            out_dir = pathlib.Path(__file__).resolve().parent / "plots"
-            cm_slow = plots.ComplexityMemory(datapoints_list, name=f"{experiment_path}_slow")
-            cm_slow.plot_negation_metrics_by_complexity(summary_df_slow, out_dir=out_dir)
-            cm_slow.plot_negation_metric_slopes(summary_df_slow, profile_tag="slow", out_dir=out_dir)
-            cm_slow.plot_topsim_vs_negation(summary_df_slow, profile_tag="slow", out_dir=out_dir)
-            cm_slow.plot_topsim_interaction_xor(summary_df_slow, profile_tag="slow", out_dir=out_dir)
-
-            cm_cmp = plots.ComplexityMemory(datapoints_list, name=experiment_path)
-            cm_cmp.plot_negation_profiles_comparison(summary_df_fast, summary_df_slow, out_dir=out_dir)
-            cm_cmp.plot_candidate_count_vs_score_gain(summary_df_fast, summary_df_slow, out_dir=out_dir)
-
-        analysis_df = analysis_df_fast
-        summary_df = summary_df_fast
+            cm_neg = plots.ComplexityMemory(datapoints_list, name=experiment_path)
+            cm_neg.plot_negation_metrics_by_complexity(summary_df, out_dir=out_dir)
+            cm_neg.plot_negation_metric_slopes(summary_df, profile_tag="single_symbol", out_dir=out_dir)
+            cm_neg.plot_topsim_vs_negation(summary_df, profile_tag="single_symbol", out_dir=out_dir)
+            cm_neg.plot_topsim_interaction_xor(summary_df, profile_tag="single_symbol", out_dir=out_dir)
 
     if args.plots:
         cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
@@ -140,39 +107,17 @@ if __name__ == "__main__":
         cm.plot_requested_suite(neg_df=None, out_dir=out_dir)
 
         if not args.negation:
-            fast_summary = cache_dir / f"negation_summary_top1_{experiment_path}_fast.csv"
-            slow_summary = cache_dir / f"negation_summary_top1_{experiment_path}_slow.csv"
-            fast_df = None
-            slow_df = None
-            if fast_summary.is_file():
+            summary_csv = cache_dir / f"negation_summary_top1_{experiment_path}.csv"
+            if summary_csv.is_file():
                 try:
-                    fast_df = pd.read_csv(fast_summary)
-                    print(f"Loaded existing negation summary for plots: {fast_summary}")
-                    cm_fast = plots.ComplexityMemory(datapoints_list, name=f"{experiment_path}_fast")
-                    cm_fast.plot_negation_metrics_by_complexity(fast_df, out_dir=out_dir)
-                    cm_fast.plot_negation_metric_slopes(fast_df, profile_tag="fast", out_dir=out_dir)
-                    cm_fast.plot_topsim_vs_negation(fast_df, profile_tag="fast", out_dir=out_dir)
-                    cm_fast.plot_topsim_interaction_xor(fast_df, profile_tag="fast", out_dir=out_dir)
+                    cached_df = pd.read_csv(summary_csv)
+                    print(f"Loaded existing negation summary for plots: {summary_csv}")
+                    cm_neg = plots.ComplexityMemory(datapoints_list, name=experiment_path)
+                    cm_neg.plot_negation_metrics_by_complexity(cached_df, out_dir=out_dir)
+                    cm_neg.plot_negation_metric_slopes(cached_df, profile_tag="single_symbol", out_dir=out_dir)
+                    cm_neg.plot_topsim_vs_negation(cached_df, profile_tag="single_symbol", out_dir=out_dir)
+                    cm_neg.plot_topsim_interaction_xor(cached_df, profile_tag="single_symbol", out_dir=out_dir)
                 except Exception as e:
-                    print(f"[WARN] Failed to load cached fast negation summary ({e}).")
+                    print(f"[WARN] Failed to load cached negation summary ({e}).")
             else:
-                print(f"[INFO] No cached fast negation summary found at {fast_summary}.")
-
-            if slow_summary.is_file():
-                try:
-                    slow_df = pd.read_csv(slow_summary)
-                    print(f"Loaded existing negation summary for plots: {slow_summary}")
-                    cm_slow = plots.ComplexityMemory(datapoints_list, name=f"{experiment_path}_slow")
-                    cm_slow.plot_negation_metrics_by_complexity(slow_df, out_dir=out_dir)
-                    cm_slow.plot_negation_metric_slopes(slow_df, profile_tag="slow", out_dir=out_dir)
-                    cm_slow.plot_topsim_vs_negation(slow_df, profile_tag="slow", out_dir=out_dir)
-                    cm_slow.plot_topsim_interaction_xor(slow_df, profile_tag="slow", out_dir=out_dir)
-                except Exception as e:
-                    print(f"[WARN] Failed to load cached slow negation summary ({e}).")
-            else:
-                print(f"[INFO] No cached slow negation summary found at {slow_summary}.")
-
-            if fast_df is not None and slow_df is not None:
-                cm_cmp = plots.ComplexityMemory(datapoints_list, name=experiment_path)
-                cm_cmp.plot_negation_profiles_comparison(fast_df, slow_df, out_dir=out_dir)
-                cm_cmp.plot_candidate_count_vs_score_gain(fast_df, slow_df, out_dir=out_dir)
+                print(f"[INFO] No cached negation summary found at {summary_csv}.")
