@@ -454,19 +454,20 @@ class AlexBeth(Game):
             logits = retriever_outcome.scores # Shape: (batch, num_candidates)
             probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
            
-            num_candidates = retriever_outcome.scores.shape[-1]
-            predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch * num_candidates)
-            failure = ((1.0 - truth_targets) * probs + truth_targets * (1.0 - probs)).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
-            data_loader.failure_based_distribution.update(predicate_idx, failure)
-
             # Scalar BCE averaged over the batch (used for logging only).
             loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
             # Accuracy is the thresholded probability vs. the binary target.
             preds = (probs >= 0.5).float() # Shape: (batch, num_candidates)
             accuracy = (preds == truth_targets).float().mean().item() # per candidate (not predicate)
             # `perf` measures how much probability mass Beth assigns to the correct truth value.
-            correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs)
+            correct_prob = torch.where((truth_targets > 0.5), probs, (1.0 - probs)) # Shape: (batch, num_candidates)
             perf = correct_prob.mean().item()
+
+            # Updates the failure-based distribution.
+            num_candidates = retriever_outcome.scores.shape[-1]
+            predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch * num_candidates)
+            failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
+            data_loader.failure_based_distribution.update(predicate_idx, failure)
 
             # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions. TODO Is this really useful?
             entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item() # TODO Instead of adding 1e-8 factors, use something like torch.where((a != 0), (a * b), 0.).
