@@ -20,6 +20,7 @@ def build_run_name(args, run_index):
         f"props={_sanitize_run_part(args.properties)}",
         f"d={args.min_depth}-{args.max_depth}",
         f"cand={args.num_candidates}",
+        f"ps={_sanitize_run_part(args.predicate_sampling)}",
         f"cs={_sanitize_run_part(args.candidate_sampling)}",
         f"enc={_sanitize_run_part(args.candidate_encoder)}",
         f"asize={args.base_alphabet_size}",

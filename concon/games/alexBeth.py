@@ -445,7 +445,7 @@ class AlexBeth(Game):
         for _ in iterator:
             self.start_episode(train_episode=False)
             
-            batch = data_loader.get_batch(size=batch_size, data_type='test')
+            batch = data_loader.get_batch(size=batch_size, data_type='test', predicate_sampling='random') # RMK: `data_type` currently has no effect.
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
             truth_targets = self._compute_truth_targets(batch) # Shape: (batch, n_candidates)
