@@ -470,26 +470,26 @@ class AlexBeth(Game):
 
             # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions. TODO Is this really useful?
             entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item() # TODO Instead of adding 1e-8 factors, use something like torch.where((a != 0), (a * b), 0.).
-            # Average symbol count for Alex's message in this batch.
+
+            # `msg_length`: average length (including EOS) of the signals in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
-            # Vocabulary usage: count symbols used in signals (excluding EOS and padding).
+            # `total_vocab_counts`: count symbols used in signals (excluding EOS and padding).
             msg_tokens = asker_outcome.action[0]
-            msg_lens = asker_outcome.action[1].int().view(-1)
             max_len = msg_tokens.size(1)
-            positions = torch.arange(max_len, device=msg_tokens.device).unsqueeze(0)
-            # True for positions strictly before EOS in each signal.
-            in_message = positions < (msg_lens.unsqueeze(1) - 1)
+            positions = torch.arange(max_len, device=msg_tokens.device).unsqueeze(0) # int tensor of shape TODO
+            msg_lens = asker_outcome.action[1].int().view(-1)
+            in_message = positions < (msg_lens.unsqueeze(1) - 1) # boolean tensor of shape TODO, True for positions strictly before EOS in each signal. TODO No, for signals reaching the length limit, the last token might be not an EOS. Anyway, padding tokens are all occurrences of the padding symbol, so I guess that all of this can be simplified.
             if in_message.any():
                 used_tokens = msg_tokens[in_message]
                 vocab_counts = torch.bincount(used_tokens, minlength=self.full_alphabet_size).to("cpu")
                 vocab_counts[self.asker.eos_index] = 0
                 vocab_counts[self.asker.padding_idx] = 0
-                if total_vocab_counts is None:
+                if total_vocab_counts is None: # TODO Instead of doing this, initialise `total_vocab_counts` correctly.
                     total_vocab_counts = vocab_counts
                 else:
                     total_vocab_counts += vocab_counts
 
-            # Store row-level performance for predicate diagnostics only when requested.
+            # Stores row-level performance for predicate diagnostics only when requested.
             if self.dump_predicate_perf:
                 row_perf = correct_prob.mean(dim=1).detach().cpu().tolist()
                 row_acc = (preds == truth_targets).float().mean(dim=1).detach().cpu().tolist()
