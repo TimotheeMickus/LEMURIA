@@ -492,7 +492,7 @@ class Dataset(SeqAsyncDataset):
         # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
         
-        # (THIS IS INCORRECT) A momentum factor of 0.99 means that each cell of the failure vector contains a statistics over 100 examples.
+        # A momentum factor of (1 - 1/k) (e.g. 0.99) corresponds to each cell of the failure vector containing a statistics over k (e.g. 100) updates.
         self.failure_based_distribution = FailureBasedDistribution(len(self.predicates), momentum_factor=0.99, smoothing_factor=1.0)
         
         super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter, failure_based_distribution_info=self.failure_based_distribution.info);
