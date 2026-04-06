@@ -412,12 +412,12 @@ class AlexBeth(Game):
             self.autologger._write(name, value, epoch_index, direct=True)
             if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
 
-        # Use the dataset batch size but cap the number of batches to keep eval fast.
+        # We try to visit each predicate on average 8 times.
         batch_size = data_loader.batch_size
-        max_batches = 128
-        # TODO: consider stratified eval with a fixed number of occurrences per predicate
-        # (e.g., 8 each) instead of random nb_batch sampling for more uniform coverage.
-        nb_batch = max(1, min(max_batches, (2 ** 15) // max(1, batch_size)))
+        max_datapoints = 32768 # (2^15)
+        n = (8 * data_loader.nb_categories)
+        n = min(max_datapoints, n)
+        nb_batch = int(np.ceil(n / batch_size))
 
         # Epoch-level totals (we aggregate batch by batch, then normalize once at the end).
         total_items = 0
