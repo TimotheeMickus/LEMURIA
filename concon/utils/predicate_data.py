@@ -361,14 +361,17 @@ class FailureBasedDistribution:
 
         return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
 
-    # Returns a predicate index.
+    # Returns predicate indices.
+    # nb: int
     # allowed_predicates_idx: np.array[int] | None
-    def sample(self, allowed_predicates_idx=None):
+    def sample(self, nb, allowed_predicates_idx=None):
         dist = self.distribution(allowed_predicates_idx)
+        
+        #print(dist) # DEBUG
 
         if(allowed_predicates_idx is None): allowed_predicates_idx = range(dist.shape[0])
 
-        return np.random.choice(a=allowed_predicates_idx, p=dist)
+        return np.random.choice(a=allowed_predicates_idx, size=nb, p=dist)
 
 class GraphConverter:
     object_token='<obj>'
@@ -468,7 +471,7 @@ class Dataset(SeqAsyncDataset):
             self.values.extend(prop.values)
 
         # Generates predicates.
-        assert (nontrivial_only or candidate_sampling != "balanced"), "It is impossible to garantee the existence of both positive and negative candidates if there exists trivial predicates."
+        assert (nontrivial_only or candidate_sampling != "balanced"), "It is impossible to garantee the existence of both positive and negative candidates if there exist trivial predicates."
         self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction, consider_indeterminate=allow_indeterminate) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules; TIMOTHÉE: be more specific
         self.nb_categories = len(self.predicates) 
@@ -509,7 +512,6 @@ class Dataset(SeqAsyncDataset):
     # failure_based_distribution_shared_memory: [1, (str, str)]
     @staticmethod
     def _additional_resources(failure_based_distribution_info, **kwargs): 
-        #print(failure_based_distribution_info) # DEBUG
         return {"failure_based_distribution": FailureBasedDistribution(**failure_based_distribution_info)}
 
     # Builds a fixed pool of instances. (Used for overfitting tests.)
@@ -572,7 +574,6 @@ class Dataset(SeqAsyncDataset):
         # Outputs a bool.
         def checkEquivalence(pred):
             signature = computeSignature(pred)
-            #input((pred, signature)) # DEBUG
             if((signature in signatures) and (pred.hasEquivalentIn(signatures[signature], consider_indeterminate))): return False
             
             signatures[signature] = signatures.get(signature, set())
@@ -623,6 +624,13 @@ class Dataset(SeqAsyncDataset):
         for prop in self.properties: print(f"{prop} ({prop.values})")
         
         print(f"{len(self.predicates)} predicates ({self.predicates})")
+
+        print(f"device: {self.device}")
+        print(f"batch_size: {self.batch_size}")
+        print(f"allow_indeterminate: {self.allow_indeterminate}")
+        print(f"num_candidates: {self.num_candidates}")
+        print(f"predicate_sampling: {self.predicate_sampling}")
+        print(f"candidate_sampling: {self.candidate_sampling}")
    
     # symbols: collection[str]
     # unknown: str
@@ -651,8 +659,6 @@ class Dataset(SeqAsyncDataset):
         if(predicate_sampling is None): predicate_sampling = self.predicate_sampling
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
-        #print(self.failure_based_distribution.failure_vector / self.failure_based_distribution.counts_vector) # DEBUG
-        
         batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, predicate_sampling=predicate_sampling, candidate_sampling=candidate_sampling, **kwargs);
 
         batch.predicate = [self.predicates[pred_idx] for pred_idx in batch.predicate_idx]
@@ -672,28 +678,23 @@ class Dataset(SeqAsyncDataset):
         overfit_pool, predicates, properties, graph_converter, failure_based_distribution, # resource arguments
         **kwargs
     ):
-        #print(failure_based_distribution.failure_vector / failure_based_distribution.counts_vector) # DEBUG
-        
         batch = []
-        for _ in range(size):
-            if(overfit_pool is not None): # Specific procedure for overfitting mode.
+        if(overfit_pool is not None): # Specific procedure for overfitting mode.
+            for _ in range(size):
                 pred_idx, predicate, candidates, truths = random.choice(overfit_pool)
                 batch.append((pred_idx, predicate, list(candidates), list(truths))) # TIMOTHÉE Why are the two lists copied (with `list`)?
-                continue
+        else:
+            # Samples `size` predicates.
+            for (pred_idx, predicate) in zip(*Dataset._selectPredicates(size, predicates, predicate_sampling, failure_based_distribution)):
+                # Samples `num_candidates` candidates.
+                if(candidate_sampling == 'balanced'):
+                    candidates, truths = Dataset._generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, properties)
+                elif(candidate_sampling == 'random'):
+                    candidates, truths = Dataset._generateCandidates(predicate, num_candidates, allow_indeterminate, properties)
+                else:
+                    raise ValueError(f"Candidate sampling strategy unknown: {candidate_sampling}.")
 
-            # Selects a predicate.
-            pred_idx, predicate = Dataset._selectPredicate(predicates, predicate_sampling, failure_based_distribution)
-
-            # Samples `num_candidates` candidates.
-            if(candidate_sampling == 'balanced'):
-                # At some point, it might be interesting to test against balanced distributions TMOTHÉE: What is the point of this comment?
-                candidates, truths = Dataset._generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, properties)
-            else:
-                assert (self.candidate_sampling == 'random')
-
-                candidates, truths = Dataset._generateCandidates(predicate, num_candidates, allow_indeterminate, properties)
-
-            batch.append((pred_idx, predicate, candidates, truths))
+                batch.append((pred_idx, predicate, candidates, truths))
 
         predicate_idx, predicate, candidates, truths = zip(*batch)
 
@@ -701,25 +702,27 @@ class Dataset(SeqAsyncDataset):
 
         return Batch(size=size, predicate=predicate, predicate_idx=predicate_idx, candidate=candidates, node_idx=node_idx, edge_idx=edge_idx, graph_sizes=graph_sizes, candidate_truth=truths)
 
+    # nb: int
     # predicate_sampling: str
-    # Outputs a (int, Predicate).
-    def selectPredicate(self, predicate_sampling):
-        return self._selectPredicate(self.predicates, predicate_sampling, self.failure_based_distribution)
+    # Outputs a (np.array[int], np.array[Predicate]).
+    def selectPredicates(self, nb, predicate_sampling):
+        return self._selectPredicates(nb, self.predicates, predicate_sampling, self.failure_based_distribution)
 
+    # nb: int
     # predicates: list[Predicate]
     # predicate_sampling: str
     # failure_based_distribution: FailureBasedDistribution
+    # Outputs a (np.array[int], np.array[Predicate]).
     @staticmethod
-    def _selectPredicate(predicates, predicate_sampling, failure_based_distribution):
+    def _selectPredicates(nb, predicates, predicate_sampling, failure_based_distribution):
         if(predicate_sampling == "random"):
-            idx = np.random.randint(0, len(predicates))
-            return (idx, predicates[idx])
+            indices = np.random.randint(0, len(predicates), size=(nb,))
+        elif(predicate_sampling == "difficulty"):
+            indices = failure_based_distribution.sample(nb)
+        else:
+            raise ValueError(f"Predicate sampling strategy unknown: {predicate_sampling}.")
         
-        if(predicate_sampling == "difficulty"):
-            idx = failure_based_distribution.sample()
-            return (idx, predicates[idx])
-
-        assert False, f"Predicate sampling strategy unknown: {predicate_sampling}."
+        return (indices, predicates[indices])
 
     # candidate: Candidate
     # allow_indeterminate
@@ -851,8 +854,7 @@ if(__name__ == "__main__"):
     nb = 10_000
     for allow_indeterminate in [True, False]:
         counts = dict() # dict[int, int]
-        for _ in range(nb):
-            _, predicate = dataset.selectPredicate(predicate_sampling='random')
+        for _, predicate in zip(*dataset.selectPredicate(nb, predicate_sampling='random')):
             candidate = dataset.generateCandidate(allow_indeterminate=allow_indeterminate)
             truth_value = predicate.check(candidate)
             counts[predicate.check(candidate)] = counts.get(predicate.check(candidate), 0) + 1
