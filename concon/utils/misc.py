@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions.bernoulli import Bernoulli
 from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import torchvision
@@ -184,10 +185,22 @@ def get_default_fn(base_fn, args):
     
     return _wrap
 
+# For each row in the batch, a score is given for each of multiple options. Each score gives a probability via sigmoid. This function simulates selecting any number of options (either by argmax or by true sampling).
+# scores: tensor of shape (batch size, #options)
+def selecting(scores, argmax=False):
+    probs = torch.sigmoid(scores) # Shape: (batch size, #options)
+    dist = Bernoulli(probs=probs)
+
+    if(argmax): actions = (probs >= 0.5).float() # Shape: (batch size, #options)
+    else: actions = dist.sample() # Shape: (batch size, #options)
+
+    return {'dist': dist, 'actions': actions}
+
+# For each row in the batch, a score is given for each of multiple options. The scores give a probability distribution via softmax. This function simulates pointing at one of the options (either by argmax or by true sampling).
 # scores: tensor of shape (batch size, #options)
 def pointing(scores, argmax=False):
     probs = F.softmax(scores, dim=-1) # Shape: (batch size, #options)
-    dist = Categorical(probs)
+    dist = Categorical(probs=probs)
 
     if(argmax): action = scores.max(-1).indices # Shape: (batch size)
     else: action = dist.sample() # Shape: (batch size)

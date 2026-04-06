@@ -182,8 +182,8 @@ class AlexBeth(Game):
         fieldnames = [
             "epoch",
             "eval/loss",
-            "eval/accuracy",
             "eval/perf",
+            "eval/accuracy",
             "eval/retriever_entropy",
             "eval/msg_length",
             "eval/vocab_used",
@@ -289,15 +289,27 @@ class AlexBeth(Game):
         Returns reward and performance tensors (both shaped [batch size]) 
         based on the probability Beth assigns to the correct truth value.
         """
-        logits = retriever_scores # Shape: (batch, num_candidates)
-        probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
-        correct_prob = torch.where(truth_targets > 0.5, probs, 1.0 - probs) # Shape: (batch, num_candidates)
-        perf = correct_prob.mean(dim=1).detach() # Shape: (batch,)
+        # Selects whether the retriever is right.
+        scores_right = torch.where((truth_targets > 0.5), retriever_scores, -retriever_scores) # Shape: (batch, candidates)
+        selecting_right = misc.selecting(scores_right)
 
+        perf = selecting_right["dist"].probs.mean(dim=1).detach() # Shape: (batch,)
+        
         if(self.use_expectation):
-            rewards = perf.clone() # Expected average accuracy of the retriever over the sequence. # Shape: (batch,)
+            rewards = perf.clone() # Expected average accuracy of the retriever over the candidates. # Shape: (batch,)
         else:
-            rewards = torch.bernoulli(correct_prob).mean(dim=1).detach() # We sample whether the retriever is right according to the probability of the retriever being right; the reward is 1 when the retriever is right, 0 otherwise. # Shape: (batch,)
+            rewards = selecting_right["actions"].mean(dim=1) # Shape: (batch,)
+
+        # Generates probabilities from the scores and selects candidates.
+        #retriever_selecting = misc.selecting(retriever_scores)
+        #
+        #dist = retriever_selecting["dist"]
+        #perf = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)).mean(dim=1).detach() # Shape: (batch,)
+        #
+        #if(self.use_expectation):
+        #    rewards = perf.clone() # Expected average accuracy of the retriever over the candidates. # Shape: (batch,)
+        #else:
+        #    rewards = torch.isclose(retriever_selecting["actions"], truth_targets).float().mean(dim=1) # Shape: (batch,)
 
         msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,), includes the EOS symbol (usualy 0).
 
@@ -368,17 +380,25 @@ class AlexBeth(Game):
     # truth_targets: tensor of shape (batch size, number of candidates)
     # return_entropy: bool
     def compute_retriever_loss(self, retriever_scores, truth_targets, return_entropy=False):
-        logits = retriever_scores # Shape: (batch, num_candidates)
-        probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
+        # Generates probabilities from the scores and selects candidates.
+        retriever_selecting = misc.selecting(retriever_scores)
+        dist = retriever_selecting["dist"] # RMK: dist.logits == retriever_scores
 
-        loss = F.binary_cross_entropy_with_logits(logits, truth_targets.float())
+        perf = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)).detach() # Shape: (batch, num_candidates)
+        
+        entropy = dist.entropy().mean()
+        
+        loss = 0.0
+        
+        # Main loss
+        #cross_entropy_loss = F.binary_cross_entropy(dist.probs, truth_targets, reduction='mean')
+        cross_entropy_loss = F.binary_cross_entropy_with_logits(retriever_scores, truth_targets, reduction='mean')
+        loss += cross_entropy_loss
 
-        eps = 1e-8
-        entropy = (-(probs * torch.log(probs + eps) + (1.0 - probs) * torch.log(1.0 - probs + eps))).mean()
-        # entropy penalty (addition)
-        loss += (self.beta_retriever * entropy)
-
-        perf = torch.where(truth_targets > 0.5, probs, 1.0 - probs).detach() # Shape: (batch, num_candidates)
+        # Entropy penalty
+        if(self.beta_retriever != 0.0):
+            entropy_loss = -(self.beta_retriever * entropy)
+            loss += entropy_loss
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
@@ -399,11 +419,11 @@ class AlexBeth(Game):
 
         # Epoch-level totals (we aggregate batch by batch, then normalize once at the end).
         total_items = 0
-        total_loss = 0.0
+        total_retriever_loss = 0.0
+        total_perf = 0.0
         total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
         total_entropy = 0.0
         total_msg_length = 0.0
-        total_perf = 0.0
         # Communication-efficiency split by truth label (model can be ex. good at positives and bad at negatives).
         total_verify_ce = 0.0 # verify: predicate true for candidate
         total_falsify_ce = 0.0 # falsify: predicate false for candidate.
@@ -438,39 +458,35 @@ class AlexBeth(Game):
                 "candidate_texts": []
             }
 
-        iterator = range(nb_batch)
-        if(self.autologger.display == 'tqdm'):
-            iterator = tqdm.tqdm(iterator, desc='Eval.')
+        batch_numbers = range(nb_batch)
+        if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
 
-        for _ in iterator:
+        for batch_index in batch_numbers:
             self.start_episode(train_episode=False)
             
             batch = data_loader.get_batch(size=batch_size, data_type='test', predicate_sampling='random') # RMK: `data_type` currently has no effect.
+            truth_targets = self._compute_truth_targets(batch) # Shape: (batch, num candidates)
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
-            truth_targets = self._compute_truth_targets(batch) # Shape: (batch, n_candidates)
 
-            # Beth outputs a logit per candidate; we interpret it as the log-odds that the predicate holds for the candidate.
-            logits = retriever_outcome.scores # Shape: (batch, num_candidates)
-            probs = torch.sigmoid(logits) # Shape: (batch, num_candidates)
-           
-            # Scalar BCE averaged over the batch (used for logging only).
-            loss = F.binary_cross_entropy_with_logits(logits, truth_targets, reduction='mean').item()
-            # Accuracy is the thresholded probability vs. the binary target.
-            preds = (probs >= 0.5).float() # Shape: (batch, num_candidates)
-            accuracy = (preds == truth_targets).float().mean().item() # per candidate (not predicate)
-            # `perf` measures how much probability mass Beth assigns to the correct truth value.
-            correct_prob = torch.where((truth_targets > 0.5), probs, (1.0 - probs)) # Shape: (batch, num_candidates)
-            perf = correct_prob.mean().item()
+            retriever_selecting = misc.selecting(retriever_outcome.scores, argmax=True)
+            dist = retriever_selecting["dist"] # RMK: dist.logits == retriever_outcome.scores
+            
+            entropy = dist.entropy().mean().item()
+            
+            retriever_loss = F.binary_cross_entropy_with_logits(retriever_outcome.scores, truth_targets, reduction='mean').item()
+
+            correct_prob = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)) # Shape: (batch, num_candidates)
+            perf = correct_prob.mean().item() # Shape: (batch, num_candidates)
+            
+            correct_pred = torch.isclose(retriever_selecting["actions"], truth_targets).float() # Shape: (batch_num_candidates)
+            accuracy = correct_pred.mean().item() # average over all candidates
 
             # Updates the failure-based distribution.
             num_candidates = retriever_outcome.scores.shape[-1]
             predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch * num_candidates)
             failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
             data_loader.failure_based_distribution.update(predicate_idx, failure)
-
-            # Entropy of Beth's Bernoulli output; useful to detect collapsed predictions. TODO Is this really useful?
-            entropy = (-(probs * torch.log(probs + 1e-8) + (1.0 - probs) * torch.log(1.0 - probs + 1e-8))).mean().item() # TODO Instead of adding 1e-8 factors, use something like torch.where((a != 0), (a * b), 0.).
 
             # `msg_length`: average length (including EOS) of the signals in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
@@ -492,8 +508,8 @@ class AlexBeth(Game):
 
             # Stores row-level performance for predicate diagnostics only when requested.
             if self.dump_predicate_perf:
-                row_perf = correct_prob.mean(dim=1).detach().cpu().tolist()
-                row_acc = (preds == truth_targets).float().mean(dim=1).detach().cpu().tolist()
+                row_perf = correct_prob.mean(dim=1).cpu().tolist()
+                row_acc = correct_pred.mean(dim=1).cpu().tolist()
                 for i, pred_idx in enumerate(batch.predicate_idx):
                     pred_idx = int(pred_idx)
                     if pred_idx not in self._predicate_text_by_idx:
@@ -502,22 +518,22 @@ class AlexBeth(Game):
 
             batch_items = truth_targets.numel()
             total_items += batch_items
-            total_loss += loss * batch_items
+            total_retriever_loss += retriever_loss * batch_items
+            total_perf += perf * batch_items
             total_accuracy += accuracy * batch_items
             total_entropy += entropy * batch_items
             total_msg_length += msg_length * batch_items
-            total_perf += perf * batch_items
 
             # Split candidate decisions into verify/falsify subsets.
             verify_mask = (truth_targets > 0.5)
             falsify_mask = ~verify_mask
             if verify_mask.any():
                 # c.e._verify: average P(true) on true instances.
-                total_verify_ce += probs[verify_mask].sum().item()
+                total_verify_ce += dist.probs[verify_mask].sum().item()
                 total_verify_items += int(verify_mask.sum().item())
             if falsify_mask.any():
                 # c.e._falsify: average P(false)=1-P(true) on false instances.
-                total_falsify_ce += (1.0 - probs[falsify_mask]).sum().item()
+                total_falsify_ce += (1.0 - dist.probs[falsify_mask]).sum().item()
                 total_falsify_items += int(falsify_mask.sum().item())
 
             # Scramble the symbol order inside signals and recompute correctness probs on these.
@@ -560,8 +576,8 @@ class AlexBeth(Game):
 
                 if len(paired_rows) > 0:
                     # Build tensor of row positions in current batch and aligned negated predicate ids
-                    row_idx = torch.tensor(paired_rows, device=probs.device, dtype=torch.long)
-                    neg_pred_idx = torch.tensor(neg_pred_indices, device=probs.device, dtype=torch.long)
+                    row_idx = torch.tensor(paired_rows, device=dist.probs.device, dtype=torch.long)
+                    neg_pred_idx = torch.tensor(neg_pred_indices, device=dist.probs.device, dtype=torch.long)
 
                     # Generate signals for negated predicates
                     neg_asker_outcome = self.asker(neg_pred_idx)
@@ -572,7 +588,7 @@ class AlexBeth(Game):
                     neg_retriever_outcome = self.retriever(beth_input_subset, *neg_asker_outcome.action)
                     p_true_given_not_p = torch.sigmoid(neg_retriever_outcome.scores)
                     # Original probabilities of paired rows
-                    p_true_given_p = probs.index_select(0, row_idx)
+                    p_true_given_p = dist.probs.index_select(0, row_idx)
 
                     neg_consistency = 1.0 - torch.abs((p_true_given_p + p_true_given_not_p) - 1.0)
                     # Accumulate sum and count: C = 1/N * (sum for i=1 to N) of c(x_i)
@@ -585,7 +601,7 @@ class AlexBeth(Game):
             if cache is not None:
                 batch_messages = asker_outcome.action[0].detach().clone()
                 batch_lens = asker_outcome.action[1].detach().clone()
-                accuracy_per_item = (preds == truth_targets).float().mean(dim=1) # (batch,) mean across candidates
+                accuracy_per_item = correct_pred.mean(dim=1) # (batch,) mean across candidates
                 for i in range(batch_messages.size(0)):
                     if self.correct_only and not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)):
                         # not: (accuracy_per_item[i].item() < 0.5):
@@ -617,21 +633,21 @@ class AlexBeth(Game):
         # --- logging and stdout --- #
         #                            #
         # Normalise the accumulated sums and push them to TensorBoard / stdout.
-        eval_loss = total_loss / total_items
-        eval_accuracy = total_accuracy / total_items
+        eval_retriever_loss = total_retriever_loss / total_items
         eval_perf = total_perf / total_items
+        eval_accuracy = total_accuracy / total_items
         eval_retriever_entropy = total_entropy / total_items
         eval_msg_length = total_msg_length / total_items
-        if total_vocab_counts is None:
-            eval_vocab_used = 0.0
-        else:
-            eval_vocab_used = float((total_vocab_counts > 0).sum().item())
-        log('eval/loss', eval_loss)
-        log('eval/accuracy', eval_accuracy)
+        if total_vocab_counts is None: eval_vocab_used = 0
+        else: eval_vocab_used = int((total_vocab_counts > 0).sum().item())
+        
+        log('eval/retriever_loss', eval_retriever_loss)
         log('eval/perf', eval_perf)
+        log('eval/accuracy', eval_accuracy)
         log('eval/retriever_entropy', eval_retriever_entropy)
         log('eval/msg_length', eval_msg_length)  # Average number of symbols Alex produced.
         log('eval/vocab_used', eval_vocab_used)
+        
         avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
 
@@ -694,7 +710,7 @@ class AlexBeth(Game):
                     asker_device = next(self.asker.parameters()).device
                     pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=asker_device)
                     # sender_vecs: (n, d) predicate embeddings for intensional distance.
-                    sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).detach().cpu().numpy()
+                    sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()
                     # Compute each pairwise distance vector once, then reuse it for all 4 topsims.
                     # This avoids recomputing expensive Jaccard distances multiple times.
                     # signal_strings: length-n list of message strings for Levenshtein.
@@ -753,12 +769,12 @@ class AlexBeth(Game):
         if self.dump_eval_metrics_enabled:
             row = {
                 "epoch": int(epoch_index),
-                "eval/loss": float(eval_loss),
-                "eval/accuracy": float(eval_accuracy),
+                "eval/retriever_loss": float(eval_retriever_loss),
                 "eval/perf": float(eval_perf),
+                "eval/accuracy": float(eval_accuracy),
                 "eval/retriever_entropy": float(eval_retriever_entropy),
                 "eval/msg_length": float(eval_msg_length),
-                "eval/vocab_used": float(eval_vocab_used),
+                "eval/vocab_used": eval_vocab_used,
                 "eval/c.e._verify": verify_ratio,
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,

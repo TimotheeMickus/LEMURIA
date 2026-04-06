@@ -235,11 +235,12 @@ class AliceBob(Game):
         receiver_pointing = misc.pointing(img_scores)
 
         perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
-
+        
         entropy = receiver_pointing['dist'].entropy().mean() # Shape: ()
 
         loss = 0.0
 
+        # Main loss
         if(use_REINFORCE): # REINFORCE
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected images. Shape: (batch size)
 
@@ -260,8 +261,9 @@ class AliceBob(Game):
             loss += cross_entropy_loss
 
         # Entropy penalty
-        entropy_loss = -(self.beta_receiver * entropy) # Entropy penalty
-        loss += entropy_loss
+        if(self.beta_receiver != 0.0):
+            entropy_loss = -(self.beta_receiver * entropy)
+            loss += entropy_loss
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
