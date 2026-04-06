@@ -139,7 +139,8 @@ class AlexBeth(Game):
         This works both ways: if p[i]=¬p and p[j]=p, store both i: j and j: i.
             partner: dict[int, int]
         '''
-        partner = {}
+        partner = {} # dict[int,int]
+
         # Map predicates to their indices
         # This should perhaps be a feature of the Dataset
         pred2idx = {pred: i for i, pred in enumerate(self._dataset.predicates)}
@@ -150,6 +151,7 @@ class AlexBeth(Game):
                 j = pred2idx[pred.predicate]
                 partner[i] = j
                 partner[j] = i
+
         return partner
 
     def dump_predicate_performance(self, output_dir, wandb_run=None, artifact_name=None):
@@ -557,17 +559,12 @@ class AlexBeth(Game):
                 perf_scrambled += torch.minimum(correct_prob, scrambled_correct_prob).sum().item()
                 perf_baseline += correct_prob.sum().item()
 
-            # Negation consistency: for predicate p and its negation ¬p on the same candidate, P(p=true) + P(¬p=true) should be close to 1.
-            # In particular: in the current evaluation batch select rows with predicate p
-            # Then run the model on the same candidates showing the model ¬p
-            # Alex generates a signal for ¬p, Beth outputs P(¬p=true | signal_¬p, candidate)
-            # Consistency per item: c = 1 - |P(p=true) + P(¬p=true) - 1|
-            # Per batch: C = 1/N * (sum for i=1 to N) of c(x_i)
+            # Negation consistency: Is it the case that for any predicate p and candidate c, P(p true | c) + P(¬p true | c) = 1?
+            # Consistency for (p, c): cons(p, c) = 1 - |P(p true | c ) + P(¬p true | c) - 1|
+            # Per batch: avg of cons(p, c) over all (p, c)
             if self.run_fancy_lang_eval and (not self.no_negation):
-                paired_rows = []
-                neg_pred_indices = []
-                # Store idx for Batch rows and their negations if exist
-                # inb4: Rows already contain P(p=true) probabilities
+                paired_rows = [] # list[int], row indices (of rows in the batch about a predicate that has or is a negation)
+                neg_pred_indices = [] # list[int], predicate indices
                 for row_i, pred_i in enumerate(batch.predicate_idx):
                     neg_i = self._predicate_negation_idx.get(int(pred_i))
                     if neg_i is not None:
@@ -575,25 +572,27 @@ class AlexBeth(Game):
                         neg_pred_indices.append(neg_i)
 
                 if len(paired_rows) > 0:
-                    # Build tensor of row positions in current batch and aligned negated predicate ids
-                    row_idx = torch.tensor(paired_rows, device=dist.probs.device, dtype=torch.long)
-                    neg_pred_idx = torch.tensor(neg_pred_indices, device=dist.probs.device, dtype=torch.long)
+                    paired_rows = torch.tensor(paired_rows, device=dist.probs.device, dtype=torch.long)
+                    
+                    p_prob = dist.probs.index_select(dim=0, index=paired_rows) # Shape: (batch size, num candidates)
+                    
+                    # Generates signals for negated predicates.
+                    neg_pred_indices = torch.tensor(neg_pred_indices, device=dist.probs.device, dtype=torch.long)
+                    neg_asker_outcome = self.asker(neg_pred_indices)
 
-                    # Generate signals for negated predicates
-                    neg_asker_outcome = self.asker(neg_pred_idx)
-                    # From candidate tensors for this batch, keep only rows that were paired
+                    # Collects the candidates used for predicates that have or are a negation.
                     beth_input = self._beth_input(batch)
-                    beth_input_subset = {k: v.index_select(0, row_idx) for k, v in beth_input.items()}
-                    # Score candidates based on ¬p signals and convert to probabilities
+                    beth_input_subset = {k: v.index_select(dim=0, index=paired_rows) for k, v in beth_input.items()}
+                    
+                    # Scores candidates based on ¬p signals.
                     neg_retriever_outcome = self.retriever(beth_input_subset, *neg_asker_outcome.action)
-                    p_true_given_not_p = torch.sigmoid(neg_retriever_outcome.scores)
-                    # Original probabilities of paired rows
-                    p_true_given_p = dist.probs.index_select(0, row_idx)
+                    not_p_prob = torch.sigmoid(neg_retriever_outcome.scores) # Shape: (batch size, num candidates)
 
-                    neg_consistency = 1.0 - torch.abs((p_true_given_p + p_true_given_not_p) - 1.0)
-                    # Accumulate sum and count: C = 1/N * (sum for i=1 to N) of c(x_i)
-                    neg_consistency_total += neg_consistency.sum().item() # sum_i c(x_i)
-                    neg_consistency_count += neg_consistency.numel() # N
+                    neg_consistency = 1.0 - torch.abs((p_prob + not_p_prob) - 1.0) # Shape: (batch size, num candidates)
+
+                    # Accumulates sum and count.
+                    neg_consistency_total += neg_consistency.sum().item()
+                    neg_consistency_count += neg_consistency.numel()
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
