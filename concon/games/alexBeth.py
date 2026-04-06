@@ -422,8 +422,8 @@ class AlexBeth(Game):
         # Epoch-level totals (we aggregate batch by batch, then normalize once at the end).
         total_items = 0
         total_retriever_loss = 0.0
-        total_perf = 0.0
-        total_accuracy = 0.0 # average accuracy (computed from success~1, failure~0).
+        total_perf = 0.0 # average probability of the retriever selecting correctly
+        total_accuracy = 0.0 # average accuracy of the retriever argmax selection
         total_entropy = 0.0
         total_msg_length = 0.0
         # Communication-efficiency split by truth label (model can be ex. good at positives and bad at negatives).
