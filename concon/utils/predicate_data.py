@@ -376,7 +376,7 @@ class FailureBasedDistribution:
     def sample(self, nb, allowed_predicates_idx=None):
         dist = self.distribution(allowed_predicates_idx)
         
-        print(dist) # DEBUG
+        #print(dist) # DEBUG
 
         if(allowed_predicates_idx is None): allowed_predicates_idx = range(dist.shape[0])
 

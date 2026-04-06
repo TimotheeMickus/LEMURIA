@@ -115,7 +115,7 @@ def do(args):
         # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
         performance_threshold = 0.6
         if(model.max_perf < performance_threshold):
-            print("This runs has failed.")
+            print("This run has failed (max perf = {model.max_perf} < {performance_threshold}).")
             filename = run_summary_dir / "FAILURE"
             open(filename, 'a').close()
 
