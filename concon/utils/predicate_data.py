@@ -346,11 +346,17 @@ class FailureBasedDistribution:
 
     # predicate_idx: np.array[int]
     # failure: np.array[float]
-    def update(self, predicate_idx, failure):
-        # Note: if the same predicate appeared multiple time, the momentum factor would still be applied only once
-        self.counts_vector[predicate_idx] *= self.momentum_factor
+    # new_epoch: boolean
+    def update(self, predicate_idx, failure, new_epoch):
+        if(new_epoch):
+            self.counts_vector *= self.momentum_factor
+            self.failure_vector *= self.momentum_factor
+        
+        ## Note: if the same predicate appeared multiple time, the momentum factor would still be applied only once
+        #self.counts_vector[predicate_idx] *= self.momentum_factor
+        #self.failure_vector[predicate_idx] *= self.momentum_factor
+        
         np.add.at(self.counts_vector, predicate_idx, 1.0)
-        self.failure_vector[predicate_idx] *= self.momentum_factor
         np.add.at(self.failure_vector, predicate_idx, failure)
 
     # Returns a probability distribution over (a subset of the) predicate indices.
@@ -358,6 +364,9 @@ class FailureBasedDistribution:
     def distribution(self, allowed_predicates_idx=None):
         if(allowed_predicates_idx is None): unnormalised_dist = (self.failure_vector / self.counts_vector)
         else: unnormalised_dist = (self.failure_vector[allowed_predicates_idx] / self.counts_vector[allowed_predicates_idx])
+
+        #print(self.failure_vector) # DEBUG
+        #print(self.counts_vector) # DEBUG
 
         return (unnormalised_dist / np.linalg.norm(unnormalised_dist, 1))
 
@@ -367,7 +376,7 @@ class FailureBasedDistribution:
     def sample(self, nb, allowed_predicates_idx=None):
         dist = self.distribution(allowed_predicates_idx)
         
-        #print(dist) # DEBUG
+        print(dist) # DEBUG
 
         if(allowed_predicates_idx is None): allowed_predicates_idx = range(dist.shape[0])
 
@@ -495,8 +504,8 @@ class Dataset(SeqAsyncDataset):
         # Builds (or not) a pool of batches used in overfitting regime.
         self.overfit_pool = self.init_overfit_pool() if(overfit) else None # list[(int, Predicate, list[Candidate], list[int])]|None
         
-        # A momentum factor of (1 - 1/k) (e.g. 0.99) corresponds to each cell of the failure vector containing a statistics over k (e.g. 100) updates.
-        self.failure_based_distribution = FailureBasedDistribution(len(self.predicates), momentum_factor=0.99, smoothing_factor=1.0)
+        # A momentum factor of (1 - 1/k) (e.g. 0.99) corresponds to each cell of the failure vector containing a statistics over k (e.g. 100) epochs.
+        self.failure_based_distribution = FailureBasedDistribution(len(self.predicates), momentum_factor=0.9, smoothing_factor=8.0)
         
         super().__init__(overfit_pool=self.overfit_pool, predicates=self.predicates, properties=self.properties, graph_converter=self.graph_converter, failure_based_distribution_info=self.failure_based_distribution.info);
         #super().__init__();
@@ -553,7 +562,7 @@ class Dataset(SeqAsyncDataset):
 
         print(f"Generating depth={len(depth2predicates)+1} predicates…")
         depth2predicates.append([value for value in self.values if(not nontrivial_only or value.isNontrivial())]) # All predicates of depth 1
-        print(f"Depth: {len(depth2predicates)+1}: {len(depth2predicates[-1])} predicates")
+        print(f"Depth: {len(depth2predicates)}: {len(depth2predicates[-1])} predicates")
 
         # In order to not include in the dataset two (syntactically) distinct predicates logically equivalent to each other, the equivalence of each new predicate with already generated predicates is checked. To speed up this process, a list of objects is used to compute a "logical signature" for each predicate. (Then, only the equivalence of predicates with the same signature is directly checked.) The signature of a predicate is the list of truth values of the predicate on a list of objects.
         # Computes the list of objects used to compute signatures.
@@ -614,7 +623,7 @@ class Dataset(SeqAsyncDataset):
                         predicates.append(pred)
 
             depth2predicates.append(predicates)
-            print(f"Depth: {len(depth2predicates)+1}: {len(predicates)} predicates")
+            print(f"Depth: {len(depth2predicates)}: {len(predicates)} predicates")
 
         return np.array(list(itertools.chain.from_iterable(depth2predicates[min_depth-1:]))) # ndarray[Predicate]
         

@@ -183,7 +183,7 @@ class AlexBeth(Game):
         rows_path = os.path.join(output_dir, "eval_metrics_rows.csv")
         fieldnames = [
             "epoch",
-            "eval/loss",
+            "eval/retriever_loss",
             "eval/perf",
             "eval/accuracy",
             "eval/retriever_entropy",
@@ -406,6 +406,8 @@ class AlexBeth(Game):
         return (loss, perf)
 
     # Called at the end of each training epoch.
+    # data_loader: Dataset
+    # epoch_index: int
     @torch.no_grad()
     def evaluate(self, data_loader, epoch_index):
         def log(name, value):
@@ -488,7 +490,7 @@ class AlexBeth(Game):
             num_candidates = retriever_outcome.scores.shape[-1]
             predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch * num_candidates)
             failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
-            data_loader.failure_based_distribution.update(predicate_idx, failure)
+            data_loader.failure_based_distribution.update(predicate_idx, failure, new_epoch=(batch_index == 0))
 
             # `msg_length`: average length (including EOS) of the signals in this batch.
             msg_length = asker_outcome.action[1].float().mean().item()
@@ -516,7 +518,7 @@ class AlexBeth(Game):
                     pred_idx = int(pred_idx)
                     if pred_idx not in self._predicate_text_by_idx:
                         self._predicate_text_by_idx[pred_idx] = str(batch.predicate[i])
-                    self._predicate_perf_rows.append((int(epoch_index), pred_idx, float(row_perf[i]), float(row_acc[i])))
+                    self._predicate_perf_rows.append((epoch_index, pred_idx, float(row_perf[i]), float(row_acc[i])))
 
             batch_items = truth_targets.numel()
             total_items += batch_items
@@ -767,7 +769,7 @@ class AlexBeth(Game):
 
         if self.dump_eval_metrics_enabled:
             row = {
-                "epoch": int(epoch_index),
+                "epoch": epoch_index,
                 "eval/retriever_loss": float(eval_retriever_loss),
                 "eval/perf": float(eval_perf),
                 "eval/accuracy": float(eval_accuracy),
@@ -822,7 +824,7 @@ class AlexBeth(Game):
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
         if self.message_dump_dir and dump_cache is not None and (
             self.dump_message_mode == 'all' or 
-            (self.dump_message_mode == 'last' and epoch_index == self.epochs - 1) or
+            (self.dump_message_mode == 'last' and epoch_index == (self.epochs - 1)) or
             (self.dump_message_mode in ('when_hike', 'when_hike_strict') and is_perf_hike)
             ):
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
