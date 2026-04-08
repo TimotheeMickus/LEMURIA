@@ -80,6 +80,7 @@ class AlexBeth(Game):
         # Fancy language eval is only needed for eval metrics.
         self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
+        self.use_jaccard_eval = getattr(args, "jaccard", False)
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
@@ -193,10 +194,10 @@ class AlexBeth(Game):
             "eval/c.e._falsify",
             "eval/scrambling-resistance",
             "eval/neg_consistency",
-            "eval/topsim_extensional_levenshtein",
-            "eval/topsim_extensional_jaccard",
-            "eval/topsim_intensional_levenshtein",
-            "eval/topsim_intensional_jaccard",
+            "eval/topsim_extensional_norm_levenshtein",
+            "eval/topsim_extensional_multi_jaccard",
+            "eval/topsim_intensional_norm_levenshtein",
+            "eval/topsim_intensional_multi_jaccard",
         ]
 
         with open(rows_path, "w") as ostr:
@@ -722,8 +723,10 @@ class AlexBeth(Game):
                     msg_lev_d = np.empty(pair_count, dtype=float)
                     ext_d = np.empty(pair_count, dtype=float)
                     int_d = np.empty(pair_count, dtype=float)
-                    # msg_jac_d uses multiset Jaccard over token sequences (order-invariant).
-                    msg_jac_d = compute_correlation.pairwise_multiset_jaccard_distances(sample_signals)
+                    msg_jac_d = None
+                    if self.use_jaccard_eval:
+                        # msg_jac_d uses multiset Jaccard over token sequences (order-invariant).
+                        msg_jac_d = compute_correlation.pairwise_multiset_jaccard_distances(sample_signals)
 
                     k = 0
                     for i in range(n - 1):
@@ -749,19 +752,22 @@ class AlexBeth(Game):
                         return float(scipy.stats.spearmanr(x, y).correlation)
 
                     topsim_ext_levenshtein = _safe_spearman(msg_lev_d, ext_d)
-                    topsim_ext_jaccard = _safe_spearman(msg_jac_d, ext_d)
                     topsim_int_levenshtein = _safe_spearman(msg_lev_d, int_d)
-                    topsim_int_jaccard = _safe_spearman(msg_jac_d, int_d)
+                    if self.use_jaccard_eval:
+                        topsim_ext_jaccard = _safe_spearman(msg_jac_d, ext_d)
+                        topsim_int_jaccard = _safe_spearman(msg_jac_d, int_d)
 
-                    log('eval/topsim_extensional_levenshtein', topsim_ext_levenshtein)
-                    log('eval/topsim_extensional_jaccard', topsim_ext_jaccard)
-                    log('eval/topsim_intensional_levenshtein', topsim_int_levenshtein)
-                    log('eval/topsim_intensional_jaccard', topsim_int_jaccard)
+                    log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
+                    log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
+                    if self.use_jaccard_eval:
+                        log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
+                        log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
                 else:
-                    log('eval/topsim_extensional_levenshtein', topsim_ext_levenshtein)
-                    log('eval/topsim_extensional_jaccard', topsim_ext_jaccard)
-                    log('eval/topsim_intensional_levenshtein', topsim_int_levenshtein)
-                    log('eval/topsim_intensional_jaccard', topsim_int_jaccard)
+                    log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
+                    log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
+                    if self.use_jaccard_eval:
+                        log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
+                        log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
                     if self.autologger.display != 'minimal':
                         print('eval/topsim\tnot enough variation in sampled messages/meanings')
 
@@ -780,10 +786,10 @@ class AlexBeth(Game):
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,
                 "eval/neg_consistency": neg_consistency_ratio,
-                "eval/topsim_extensional_levenshtein": topsim_ext_levenshtein,
-                "eval/topsim_extensional_jaccard": topsim_ext_jaccard,
-                "eval/topsim_intensional_levenshtein": topsim_int_levenshtein,
-                "eval/topsim_intensional_jaccard": topsim_int_jaccard,
+                "eval/topsim_extensional_norm_levenshtein": topsim_ext_levenshtein,
+                "eval/topsim_extensional_multi_jaccard": topsim_ext_jaccard,
+                "eval/topsim_intensional_norm_levenshtein": topsim_int_levenshtein,
+                "eval/topsim_intensional_multi_jaccard": topsim_int_jaccard,
             }
             missing = [k for k, v in row.items() if (k != "epoch" and v is None)]
             if missing:

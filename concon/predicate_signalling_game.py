@@ -226,6 +226,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
+    group.add_argument('--jaccard', help='enable Jaccard-based topsim metrics (more expensive)', action='store_true')
     group.add_argument('--dump_predicate_perf', help='dump per-predicate performance tables and log them as a W&B artifact', action='store_true')
     group.add_argument('--dump_eval_metrics', help='dump per-eval-call aggregate metrics CSV and log it as a W&B artifact', action='store_true')
     
