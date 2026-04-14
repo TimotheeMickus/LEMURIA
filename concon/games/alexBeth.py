@@ -891,7 +891,7 @@ class AlexBeth(Game):
         if self.message_dump_dir and dump_cache is not None and (
             self.dump_message_mode == 'all' or 
             (self.dump_message_mode == 'last' and epoch_index == (self.epochs - 1)) or
-            (self.dump_message_mode in ('when_hike', 'when_hike_strict') and is_perf_hike)
+            (self.dump_message_mode in ('when_hike', 'when_hike_strict') and (is_perf_hike or epoch_index == (self.epochs - 1)))
             ):
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
