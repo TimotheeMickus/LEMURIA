@@ -132,6 +132,29 @@ class AlexBeth(Game):
             for values in it.product(*(prop.values for prop in self._dataset.properties))
         ]
         return candidate_vector
+    
+    def _polarity_repr(self, predicate):
+        """Returns a frozenset of signed literals where literal identity is property-level."""
+        signed_literals = []
+        # stack entries are (predicate, sign ∈ {+1, -1})
+        stack = [(predicate, 1)]
+
+        while stack:
+            p, sign = stack.pop()
+            if isinstance(p, predicate_data.Conjunction):
+                stack.append((p.pred2, sign))
+                stack.append((p.pred1, sign))
+            elif isinstance(p, predicate_data.Negation):
+                stack.append((p.predicate, -sign))
+            else:
+                if isinstance(p, predicate_data.Value):
+                    atom_name = p.prop.name
+                else:
+                    atom_name = str(p)
+                signed_literals.append(("+" if sign > 0 else "-", atom_name))
+
+        return frozenset(signed_literals)
+
 
     def _build_negation_correspondence(self):
         '''
@@ -198,6 +221,7 @@ class AlexBeth(Game):
             "eval/topsim_extensional_multi_jaccard",
             "eval/topsim_intensional_norm_levenshtein",
             "eval/topsim_intensional_multi_jaccard",
+            "eval/topsim_polarity_norm_levenshtein"
         ]
 
         with open(rows_path, "w") as ostr:
@@ -662,6 +686,7 @@ class AlexBeth(Game):
         topsim_ext_jaccard = float("nan")
         topsim_int_levenshtein = float("nan")
         topsim_int_jaccard = float("nan")
+        topsim_polarity_norm_levenshtein = float("nan")
         if self.run_fancy_lang_eval:
             verify_ratio = 0
             falsify_ratio = 0
@@ -691,8 +716,11 @@ class AlexBeth(Game):
                 # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
                 sample_signals = [tuple(s) for (s, _) in sample]
                 sample_pred_ids = [int(pid) for (_, pid) in sample]
+                # signed-literal representation (polarity topsim)
+                if not self.no_negation:
+                    sample_signed_literals = [self._polarity_repr(self._dataset.predicates[pid]) for pid in sample_pred_ids]
 
-                # Meaning is expressed as a binary vector over candidate IDs
+                # Extensional meaning is expressed as a binary vector over candidate IDs
                 # sample_cand_vec = [(1,1,0,0), (0,0,1,1), ...]
                 sample_cand_vecs = []
                 # For each predicate build meaning vector
@@ -707,6 +735,8 @@ class AlexBeth(Game):
                 # intensional: the meaning is the embedding ("what the robots think")
                 # Levenshtein vs. Jaccard: order-dependent vs. invariant
                 # report 2 x 2
+                # Polarity (Levenshtein): topsim over signed literals
+                # Levenshtein is normalised to account for varying signal length
                 if len(set(sample_signals)) > 1 and len(set(sample_cand_vecs)) > 1:
                     # Intensional topsim: meaning distance is cosine distance between predicate embeddings.
                     asker_device = next(self.asker.parameters()).device
@@ -723,6 +753,7 @@ class AlexBeth(Game):
                     msg_lev_d = np.empty(pair_count, dtype=float)
                     ext_d = np.empty(pair_count, dtype=float)
                     int_d = np.empty(pair_count, dtype=float)
+                    pol_d = np.empty(pair_count, dtype=float) if (not self.no_negation) else None
                     msg_jac_d = None
                     if self.use_jaccard_eval:
                         # msg_jac_d uses multiset Jaccard over token sequences (order-invariant).
@@ -741,6 +772,9 @@ class AlexBeth(Game):
                             ext_d[k] = sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j]))
                             # int_d: cosine distance between predicate embeddings (intensional meaning).
                             int_d[k] = float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j]))
+                            # pol_d: symmetric difference over signed literals (equiv. Hamming over binary).
+                            if not self.no_negation:
+                                pol_d[k] = float(len(sample_signed_literals[i] ^ sample_signed_literals[j]))
                             k += 1
 
                     def _safe_spearman(x, y):
@@ -753,18 +787,24 @@ class AlexBeth(Game):
 
                     topsim_ext_levenshtein = _safe_spearman(msg_lev_d, ext_d)
                     topsim_int_levenshtein = _safe_spearman(msg_lev_d, int_d)
+                    if not self.no_negation:
+                        topsim_polarity_norm_levenshtein = _safe_spearman(msg_lev_d, pol_d)
                     if self.use_jaccard_eval:
                         topsim_ext_jaccard = _safe_spearman(msg_jac_d, ext_d)
                         topsim_int_jaccard = _safe_spearman(msg_jac_d, int_d)
 
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
+                    if not self.no_negation:
+                        log('eval/topsim_polarity_norm_levenshtein', topsim_polarity_norm_levenshtein)
                     if self.use_jaccard_eval:
                         log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
                 else:
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
+                    if not self.no_negation:
+                        log('eval/topsim_polarity_norm_levenshtein', topsim_polarity_norm_levenshtein)
                     if self.use_jaccard_eval:
                         log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
@@ -790,6 +830,7 @@ class AlexBeth(Game):
                 "eval/topsim_extensional_multi_jaccard": topsim_ext_jaccard,
                 "eval/topsim_intensional_norm_levenshtein": topsim_int_levenshtein,
                 "eval/topsim_intensional_multi_jaccard": topsim_int_jaccard,
+                "eval/topsim_polarity_norm_levenshtein": topsim_polarity_norm_levenshtein,
             }
             missing = [k for k, v in row.items() if (k != "epoch" and v is None)]
             if missing:
