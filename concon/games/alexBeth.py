@@ -713,6 +713,16 @@ class AlexBeth(Game):
                 sample = list(zip(eval_cache["messages"], eval_cache["predicate_ids"]))
                 random.shuffle(sample)
                 sample = sample[:sample_size]
+                # Consider only unique (predicate, signal) pairs.
+                sample_type = []
+                seen_pairs = set()
+                for msg, pid in sample:
+                    key = (int(pid), tuple(msg))
+                    if key in seen_pairs:
+                        continue
+                    seen_pairs.add(key)
+                    sample_type.append((msg, int(pid)))
+                sample = sample_type
                 # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
                 sample_signals = [tuple(s) for (s, _) in sample]
                 sample_pred_ids = [int(pid) for (_, pid) in sample]
@@ -743,39 +753,48 @@ class AlexBeth(Game):
                     pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=asker_device)
                     # sender_vecs: (n, d) predicate embeddings for intensional distance.
                     sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()
-                    # Compute each pairwise distance vector once, then reuse it for all 4 topsims.
-                    # This avoids recomputing expensive Jaccard distances multiple times.
+                    # Compute one condensed pairwise vector per distance notion.
                     # signal_strings: length-n list of message strings for Levenshtein.
                     signal_strings = [''.join(map(chr, msg)) for msg in sample_signals]
                     n = len(sample_signals)
-                    pair_count = (n * (n - 1)) // 2
-                    # Condensed upper-triangle distance vectors.
-                    msg_lev_d = np.empty(pair_count, dtype=float)
-                    ext_d = np.empty(pair_count, dtype=float)
-                    int_d = np.empty(pair_count, dtype=float)
-                    pol_d = np.empty(pair_count, dtype=float) if (not self.no_negation) else None
-                    msg_jac_d = None
-                    if self.use_jaccard_eval:
-                        # msg_jac_d uses multiset Jaccard over token sequences (order-invariant).
-                        msg_jac_d = compute_correlation.pairwise_multiset_jaccard_distances(sample_signals)
+                    # Pairwise distance vectors built only on non-identical (predicate, signal) pairs.
+                    msg_lev_d = []
+                    ext_d = []
+                    int_d = []
+                    pol_d = [] if (not self.no_negation) else None
+                    msg_jac_d = [] if self.use_jaccard_eval else None
 
-                    k = 0
                     for i in range(n - 1):
                         sig_i_str = signal_strings[i]
+                        sig_i = sample_signals[i]
+                        pid_i = sample_pred_ids[i]
                         ext_i = sample_cand_vecs[i]
                         vec_i = sender_vecs[i]
                         for j in range(i + 1, n):
+                            # Keep one of each pair type.
+                            if (pid_i == sample_pred_ids[j]) and (sig_i == sample_signals[j]):
+                                continue
                             # msg_lev_d: normalized Levenshtein (order-sensitive, normalize by length).
-                            msg_lev_d[k] = compute_correlation.levenshtein_normalised(sig_i_str, signal_strings[j])
+                            msg_lev_d.append(compute_correlation.levenshtein_normalised(sig_i_str, signal_strings[j]))
                             # ext_d: Hamming distance over candidate truth vectors
                             # Hamming is equally sensitive to verify and falsify.
-                            ext_d[k] = sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j]))
+                            ext_d.append(sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j])))
                             # int_d: cosine distance between predicate embeddings (intensional meaning).
-                            int_d[k] = float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j]))
+                            int_d.append(float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j])))
                             # pol_d: symmetric difference over signed literals (equiv. Hamming over binary).
                             if not self.no_negation:
-                                pol_d[k] = float(len(sample_signed_literals[i] ^ sample_signed_literals[j]))
-                            k += 1
+                                pol_d.append(float(len(sample_signed_literals[i] ^ sample_signed_literals[j])))
+                            if self.use_jaccard_eval:
+                                # multiset Jaccard over token sequences (order-invariant).
+                                msg_jac_d.append(compute_correlation.jaccard(sig_i, sample_signals[j]))
+
+                    msg_lev_d = np.asarray(msg_lev_d, dtype=float)
+                    ext_d = np.asarray(ext_d, dtype=float)
+                    int_d = np.asarray(int_d, dtype=float)
+                    if not self.no_negation:
+                        pol_d = np.asarray(pol_d, dtype=float)
+                    if self.use_jaccard_eval:
+                        msg_jac_d = np.asarray(msg_jac_d, dtype=float)
 
                     def _safe_spearman(x, y):
                         # Spearman correlation on pairwise distance vectors; NaN if degenerate.

@@ -8,3 +8,5 @@ python -m concon --do predicate_signalling_game --candidate_sampling random --pr
 
 // With "difficulty" predicate sampling
 python -m concon --do predicate_signalling_game --candidate_sampling balanced --properties 2-2-2-2-2 --max_depth 1 --use_baseline --batch_size 1024 --device cuda --steps_per_epoch 10 --epochs 50  --debug --no_negation --nontrivial_only --num_candidates 2 --candidate_encoder node_averager --learning_rate 0.0005 --hidden_size 48 --predicate_sampling difficulty
+
+python -m concon --do predicate_signalling_game --candidate_sampling balanced --properties 16 --max_depth 2 --use_baseline --batch_size 1024 --device cuda --steps_per_epoch 100 --epochs 15  --nontrivial_only --num_candidates 2 --candidate_encoder node_averager --learning_rate 0.008 --hidden_size 48 --predicate_sampling difficulty --dump_eval_metrics
