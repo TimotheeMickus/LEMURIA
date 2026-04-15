@@ -74,7 +74,7 @@ class AlexBeth(Game):
             self._asker_avg_reward = misc.Averager(size=12800)
             self._retriever_avg_reward = misc.Averager(size=12800)
 
-        self.dump_message_mode = getattr(args, "dump_message", None)
+        self.dump_message_mode = getattr(args, "dump_messages", None)
         self.dump_predicate_perf = getattr(args, "dump_predicate_perf", False)
         self.dump_eval_metrics_enabled = getattr(args, "dump_eval_metrics", False)
         # Fancy language eval is only needed for eval metrics.
@@ -84,6 +84,16 @@ class AlexBeth(Game):
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
+        # "Curriculum learning"; if not None, then some accuracy threshold in [0,1] unlocks it
+        self.curriculum_negation_acc = getattr(args, "curriculum_negation", None)
+        self._curriculum_unlocked = (self.curriculum_negation_acc is None) or self.no_negation
+        self._curriculum_unlock_epoch = None
+        if (self.curriculum_negation_acc is not None) and (not self.no_negation):
+            self._dataset.use_positive_predicates_only()
+            print(
+                f"[curriculum] positive-only phase enabled "
+                f"(unlock_acc={self.curriculum_negation_acc})"
+            )
         # Used to decide whether to dump messages during a hike in performance
         self._prev_eval_perf = None
         self._best_eval_perf = None
@@ -97,7 +107,7 @@ class AlexBeth(Game):
         self._eval_metrics_rows = []
 
         if self.dump_eval_metrics_enabled and (not self.run_fancy_lang_eval):
-            raise ValueError("--dump_eval_metrics requires fancy eval metrics; enable --dump_message.")
+            raise ValueError("--dump_eval_metrics requires fancy eval metrics; enable --dump_messages.")
         
         self.debug = args.debug
         self.message_dump_dir = message_dump_dir # str|None
@@ -217,6 +227,7 @@ class AlexBeth(Game):
             "eval/c.e._falsify",
             "eval/scrambling-resistance",
             "eval/neg_consistency",
+            "eval/curriculum_unlocked",
             "eval/topsim_extensional_norm_levenshtein",
             "eval/topsim_extensional_multi_jaccard",
             "eval/topsim_intensional_norm_levenshtein",
@@ -474,7 +485,6 @@ class AlexBeth(Game):
                 "messages": [],
                 "predicate_ids": [],
                 "predicate_texts": [],
-                "candidate_texts": []
             }
 
         # Cache for language-level eval metrics.
@@ -484,7 +494,6 @@ class AlexBeth(Game):
                 "messages": [],
                 "predicate_ids": [],
                 "predicate_texts": [],
-                "candidate_texts": []
             }
 
         batch_numbers = range(nb_batch)
@@ -638,22 +647,12 @@ class AlexBeth(Game):
                     cache["predicate_ids"].append(int(batch.predicate_idx[i]))
                     # TODO This was crashing
                     # eval_cache["predicate_texts"].append(str(batch.predicate[i]))
-                    # eval_cache["candidate_texts"].append(",".join(str(c) for c in batch.candidate[i]))
                     # ---- and with this it works now:
                     pred_list = getattr(batch, "predicate", None)
                     if pred_list is not None: 
                         cache["predicate_texts"].append(str(pred_list[i]))
                     else: 
                         cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
-                    cand_texts = getattr(batch, "candidate_texts", None)
-                    if cand_texts is not None: 
-                        cache["candidate_texts"].append(cand_texts[i])
-                    else:  
-                        cand_list = getattr(batch, "candidate", None)
-                        if cand_list is not None:
-                            cache["candidate_texts"].append(",".join(str(c) for c in cand_list[i]))
-                        else:
-                            cache["candidate_texts"].append("")
                     
 
         # --- logging and stdout --- #
@@ -676,6 +675,21 @@ class AlexBeth(Game):
         
         avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
+
+        is_perf_hike = False
+        # Curriculum: start with positive-only predicates, unlock all once eval accuracy reaches threshold.
+        if (self.curriculum_negation_acc is not None) and (not self._curriculum_unlocked):
+            if eval_accuracy >= self.curriculum_negation_acc:
+                data_loader.use_all_predicates()
+                self._curriculum_unlocked = True
+                self._curriculum_unlock_epoch = epoch_index
+                is_perf_hike = True
+                print(
+                    f"[curriculum] unlocked all predicates at epoch {epoch_index} "
+                    f"(eval/accuracy={eval_accuracy:.6f})"
+                )
+        curriculum_unlocked = float(self._curriculum_unlocked)
+        log('eval/curriculum_unlocked', curriculum_unlocked)
 
         # Fancy metrics
         verify_ratio = None
@@ -845,6 +859,7 @@ class AlexBeth(Game):
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,
                 "eval/neg_consistency": neg_consistency_ratio,
+                "eval/curriculum_unlocked": curriculum_unlocked,
                 "eval/topsim_extensional_norm_levenshtein": topsim_ext_levenshtein,
                 "eval/topsim_extensional_multi_jaccard": topsim_ext_jaccard,
                 "eval/topsim_intensional_norm_levenshtein": topsim_int_levenshtein,
@@ -862,49 +877,57 @@ class AlexBeth(Game):
 
         #                            #
         # -------------------------- #
-        # Decide if there is a performance hike
-        is_perf_hike = False
+        # Decide if there is a performance hike.
 
         def _min_jump(best):
-                if best < 0.50: return 0.10
-                if best < 0.70: return 0.05
-                if best < 0.90: return 0.01
-                if best < 0.95: return 0.005
-                return 0.001
+            if best < 0.50: return 0.10
+            if best < 0.70: return 0.05
+            if best < 0.90: return 0.01
+            if best < 0.95: return 0.005
+            return 0.001
         
         if self.dump_message_mode in ('when_hike', 'when_hike_strict'):
-            if self._best_eval_perf is None:
+            if (self._curriculum_unlock_epoch is not None and epoch_index == (self._curriculum_unlock_epoch + 1)):
+                # Reset performance baseline.
                 self._best_eval_perf = eval_perf
-            if eval_perf >= 1.0 and eval_perf > self._best_eval_perf:
-                is_perf_hike = True
+                self._prev_eval_perf = eval_perf
+                is_perf_hike = False
             else:
-                delta_min = _min_jump(self._best_eval_perf)
-                if self.dump_message_mode == 'when_hike_strict':
-                    is_perf_hike = (eval_perf > self._best_eval_perf + delta_min) and (eval_perf > 0.95)
-                else:
-                    is_perf_hike = (eval_perf > self._best_eval_perf + delta_min)
+                if self._best_eval_perf is None:
+                    self._best_eval_perf = eval_perf
+                if not is_perf_hike:
+                    if eval_perf >= 1.0 and eval_perf > self._best_eval_perf:
+                        is_perf_hike = True
+                    else:
+                        delta_min = _min_jump(self._best_eval_perf)
+                        if self.dump_message_mode == 'when_hike_strict':
+                            is_perf_hike = (eval_perf > self._best_eval_perf + delta_min) and (eval_perf > 0.95)
+                        else:
+                            is_perf_hike = (eval_perf > self._best_eval_perf + delta_min)
 
-            if is_perf_hike and eval_perf > self._best_eval_perf:
-                self._best_eval_perf = eval_perf
-            self._prev_eval_perf = eval_perf
+                if is_perf_hike and eval_perf > self._best_eval_perf:
+                    self._best_eval_perf = eval_perf
+                self._prev_eval_perf = eval_perf
         # Dumps signals into file every epoch or on the last epoch, depending on the flag
         if self.message_dump_dir and dump_cache is not None and (
             self.dump_message_mode == 'all' or 
             (self.dump_message_mode == 'last' and epoch_index == (self.epochs - 1)) or
-            (self.dump_message_mode in ('when_hike', 'when_hike_strict') and (is_perf_hike or epoch_index == (self.epochs - 1)))
+            (self.dump_message_mode in ('when_hike', 'when_hike_strict')
+                and (is_perf_hike 
+                     or (self._curriculum_unlock_epoch is not None and epoch_index == (self._curriculum_unlock_epoch + 1))
+                     or epoch_index == (self.epochs - 1)))
             ):
             filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
-                _ = writer.writerow(['msg', 'pred_idx', 'pred_str', 'candidates'])
-                for msg, pred_idx, pred_text, cand_text in zip(
+                _ = writer.writerow(['msg', 'pred_idx', 'pred_str'])
+                for msg, pred_idx, pred_text in zip(
                     dump_cache["messages"],
                     dump_cache["predicate_ids"],
                     dump_cache["predicate_texts"],
-                    dump_cache["candidate_texts"],
                 ):
                     msg = ' '.join(map(str, msg))
-                    row = [msg, pred_idx, pred_text, cand_text]
+                    row = [msg, pred_idx, pred_text]
                     _ = writer.writerow(row)
         
         return

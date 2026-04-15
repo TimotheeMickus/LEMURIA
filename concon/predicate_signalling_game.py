@@ -27,7 +27,7 @@ def do(args):
         run_name = build_run_name(args, run)
         run_summary_dir = summary_dir / run_name
         run_models_dir = models_dir / run_name
-        message_dump_dir = run_summary_dir if(args.dump_message is not None) else None
+        message_dump_dir = run_summary_dir if(args.dump_messages is not None) else None
 
         # Loads the data.
         data_loader = get_data_loader(args)
@@ -165,7 +165,7 @@ def get_args(remaining_args=None):
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
-    group.add_argument('--dump_message', help='dump messages: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
+    group.add_argument('--dump_messages', help='dump messages: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --display tqdm should be inferred from the env
@@ -223,6 +223,7 @@ def get_args(remaining_args=None):
     group.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
+    group.add_argument('--curriculum_negation', help='train on predicates without negation first, then unlock all predicates at the given eval accuracy threshold (default: 1.0)', nargs='?', const=1.0, default=None, type=float)
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
@@ -239,6 +240,8 @@ def get_args(remaining_args=None):
     args = arg_parser.parse_args(remaining_args)
     if args.debug and not args.log_debug:
         args.log_debug = True
+    if (args.curriculum_negation is not None) and (not (0.0 <= args.curriculum_negation <= 1.0)):
+        raise ValueError(f"--curriculum_negation threshold must be in [0,1], got {args.curriculum_negation}.")
     if not args.quiet:
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)

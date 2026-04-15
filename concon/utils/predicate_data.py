@@ -484,6 +484,10 @@ class Dataset(SeqAsyncDataset):
         self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction, consider_indeterminate=allow_indeterminate) # ndarray[Predicate]
         # naming convention inconsistent internally but compatible with modules; TIMOTHÉE: be more specific
         self.nb_categories = len(self.predicates) 
+        # Predicate-selection mask used by get_batch. True means "can be sampled".
+        self.predicate_sampling_mask = np.ones((self.nb_categories,), dtype=bool)
+        # Positive predicates are predicates that do not contain any negation node.
+        self.positive_predicate_mask = np.array([not self._has_negation(pred) for pred in self.predicates], dtype=bool)
 
         # Builds a global node vocabulary.
         node_labels = {GraphConverter.object_token} # set[str | (str, str)]
@@ -640,6 +644,26 @@ class Dataset(SeqAsyncDataset):
         print(f"num_candidates: {self.num_candidates}")
         print(f"predicate_sampling: {self.predicate_sampling}")
         print(f"candidate_sampling: {self.candidate_sampling}")
+
+    @staticmethod
+    def _has_negation(predicate):
+        if isinstance(predicate, Negation):
+            return True
+        if isinstance(predicate, Conjunction):
+            return Dataset._has_negation(predicate.pred1) or Dataset._has_negation(predicate.pred2)
+        return False
+
+    def set_predicate_sampling_mask(self, mask):
+        mask = np.asarray(mask, dtype=bool)
+        assert mask.shape == (self.nb_categories,), f"Mask shape {mask.shape} does not match number of predicates ({self.nb_categories})."
+        assert np.any(mask), "Predicate sampling mask cannot be empty."
+        self.predicate_sampling_mask = mask.copy()
+
+    def use_positive_predicates_only(self):
+        self.set_predicate_sampling_mask(self.positive_predicate_mask)
+
+    def use_all_predicates(self):
+        self.predicate_sampling_mask = np.ones((self.nb_categories,), dtype=bool)
    
     # symbols: collection[str]
     # unknown: str
@@ -668,7 +692,16 @@ class Dataset(SeqAsyncDataset):
         if(predicate_sampling is None): predicate_sampling = self.predicate_sampling
         if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
 
-        batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, predicate_sampling=predicate_sampling, candidate_sampling=candidate_sampling, **kwargs);
+        allowed_predicates_idx = kwargs.pop('allowed_predicates_idx', None)
+        if allowed_predicates_idx is None:
+            if not np.all(self.predicate_sampling_mask):
+                allowed_predicates_idx = tuple(np.flatnonzero(self.predicate_sampling_mask).tolist())
+        elif isinstance(allowed_predicates_idx, np.ndarray):
+            allowed_predicates_idx = tuple(allowed_predicates_idx.tolist())
+        elif isinstance(allowed_predicates_idx, list):
+            allowed_predicates_idx = tuple(allowed_predicates_idx)
+
+        batch = self._get_batch(size=size, data_type=data_type, allow_indeterminate=allow_indeterminate, num_candidates=num_candidates, predicate_sampling=predicate_sampling, candidate_sampling=candidate_sampling, allowed_predicates_idx=allowed_predicates_idx, **kwargs);
 
         batch.predicate = [self.predicates[pred_idx] for pred_idx in batch.predicate_idx]
         
@@ -687,6 +720,7 @@ class Dataset(SeqAsyncDataset):
         overfit_pool, predicates, properties, graph_converter, failure_based_distribution, # resource arguments
         **kwargs
     ):
+        allowed_predicates_idx = kwargs.get('allowed_predicates_idx', None)
         batch = []
         if(overfit_pool is not None): # Specific procedure for overfitting mode.
             for _ in range(size):
@@ -694,7 +728,7 @@ class Dataset(SeqAsyncDataset):
                 batch.append((pred_idx, predicate, list(candidates), list(truths))) # TIMOTHÉE Why are the two lists copied (with `list`)?
         else:
             # Samples `size` predicates.
-            for (pred_idx, predicate) in zip(*Dataset._selectPredicates(size, predicates, predicate_sampling, failure_based_distribution)):
+            for (pred_idx, predicate) in zip(*Dataset._selectPredicates(size, predicates, predicate_sampling, failure_based_distribution, allowed_predicates_idx=allowed_predicates_idx)):
                 # Samples `num_candidates` candidates.
                 if(candidate_sampling == 'balanced'):
                     candidates, truths = Dataset._generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate, properties)
@@ -714,8 +748,8 @@ class Dataset(SeqAsyncDataset):
     # nb: int
     # predicate_sampling: str
     # Outputs a (np.array[int], np.array[Predicate]).
-    def selectPredicates(self, nb, predicate_sampling):
-        return self._selectPredicates(nb, self.predicates, predicate_sampling, self.failure_based_distribution)
+    def selectPredicates(self, nb, predicate_sampling, allowed_predicates_idx=None):
+        return self._selectPredicates(nb, self.predicates, predicate_sampling, self.failure_based_distribution, allowed_predicates_idx=allowed_predicates_idx)
 
     # nb: int
     # predicates: list[Predicate]
@@ -723,11 +757,18 @@ class Dataset(SeqAsyncDataset):
     # failure_based_distribution: FailureBasedDistribution
     # Outputs a (np.array[int], np.array[Predicate]).
     @staticmethod
-    def _selectPredicates(nb, predicates, predicate_sampling, failure_based_distribution):
+    def _selectPredicates(nb, predicates, predicate_sampling, failure_based_distribution, allowed_predicates_idx=None):
+        if allowed_predicates_idx is None:
+            allowed_predicates_idx = np.arange(len(predicates))
+        else:
+            allowed_predicates_idx = np.asarray(allowed_predicates_idx, dtype=np.int64)
+        if allowed_predicates_idx.size == 0:
+            raise ValueError("No predicates are available for sampling.")
+
         if(predicate_sampling == "random"):
-            indices = np.random.randint(0, len(predicates), size=(nb,))
+            indices = np.random.choice(allowed_predicates_idx, size=(nb,), replace=True)
         elif(predicate_sampling == "difficulty"):
-            indices = failure_based_distribution.sample(nb)
+            indices = failure_based_distribution.sample(nb, allowed_predicates_idx=allowed_predicates_idx)
         else:
             raise ValueError(f"Predicate sampling strategy unknown: {predicate_sampling}.")
         
