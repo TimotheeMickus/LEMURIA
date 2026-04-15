@@ -1,7 +1,7 @@
-import time
 import re
 import pandas as pd
 import numpy as np
+from collections import Counter
 
 def _tokenize_messages(language: pd.DataFrame):
     assert "msg" in language.columns, "language must have a 'msg' column"
@@ -11,230 +11,171 @@ def _tokenize_messages(language: pd.DataFrame):
     return tokenized, vocab
 
 def _build_presence_matrix(tokenized, vocab):
-    '''Build binary matrix X of (N_messages, |V|). 
-    Set X[i,j]=1 if vocab[j] appears in message i.'''
-    X = np.zeros((len(tokenized), len(vocab)), dtype=int)
+    '''Build binary matrix M of (|messages|, |vocab|).
+    Set M[i,j]=1 if vocab[j] appears in message #i.'''
+    M = np.zeros((len(tokenized), len(vocab)), dtype=int)
     tok2idx = {t: i for i, t in enumerate(vocab)}
     for i, toks in enumerate(tokenized):
         for t in toks:
-            X[i, tok2idx[t]] = 1
-    return X
+            M[i, tok2idx[t]] = 1
+    return M
 
-print("Mock language:")
-def _pred_str(neg, idx):
-    base = f"P0-v{idx}"
-    return f"(¬{base})" if neg else base
-rows = []
-rows.append({"msg": "1 0", "pred_str": _pred_str(False, 0)})
-rows.append({"msg": "17 1 0", "pred_str": _pred_str(True, 0)})
-rows.append({"msg": "2 0", "pred_str": _pred_str(False, 1)})
-rows.append({"msg": "17 2 0", "pred_str": _pred_str(True, 1)})
-rows.append({"msg": "3 4 0", "pred_str": _pred_str(False, 2)})
-rows.append({"msg": "17 4 0", "pred_str": _pred_str(True, 2)})
-rows.append({"msg": "5 0", "pred_str": _pred_str(False, 3)})
-rows.append({"msg": "15 5 0", "pred_str": _pred_str(True, 3)})
-# rows.append({"msg": "16 18 0", "pred_str": _pred_str(False, 4)})
-# rows.append({"msg": "15 16 0", "pred_str": _pred_str(True, 4)})
-toy_set = pd.DataFrame(rows)
-print(toy_set)
-print()
-tok, voc = _tokenize_messages(toy_set)
-print(f"Tokenized signals:\n{tok}\nVocabulary:\n{voc}")
-X        = _build_presence_matrix(tok, voc)
-print(f"Presence matrix for vocabulary:\n{X}")
-
-# Input: language and features
-# raw features and the data structure after evaluating disjunctions must be the same
-# two cases:
-# 1. 
-# find such tokens or disjunctions of tokens (== features) that their MI with the predicate values is close to 1, this means they separate the meaning space in half (negation); 
-# evaluate each of these disjunctions for 
-# precision (number of signals such that the feature is in the signal and the signal designates some negative predicate value / number of negative predicate values), 
-# recall (number of signals such that the feature is in the signal and the signal designates some negative predicate value / number of predicate values where the signal occurs), 
-# and the XOR criterion (number of predicate values such that [there is a signal that designates the positive value and the feature is in the signal XOR there is a signal that designates the negative value and the feature is in the signal] / total number of predicate values)
-# all the above values are in [0,1]
-# 2.
-# start directly from the XOR criterion, without evaluating MI first; build disjunctions based on the XOR ratio, then we can compute precision and recall
-# Let us try and focus on case 2.
-
-def parse_pred(s):
-    # Parses predicate labels: negative/positive
-    s = str(s)
-    m = re.match(r"^\(¬(.+)\)$", s)
-    if m:
-        return m.group(1), True
+def _parse_predicate(s):
+    '''Parse a predicate into (value, negation bit).'''
+    m = re.match(r"^\(¬(.+)\)$", str(s))
+    if(m): return m.group(1), True
     return s, False
 
-# Build features from presence matrix:
-# Each token is mapped to its binary feature vector across all messages
-# features[("tok", t)] = [False, True, ...]
-features = {("tok", t): X[:, j].astype(bool) for j, t in enumerate(voc)}
-print(f"Features:\n{features}")
+def _build_features(vocab, M):
+    '''For each token t, define a binary feature vector over messages: X_t(S) = 1[t in s].'''
+    return {("tok", frozenset({tok})): M[:, j].astype(bool) for j, tok in enumerate(vocab)}
 
-# Prune based on a NAND criterion to keep numbers manageable.
-# Indeed, NAND rejects features that appear on both the positive and the negative side for a given predicate value.
-# NAND(feature) =
-# #(base predicate values v such that
-#   [NOT (exists positive signal for v with feature) OR
-#    NOT (exists negative signal for v with feature)])
-# / #(base predicate values)
-vs = []
-is_neg = []
-for s in toy_set["pred_str"]:
-    b, n = parse_pred(s)
-    vs.append(b)
-    is_neg.append(n)
-vs = np.array(vs, dtype=object)
-is_neg = np.array(is_neg, dtype=bool)
-print(f"whether occurrence is negative:\n{list(zip(vs, is_neg))}")
+def _select_top_k(features, score_fn, top_k):
+    '''Keep the k highest-scoring features according to score_fn.'''
+    return dict(sorted(features.items(), key=lambda kv: score_fn(kv[1]), reverse=True)[:top_k])
 
-v_types = sorted(set(vs))
-kept = {}
+def _expand_features(features, parents, operator, score_fn):
+    '''Build composite features that strictly improve over both parent scores.'''
+    assert operator in ["or", "and"]
+    if(operator == "or"): op_fn = np.logical_or
+    if(operator == "and"): op_fn = np.logical_and
+    items = list(parents.items())
+    parent_scores = {key: score_fn(X) for key, X in items}
+    new_features = {}
+    for i, (key_a, X_a) in enumerate(items):
+        _, atoms_a = key_a
+        for key_b, X_b in items[i+1:]:
+            _, atoms_b = key_b
+            if(atoms_a & atoms_b): continue
+            atoms = atoms_a | atoms_b
+            key = (operator, frozenset(atoms))
+            if(key in features or key in new_features): continue
+            X = op_fn(X_a, X_b)
+            score = score_fn(X)
+            if(score <= parent_scores[key_a] or score <= parent_scores[key_b]): continue
+            new_features[key] = X
+    return new_features
 
-for feature_name, f in features.items():
-    # reminder: f is a boolean vector over rows/messages
-    nand_hits = 0
-    for v in v_types:
-        v_mask = (vs == v)
-        E_pos_and_feature = np.any(f[v_mask & (~is_neg)])
-        E_neg_and_feature = np.any(f[v_mask & is_neg])
+def _grow_features(vocab, M, score_fn, operator, top_k=None, max_size=None):
+    '''Grow features over max_size rounds or as long as score improves.'''
+    features = _build_features(vocab, M)
+    if(max_size is not None and max_size <= 1):
+        return features
 
-        # NAND
-        if ((not E_pos_and_feature) or (not E_neg_and_feature)):
-            nand_hits += 1
+    frontier = dict(features)
+    current_size = 1
+    best_score = max(score_fn(X) for X in features.values())
 
-    if nand_hits / len(v_types) == 1:
-        kept[feature_name] = f
+    while True:
+        if(max_size is not None and current_size >= max_size): break
+        round_top_k = None if current_size == 1 else top_k
+        parents = _select_top_k(frontier, score_fn, top_k=round_top_k)
+        new_features = _expand_features(features, parents, operator=operator, score_fn=score_fn)
+        if(not new_features): break
+        round_best = max(score_fn(X) for X in new_features.values())
+        if(max_size is None and round_best <= best_score): break
+        features.update(new_features)
+        frontier = new_features
+        best_score = max(best_score, round_best)
+        current_size += 1
 
-print(f"NAND kept: {kept}")
-# Hereforth only consider pruned elements
-features = kept
+    return features
 
+def _entropy(X):
+    '''H(X) = -Σ_x p(x) log p(x).'''
+    counts_x = Counter(X)
+    n_x = sum(counts_x.values())
+    return -sum(count / n_x * np.log2(count / n_x) for count in counts_x.values())
 
-# Now we evaluate the XOR criterion
-# Start with single-token features and score each by XOR
-# Keep the features that score high
-# Then n times combine retained features with all vocabulary tokens and compute XOR(new_feature), keep only if XOR increased over parent feature
-# Augment pool with new features
+def _joint_entropy(*vars):
+    '''H(X,Y) = -Σ_xy p(x,y) log p(x,y).'''
+    assert len(vars) > 0, "need at least one variable"
+    assert all(len(v) == len(vars[0]) for v in vars), "variables must be of equal length"
+    return _entropy(list(zip(*vars)))
 
-def _xor_score(f, vs, is_neg, v_types):
-    xor_hits = 0
-    for v in v_types:
-        v_mask = (vs == v)
-        E_pos_and_feature = np.any(f[v_mask & (~is_neg)])
-        E_neg_and_feature = np.any(f[v_mask & is_neg])
-        if E_pos_and_feature ^ E_neg_and_feature:
-            xor_hits += 1
-    return (xor_hits / len(v_types)) if len(v_types) else 0.0
+def _conditional_entropy(X, Y):
+    '''H(X|Y) = -Σ_xy p(x,y) log p(x|y).'''
+    assert len(X) == len(Y), "variables must be of equal length"
+    counts_xy = Counter(zip(X,Y))
+    counts_y = Counter(Y)
+    n_xy = sum(counts_xy.values())
+    return -sum(count / n_xy * np.log2(count / counts_y[xy[1]]) for xy, count in counts_xy.items())
 
-N = 3
-xor_scores, active = {}, {}
+def _conditional_mi(X, Y, Z):
+    '''I(X;Y|Z) = H(X,Z) + H(Y,Z) - H(Z) - H(X,Y,Z).'''
+    assert len(X) == len(Y) == len(Z), "variables must be of equal length"
+    # Joint entropy
+    h_xz = _joint_entropy(X,Z)
+    h_yz = _joint_entropy(Y,Z)
+    h_z = _entropy(Z)
+    h_xyz = _joint_entropy(X,Y,Z)
+    return h_xz + h_yz - h_z - h_xyz
 
-for feature_name, f in features.items():
-    xor_score = _xor_score(f, vs, is_neg, v_types)
-    xor_scores[feature_name] = xor_score
-    active[feature_name] = f
+# S : set of all signals
+# s : one observed signal
+# X : candidate negation feature
+# V : predicate value
+# N : polarity bit (1 = negation, 0 = non-negation)
+# If X = {t1, ..., tk}, then for any signal s,
+# T = b(s) = (1[t1 ∈ s], ..., 1[tk ∈ s]) ∈ {0,1}^k
+# is the activation pattern of X in s.
+# R(s) : for a signal s, the remainder after removing the atoms of X
+#        i.e. R(s) = s \ {t1, ..., tk} if X = {t1, ..., tk}
+# n = I(X;N|V)/H(N|V) : X marque-t-il l'opposition de polarité relativement à V ?
+# l_X = I(X;V|N)/H(V|N) : la présence de X divulgue-t-elle de l'information sur la valeur du prédicat ?
+# l_T = I(T;V|X=1)/H(V|X=1) : si X est composé, son état interne divulgue-t-il la valeur du prédicat ?
+# r = I(R;V|X=1)/H(V|X=1) : après retrait de X, le reste du signal R conserve-t-il la valeur du prédicat ? (ancien u_T')
 
-feature_pool = dict(features)
+def _negation_strength(X, N, V):
+    '''I(X;N|V) / H(N|V).
+    Measures if a feature marks polarity relative to predicate value.'''
+    return _conditional_mi(X, N, V) / _conditional_entropy(N, V)
 
-for step in range(N):
-    print(f"XOR expansion round {step+1}/{N}")
-    new_active = {}
-    
-    for parent_name, parent_f in active.items():
-        parent_score = xor_scores[parent_name]
+def _leak_unary(X, V, N):
+    '''I(X;V|N) / H(V|N).
+    Measures if the presence of a feature carries information on predicate value.'''
+    return _conditional_mi(X, V, N) / _conditional_entropy(V, N)
 
-        if parent_name[0] == "tok":
-            parent_tokens = {parent_name[1]}
-        else:
-            parent_tokens = set(parent_name[1])
+def _leak_composite(T, V, X):
+    '''I(T;V|X=1) / H(V|X=1).
+    If the feature is composite, measures if its internal state carries information on predicate value.'''
+    assert True, "TODO"
+    pass
 
-        for tok_name, tok_f in features.items():
-            if tok_name[0] != "tok":
-                continue
-            t = tok_name[1]
-            if t in parent_tokens:
-                continue
-
-            child_tokens = tuple(sorted(parent_tokens | {t}))
-            child_name = ("or", child_tokens)
-
-            if child_name in feature_pool:
-                continue
-
-            child_f = parent_f | tok_f
-            child_score = _xor_score(child_f, vs, is_neg, v_types)
-
-            # keep only if not worse than parent (+ above threshold)
-            if child_score + 1e-12 >= parent_score:
-                feature_pool[child_name] = child_f
-                xor_scores[child_name] = child_score
-                new_active[child_name] = child_f
-
-    if not new_active:
-        print("Nothing new.")
-        break
-    active = new_active
-
-    print(f"New features:\n{sorted(new_active.keys(), key=lambda n: xor_scores[n], reverse=True)}")
-
-print("\nBest features (10 max):")
-for name, s in sorted(xor_scores.items(), key=lambda kv: kv[1], reverse=True)[:10]:
-    print(f"{name} -> XOR={s:.3f}")
-
-print(feature_pool)
-features = feature_pool
-
-# calculate precision / recall
-# also, calculate homogeneity:
-# max(
-# [number of predicate values s.t. there is a signal that expresses the positive predicate value and the feature belongs to the signal / number of predicate values],
-# [number of predicate values s.t. there is a signal that expresses the negative predicate value and the feature belongs to the signal / number of predicate values]
-# )
-rows = []
-n_v = len(v_types)
-for name, f in features.items():
-    if name[0] == "tok":
-        name_str = name[1]
-    else:
-        name_str = "(" + " ∨ ".join(name[1]) + ")"
-
-    present_in_v, present_in_not_v = [], []
-    pos_hits, neg_hits, any_hits = 0, 0, 0
-
-    for v in v_types:
-        v_mask = (vs == v)
-        E_pos_and_feature = np.any(f[v_mask & (~is_neg)])
-        E_neg_and_feature = np.any(f[v_mask & is_neg])
-
-        if E_pos_and_feature:
-            present_in_v.append(v)
-            pos_hits += 1
-            any_hits += 1
-        if E_neg_and_feature:
-            present_in_not_v.append(f"¬{v}")
-            neg_hits += 1
-            any_hits += 1
-    
-    precision   = (neg_hits / any_hits) if any_hits else 0.0
-    recall      = (neg_hits / n_v) if n_v else 0.0
-    homogeneity = max((pos_hits / n_v) if n_v else 0.0,
-                   (neg_hits / n_v) if n_v else 0.0)
-    
-    rows.append({
-        "name": name,
-        "name_str": name_str,
-        "v": present_in_v,
-        "¬v": present_in_not_v,
-        "xor_score": xor_scores[name],
-        "precision": precision,   # purity
-        "recall": recall,         # coverage
-        "homogeneity": homogeneity
-    })
+def _signal_conservation(R, V, X):
+    '''I(R;V|X=1) / H(V|X=1).
+    After feature is removed from the signal, measures if its remainder carry information on predicate value.'''
+    pass
 
 
-stats = pd.DataFrame(rows).sort_values(
-    ["xor_score", "precision", "recall", "homogeneity"], ascending=False
-).reset_index(drop=True)
+# DEBUG
+if __name__ == "__main__":
+    import pathlib
+    directory = pathlib.Path(__file__).resolve().parents[3] / "runs" / "n_complexity_memory" / "props=16__d=1-2__cand=2__enc=node_averager__cs=balanced__t=2026-03-27_12-40-18__run=0"
+    filename = "msgs.e7.csv"
+    language = pd.read_csv(directory / filename)
+    V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
+    tok, voc = _tokenize_messages(language)
+    M = _build_presence_matrix(tok, voc)
 
-print(stats[["name_str", "xor_score", "precision", "recall", "homogeneity"]].to_string(index=False))
+    print(f"vocab size: {len(voc)}")
+    score_fn = lambda X: _negation_strength(X, N, V)
+    configs = [
+        ("Singles only (max_size=1)", dict(operator="or", top_k=20, max_size=1)),
+        ("OR one expansion round (max_size=2)", dict(operator="or", top_k=20, max_size=2)),
+        ("AND one expansion round (max_size=2)", dict(operator="and", top_k=20, max_size=2)),
+        ("OR until plateau (max_size=None)", dict(operator="or", top_k=20, max_size=None)),
+        ("AND until plateau (max_size=None)", dict(operator="and", top_k=20, max_size=None)),
+    ]
+
+    for title, params in configs:
+        features = _grow_features(voc, M, score_fn, **params)
+        ranked = sorted(((key, score_fn(X)) for key, X in features.items()), key=lambda kv: kv[1], reverse=True)
+        max_atoms = max(len(key[1]) for key in features)
+        print(f"\n=== {title} ===")
+        print(f"features: {len(features)} | max atoms: {max_atoms}")
+        print("top 5:")
+        for i, (key, score) in enumerate(ranked[:5], start=1):
+            op, atoms = key
+            print(f"{i:2d}. {op}({','.join(sorted(atoms))}) -> {score:.4f}")
+# END DEBUG
