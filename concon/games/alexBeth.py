@@ -688,7 +688,7 @@ class AlexBeth(Game):
                     f"[curriculum] unlocked all predicates at epoch {epoch_index} "
                     f"(eval/accuracy={eval_accuracy:.6f})"
                 )
-        curriculum_unlocked = float(self._curriculum_unlocked)
+        curriculum_unlocked = float((self._curriculum_unlock_epoch is not None) and (epoch_index > self._curriculum_unlock_epoch))
         log('eval/curriculum_unlocked', curriculum_unlocked)
 
         # Fancy metrics
