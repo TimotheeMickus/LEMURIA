@@ -178,14 +178,8 @@ def _signal_conservation(R, V, X):
     if(h <= 0): return np.nan
     return _mutual_information(R_0, V_0) / h
 
-
-if __name__ == "__main__":
-    import pathlib
-    # DEBUG, choose existing directory
-    directory = pathlib.Path(__file__).resolve().parents[3] / "runs" / "n_complexity_memory" / "props=16__d=1-2__cand=2__enc=node_averager__cs=balanced__t=2026-03-27_12-40-18__run=0"
-    filename = "msgs.e7.csv"
+def analysis(language, sort_order: list = None, top_rows=None):
     # language: pd.DataFrame with "msg" and "pred_str" columns
-    language = pd.read_csv(directory / filename)
     # V: np.ndarray shape (n_msgs,), predicate values (str/object)
     # N: np.ndarray shape (n_msgs,), negation flags (bool)
     V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
@@ -209,9 +203,58 @@ if __name__ == "__main__":
 
     rows = []
     for key, X in features.items():
-        # If X = {t1, ..., tk}, then for any signal s,
-        # T = b(s) = (1[t1 ∈ s], ..., 1[tk ∈ s]) ∈ {0,1}^k
-        # is the activation pattern of X in s.
+        op, atoms = key
+        T = _build_T(key, unary_features)
+        R = _build_R(key, tok)
+        rows.append({
+            "feature": f"{op}({','.join(sorted(atoms))})",
+            "n": _negation_strength(X, N, V),
+            "l_X": _leak_unary(X, V, N),
+            "l_T": _leak_composite(T, V, X),
+            "r": _signal_conservation(R, V, X),
+            "atoms": len(atoms),
+            "support": float(np.mean(X)),
+        })
+    mapping = {"n": False, "r": False, "support": False, "atoms": True, "l_T": True, "l_X": True}
+    if sort_order is not None:
+        assert set(sort_order).issubset({"n", "r", "l_T", "l_X", "atoms", "support"}), "invalid key in sort_order"
+    else:
+        sort_order = ["n", "r", "l_T", "l_X"]
+    ascending = [mapping[k] for k in sort_order]
+    # pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
+    return pd.DataFrame(rows).sort_values(sort_order, ascending=ascending, na_position="last").head(top_rows)
+
+
+if __name__ == "__main__":
+    import pathlib
+    # DEBUG, choose existing directory
+    # language: pd.DataFrame with "msg" and "pred_str" columns
+    language = pd.read_csv(
+        pathlib.Path(__file__).resolve().parents[3] / "runs" / "n_complexity_memory" / "props=16__d=1-2__cand=2__enc=node_averager__cs=balanced__t=2026-03-27_12-40-18__run=0" / "msgs.e7.csv"
+    )
+    # V: np.ndarray shape (n_msgs,), predicate values (str/object)
+    # N: np.ndarray shape (n_msgs,), negation flags (bool)
+    V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
+    # tok: list[list[str]], length n_msgs
+    # voc: list[str], length n_vocab
+    tok, voc = _tokenize_messages(language)
+    # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
+    M = _build_presence_matrix(tok, voc)
+    # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
+    # score_fn output: float
+    score_fn = lambda X: _negation_strength(X, N, V)
+    # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
+    # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
+    features = _grow_features(voc, M, score_fn, operator="or", top_k=20, max_size=None)
+    # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
+    unary_features = {
+        a: features[("tok", frozenset({a}))].astype(np.uint8) 
+        for _, atoms in features.keys() if len(atoms) == 1 
+        for a in atoms
+        }
+
+    rows = []
+    for key, X in features.items():
         op, atoms = key
         T = _build_T(key, unary_features)
         R = _build_R(key, tok)
