@@ -101,6 +101,14 @@ def _conditional_entropy(X, Y):
     n_xy = sum(counts_xy.values())
     return -sum(count / n_xy * np.log2(count / counts_y[xy[1]]) for xy, count in counts_xy.items())
 
+def _mutual_information(X, Y):
+    '''I(X;Y) = H(X) + H(Y) - H(X, Y).'''
+    assert len(X) == len(Y), "variables must be of equal length"
+    h_x = _entropy(X)
+    h_y = _entropy(Y)
+    h_xy = _joint_entropy(X,Y)
+    return h_x + h_y - h_xy
+
 def _conditional_mi(X, Y, Z):
     '''I(X;Y|Z) = H(X,Z) + H(Y,Z) - H(Z) - H(X,Y,Z).'''
     assert len(X) == len(Y) == len(Z), "variables must be of equal length"
@@ -126,6 +134,18 @@ def _conditional_mi(X, Y, Z):
 # l_T = I(T;V|X=1)/H(V|X=1) : si X est composé, son état interne divulgue-t-il la valeur du prédicat ?
 # r = I(R;V|X=1)/H(V|X=1) : après retrait de X, le reste du signal R conserve-t-il la valeur du prédicat ? (ancien u_T')
 
+def _build_T(key, features):
+    # key = (op, frozenset(atoms))
+    _, atoms = key
+    cols = [features[a] for a in sorted(atoms)]
+    B = np.column_stack(cols) # shape: (n_msgs, |atoms|)
+    return [tuple(row) for row in B]
+
+def _build_R(key, tok):
+    # key = (op, frozenset(atoms))
+    _, atoms = key
+    return [frozenset(t for t in msg if t not in set(atoms)) for msg in tok]
+
 def _negation_strength(X, N, V):
     '''I(X;N|V) / H(N|V).
     Measures if a feature marks polarity relative to predicate value.'''
@@ -139,43 +159,71 @@ def _leak_unary(X, V, N):
 def _leak_composite(T, V, X):
     '''I(T;V|X=1) / H(V|X=1).
     If the feature is composite, measures if its internal state carries information on predicate value.'''
-    assert True, "TODO"
-    pass
+    X = np.asarray(X).astype(bool)
+    if(not np.any(X)): return np.nan
+    T_0 = [t for t, keep in zip(T, X) if keep]
+    V_0 = np.asarray(V)[X]
+    h = _entropy(V_0)
+    if(h <= 0): return np.nan
+    return _mutual_information(T_0, V_0) / h
 
 def _signal_conservation(R, V, X):
     '''I(R;V|X=1) / H(V|X=1).
     After feature is removed from the signal, measures if its remainder carry information on predicate value.'''
-    pass
+    X = np.asarray(X, dtype=bool)
+    if(not np.any(X)): return np.nan
+    V_0 = np.asarray(V)[X]
+    R_0 = [r for r, keep in zip(R, X) if keep]
+    h = _entropy(V_0)
+    if(h <= 0): return np.nan
+    return _mutual_information(R_0, V_0) / h
 
 
-# DEBUG
 if __name__ == "__main__":
     import pathlib
+    # DEBUG, choose existing directory
     directory = pathlib.Path(__file__).resolve().parents[3] / "runs" / "n_complexity_memory" / "props=16__d=1-2__cand=2__enc=node_averager__cs=balanced__t=2026-03-27_12-40-18__run=0"
     filename = "msgs.e7.csv"
+    # language: pd.DataFrame with "msg" and "pred_str" columns
     language = pd.read_csv(directory / filename)
+    # V: np.ndarray shape (n_msgs,), predicate values (str/object)
+    # N: np.ndarray shape (n_msgs,), negation flags (bool)
     V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
+    # tok: list[list[str]], length n_msgs
+    # voc: list[str], length n_vocab
     tok, voc = _tokenize_messages(language)
+    # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
     M = _build_presence_matrix(tok, voc)
-
-    print(f"vocab size: {len(voc)}")
+    # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
+    # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
-    configs = [
-        ("Singles only (max_size=1)", dict(operator="or", top_k=20, max_size=1)),
-        ("OR one expansion round (max_size=2)", dict(operator="or", top_k=20, max_size=2)),
-        ("AND one expansion round (max_size=2)", dict(operator="and", top_k=20, max_size=2)),
-        ("OR until plateau (max_size=None)", dict(operator="or", top_k=20, max_size=None)),
-        ("AND until plateau (max_size=None)", dict(operator="and", top_k=20, max_size=None)),
-    ]
+    # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
+    # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
+    features = _grow_features(voc, M, score_fn, operator="or", top_k=20, max_size=None)
+    # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
+    unary_features = {
+        a: features[("tok", frozenset({a}))].astype(np.uint8) 
+        for _, atoms in features.keys() if len(atoms) == 1 
+        for a in atoms
+        }
 
-    for title, params in configs:
-        features = _grow_features(voc, M, score_fn, **params)
-        ranked = sorted(((key, score_fn(X)) for key, X in features.items()), key=lambda kv: kv[1], reverse=True)
-        max_atoms = max(len(key[1]) for key in features)
-        print(f"\n=== {title} ===")
-        print(f"features: {len(features)} | max atoms: {max_atoms}")
-        print("top 5:")
-        for i, (key, score) in enumerate(ranked[:5], start=1):
-            op, atoms = key
-            print(f"{i:2d}. {op}({','.join(sorted(atoms))}) -> {score:.4f}")
-# END DEBUG
+    rows = []
+    for key, X in features.items():
+        # If X = {t1, ..., tk}, then for any signal s,
+        # T = b(s) = (1[t1 ∈ s], ..., 1[tk ∈ s]) ∈ {0,1}^k
+        # is the activation pattern of X in s.
+        op, atoms = key
+        T = _build_T(key, unary_features)
+        R = _build_R(key, tok)
+        rows.append({
+            "feature": f"{op}({','.join(sorted(atoms))})",
+            "n": _negation_strength(X, N, V),
+            "l_X": _leak_unary(X, V, N),
+            "l_T": _leak_composite(T, V, X),
+            "r": _signal_conservation(R, V, X),
+            "atoms": len(atoms),
+            "support": float(np.mean(X)),
+        })
+    # report: pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
+    report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X"], ascending=[False, False, True, True, False], na_position="last")
+    print(report.head(20).to_string(index=False))
