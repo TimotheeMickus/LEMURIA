@@ -190,6 +190,18 @@ class Value(Predicate):
 
     def __str__(self): return self.name
 
+    # A value predicate is always verifiable: assign this value to its property.
+    def isVerifiable(self):
+        return True
+
+    # It is falsifiable iff the property has at least one different value.
+    def isFalsifiable(self):
+        return (len(self.prop.values) > 1)
+
+    # O(1) exact nontriviality for atomic predicates.
+    def isNontrivial(self):
+        return (len(self.prop.values) > 1)
+
 class Negation(Predicate):
     def __init__(self, predicate):
         super(Negation, self).__init__()
@@ -208,6 +220,16 @@ class Negation(Predicate):
         return self.predicate.build(target=(-target))
 
     def __str__(self): return f"(¬{self.predicate})"
+
+    # Negation swaps verifiable/falsifiable and preserves nontriviality.
+    def isVerifiable(self):
+        return self.predicate.isFalsifiable()
+
+    def isFalsifiable(self):
+        return self.predicate.isVerifiable()
+
+    def isNontrivial(self):
+        return self.predicate.isNontrivial()
 
 class Conjunction(Predicate):
     # pred1, pred2: Predicate
