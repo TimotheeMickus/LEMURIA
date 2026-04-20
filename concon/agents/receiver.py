@@ -76,7 +76,7 @@ class Receiver(Agent):
         other_parameters = dict(other_receiver.named_parameters())
         
         for name, parameters in dict(self.named_parameters()).items():
-            parameters.data = other_parameters[name].data
+            parameters.data.copy_(other_parameters[name].data.to(device=parameters.device, dtype=parameters.dtype))
             parameters.requires_grad = other_parameters[name].requires_grad
 
     # The two optional arguments are specified when creating a SenderReceiver.

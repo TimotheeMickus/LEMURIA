@@ -49,7 +49,7 @@ class Drawer(Agent):
         other_parameters = dict(other_drawer.named_parameters())
         
         for name, parameters in dict(self.named_parameters()).items():
-            parameters.data = other_parameters[name].data
+            parameters.data.copy_(other_parameters[name].data.to(device=parameters.device, dtype=parameters.dtype))
             parameters.requires_grad = other_parameters[name].requires_grad
 
     # Currently (2023-02-28), the optional argument is never specified.

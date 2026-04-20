@@ -224,6 +224,7 @@ def get_args(remaining_args=None):
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
     group.add_argument('--curriculum_negation', help='train on predicates without negation first, then unlock all predicates at the given eval accuracy threshold (default: 1.0)', nargs='?', const=1.0, default=None, type=float)
+    group.add_argument('--beth_reaper_step', help='reinitialize Beth every N training epochs', default=None, type=int)
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
