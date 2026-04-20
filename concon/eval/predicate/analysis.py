@@ -15,6 +15,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", nargs="?", help="experiment name under runs/")
     parser.add_argument("--negation", action="store_true", help="run negation analysis")
+    parser.add_argument("--negation-top-rows", type=int, default=10, help="number of top rows per run")
+    parser.add_argument("--latest-only", action="store_true", help="analyze only latest language per run (default: analyze all)")
     parser.add_argument("--plots", action="store_true", help="generate plots")
     args = parser.parse_args()
     experiment_path = args.experiment or input("Experiment name: ")
@@ -48,26 +50,31 @@ if __name__ == "__main__":
         avg_used_vocab = 0
         if d['evaluation'] is not None:
             has_eval += 1
-            vocab_sum += d['evaluation']['eval/vocab_used'].iloc[-1]
-            vocab_count += 1
+            if "eval/vocab_used" in d["evaluation"].columns and not d["evaluation"].empty:
+                vocab_sum += d['evaluation']['eval/vocab_used'].iloc[-1]
+                vocab_count += 1
         if d['predicates'] is not None:
             has_pred += 1
         if d['languages']:
             has_lang += 1
     print(f"Found {total} datapoints.")
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
-    print(f"Average vocab length: {vocab_sum/vocab_count}")
+    print(f"Average vocab length: {vocab_sum/vocab_count if vocab_count else 'n/a'}")
 
     if args.negation:
-        pass
+        negation.export_analysis(
+            datapoints_list,
+            experiment_name=experiment_path,
+            top_rows=args.negation_top_rows,
+            latest_only=args.latest_only,
+            outputs_dir=pathlib.Path(__file__).resolve().parent / "outputs",
+        )
 
     run_plots = args.plots or (args.negation is None)
     cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
     if run_plots:
         # Plot: epochs to max accuracy/performance
         cm.plot_time_to_max_accuracy()
-        if args.negation_mode:
-            cm.plot_message_compression(group_by=("negation",))
         cm.plot_message_compression(group_by=("properties",))
         cm.plot_message_compression(group_by=("hidden_size",))
     # cm.plot_message_compression(group_by=("negation","properties"))

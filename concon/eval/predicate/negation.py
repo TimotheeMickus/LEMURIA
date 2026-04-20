@@ -1,4 +1,5 @@
 import re
+import pathlib
 import pandas as pd
 import numpy as np
 from collections import Counter
@@ -178,7 +179,7 @@ def _signal_conservation(R, V, X):
     if(h <= 0): return np.nan
     return _mutual_information(R_0, V_0) / h
 
-def analysis(language, sort_order: list = None, top_rows=None):
+def analysis(language, sort_order: list = None, top_rows=10):
     # language: pd.DataFrame with "msg" and "pred_str" columns
     # V: np.ndarray shape (n_msgs,), predicate values (str/object)
     # N: np.ndarray shape (n_msgs,), negation flags (bool)
@@ -206,6 +207,7 @@ def analysis(language, sort_order: list = None, top_rows=None):
         op, atoms = key
         T = _build_T(key, unary_features)
         R = _build_R(key, tok)
+        verified_predicates = language.loc[np.asarray(X, dtype=bool), "pred_str"].astype(str).drop_duplicates().tolist()
         rows.append({
             "feature": f"{op}({','.join(sorted(atoms))})",
             "n": _negation_strength(X, N, V),
@@ -214,6 +216,7 @@ def analysis(language, sort_order: list = None, top_rows=None):
             "r": _signal_conservation(R, V, X),
             "atoms": len(atoms),
             "support": float(np.mean(X)),
+            "verified_predicates": " ; ".join(verified_predicates),
         })
     mapping = {"n": False, "r": False, "support": False, "atoms": True, "l_T": True, "l_X": True}
     if sort_order is not None:
@@ -223,6 +226,48 @@ def analysis(language, sort_order: list = None, top_rows=None):
     ascending = [mapping[k] for k in sort_order]
     # pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
     return pd.DataFrame(rows).sort_values(sort_order, ascending=ascending, na_position="last").head(top_rows)
+
+
+def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10, latest_only: bool = False, outputs_dir=None):
+    """Perform analysis over datapoints and export a csv with top rows and a csv with the one top row."""
+    if(outputs_dir is None): outputs_dir = pathlib.Path(__file__).resolve().parent / "outputs"
+    outputs_dir = pathlib.Path(outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    all_top_rows = []
+    top_one_rows = []
+
+    for dp in datapoints_list:
+        languages = dp["languages"]
+        assert languages, "a datapoint is missing languages"
+
+        if(latest_only): language_entries = [max(languages, key=lambda x: x.get("epoch_number", -1))]
+        else:            language_entries = sorted(languages, key=lambda x: x.get("epoch_number", -1))
+
+        for lang_entry in language_entries:
+            report = analysis(lang_entry["language"], top_rows=top_rows)
+            report.insert(0, "run_name", dp["run_name"])
+            report.insert(1, "properties", dp["config"]["properties"])
+            report.insert(2, "epoch_analyzed", lang_entry["epoch_number"])
+            report.insert(3, "vocab_size", dp["evaluation"]["eval/vocab_used"].iloc[-1])
+            ordered_cols = [c for c in report.columns if c != "verified_predicates"] + ["verified_predicates"]
+            report = report[ordered_cols]
+
+            all_top_rows.append(report)
+            top_one_rows.append(report.head(1))
+
+    assert all_top_rows, "no rows collected for export"
+    all_top_df = pd.concat(all_top_rows, ignore_index=True)
+    top_one_df = pd.concat(top_one_rows, ignore_index=True)
+
+    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}.csv"
+    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}.csv"
+    all_top_df.to_csv(all_top_path, index=False)
+    top_one_df.to_csv(top_one_path, index=False)
+    print(f"Saved negation top-rows CSV to: {all_top_path}")
+    print(f"Saved negation top-1 CSV to: {top_one_path}")
+
+    return all_top_df, top_one_df
 
 
 if __name__ == "__main__":

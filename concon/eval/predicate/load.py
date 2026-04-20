@@ -58,6 +58,8 @@ def iter_datapoints(directory_name: str = None):
         datapoint = {}
         with open(os.path.join(directory, 'hparams.json')) as f:
             datapoint['config'] = json.load(f)
+        datapoint['run_name'] = directory.name
+        datapoint['run_path'] = str(directory)
 
         datapoint['evaluation'] = pd.read_csv(eval_path) if eval_path is not None else None
         datapoint['predicates'] = pd.read_csv(pred_path) if pred_path is not None else None
