@@ -172,6 +172,35 @@ def _conditional_mi(X, Y, Z):
     h_xyz = _joint_entropy(X,Y,Z)
     return h_xz + h_yz - h_z - h_xyz
 
+def _binary_conditional_entropy(x1_counts, total_counts, n_total):
+    '''H(X|C) for binary X and categorical C, from per-category counts of X=1 and totals.'''
+    totals = np.asarray(total_counts, dtype=np.float64)
+    if totals.size == 0 or n_total <= 0: return 0.0
+    x1 = np.asarray(x1_counts, dtype=np.float64)
+    mask = totals > 0
+    if not np.any(mask): return 0.0
+    p1 = x1[mask] / totals[mask]
+    h = np.zeros_like(p1, dtype=np.float64)
+    mid = (p1 > 0.0) & (p1 < 1.0)
+    p = p1[mid]
+    h[mid] = -(p * np.log2(p) + (1.0 - p) * np.log2(1.0 - p))
+    weights = totals[mask] / float(n_total)
+    return float(np.sum(weights * h))
+
+def _cmi_binary_xn_given_v(X, v_codes, vn_codes, count_v, count_vn, n_total):
+    '''I(X;N|V) for binary X, using H(X|V)-H(X|V,N).'''
+    x = np.asarray(X, dtype=np.uint8)
+    x1_by_v = np.bincount(v_codes, weights=x, minlength=len(count_v))
+    x1_by_vn = np.bincount(vn_codes, weights=x, minlength=len(count_vn))
+    return _binary_conditional_entropy(x1_by_v, count_v, n_total) - _binary_conditional_entropy(x1_by_vn, count_vn, n_total)
+
+def _cmi_binary_xv_given_n(X, n_codes, vn_codes, count_n, count_vn, n_total):
+    '''I(X;V|N) for binary X, using H(X|N)-H(X|V,N).'''
+    x = np.asarray(X, dtype=np.uint8)
+    x1_by_n = np.bincount(n_codes, weights=x, minlength=len(count_n))
+    x1_by_vn = np.bincount(vn_codes, weights=x, minlength=len(count_vn))
+    return _binary_conditional_entropy(x1_by_n, count_n, n_total) - _binary_conditional_entropy(x1_by_vn, count_vn, n_total)
+
 def _safe_normalize(num, den):
     den = float(den)
     if(not np.isfinite(den) or den <= 0.0): return np.nan
@@ -258,9 +287,20 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     pred_labels = language["pred_str"].astype(str).to_numpy()
     # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
     M = _build_presence_matrix(tok, voc)
+    # Entropy denominators do not depend on candidate feature X.
+    h_n_given_v = _conditional_entropy(N, V)
+    h_v_given_n = _conditional_entropy(V, N)
+    # Pre-encode conditioning variables for fast binary-X CMI.
+    V_codes = pd.factorize(V, sort=False)[0].astype(np.int64, copy=False)
+    N_codes = N.astype(np.int64, copy=False)
+    VN_codes = V_codes * 2 + N_codes
+    count_v = np.bincount(V_codes)
+    count_n = np.bincount(N_codes, minlength=2)
+    count_vn = np.bincount(VN_codes, minlength=max(1, 2 * len(count_v)))
+    n_total = len(V_codes)
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
     # score_fn output: float
-    score_fn = lambda X: _negation_strength(X, N, V)
+    score_fn = lambda X: _safe_normalize(_cmi_binary_xn_given_v(X, V_codes, VN_codes, count_v, count_vn, n_total), h_n_given_v)
     max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(len(voc), profile=profile)
     score_cache = {}
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
@@ -284,7 +324,7 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
             "_X": X,
             "feature": f"{op}({','.join(sorted(atoms))})",
             "n": _score_cached(key, X, score_fn, score_cache),
-            "l_X": _leak_unary(X, V, N),
+            "l_X": _safe_normalize(_cmi_binary_xv_given_n(X, N_codes, VN_codes, count_n, count_vn, n_total), h_v_given_n),
             "atoms": len(atoms),
             "support": float(np.mean(X)),
         })
