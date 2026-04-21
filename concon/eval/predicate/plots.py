@@ -539,8 +539,9 @@ class ComplexityMemory:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         if "properties" in df.columns:
             df["properties"] = df["properties"].astype(str)
-        df["orth_x"] = 1.0 - df["l_X"]
-        df["orth_t"] = 1.0 - df["l_T"]
+        df["leak_unary_x"] = np.where(df["atoms"] <= 1, df["l_X"], np.nan)
+        df["leak_x"] = df["l_X"]
+        df["leak_composite_t"] = np.where(df["atoms"] > 1, df["l_T"], np.nan)
         return df.dropna(subset=["complexity", "n"])
 
     def _complexity_ticks(self, df):
@@ -558,6 +559,13 @@ class ComplexityMemory:
                 labels.append(f"{int(c)} ({'/'.join(props)})")
         return xticks, labels
 
+    def _leak_metric_specs(self):
+        return [
+            ("leak_unary_x", "l_X (unary)", "leak_unary_x", "#2ca02c"),
+            ("leak_x", "l_X (all)", "leak_x", "#ff7f0e"),
+            ("leak_composite_t", "l_T (composite)", "leak_composite_t", "#1f77b4"),
+        ]
+
     def plot_negation_metrics_by_complexity(self, neg_df, *, out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
         if df is None or df.empty:
@@ -565,52 +573,47 @@ class ComplexityMemory:
 
         out_dir = pathlib.Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        metric_cols = [("n", "n"), ("orth_x", "1-l_X"), ("r", "r")]
-        metric_colors = {"n": "#1f77b4", "orth_x": "#2ca02c", "r": "#d62728"}
+        for col, label, suffix, color in self._leak_metric_specs():
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
 
-        fig = plt.figure(figsize=(10, 6))
-        for col, label in metric_cols:
-            stats = df.groupby("complexity")[col].agg(mean="mean", median="median", lo="min", hi="max").reset_index()
-            c = metric_colors[col]
-            plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color=c)
-            plt.plot(stats["complexity"], stats["mean"], marker="o", color=c, label=f"{label} mean")
-            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=c, label=f"{label} median")
-        xticks, labels = self._complexity_ticks(df)
-        plt.xscale("log", base=2)
-        plt.xticks(xticks, labels, rotation=45, ha="right")
-        plt.title("negation metrics by complexity")
-        plt.xlabel("complexity")
-        plt.ylabel("score")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        fig.tight_layout()
-        fig.savefig(out_dir / f"negation_metrics_by_complexity_{self.name}.png", dpi=150)
+            fig = plt.figure(figsize=(10, 6))
+            stats = sub.groupby("complexity")[col].agg(mean="mean", median="median", lo="min", hi="max").reset_index()
+            plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color=color)
+            plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, label=f"{label} mean")
+            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, label=f"{label} median")
+            xticks, labels = self._complexity_ticks(sub)
+            plt.xscale("log", base=2)
+            plt.xticks(xticks, labels, rotation=45, ha="right")
+            plt.title(f"{label} by complexity")
+            plt.xlabel("complexity")
+            plt.ylabel("score")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            fig.tight_layout()
+            fig.savefig(out_dir / f"negation_{suffix}_by_complexity_{self.name}.png", dpi=150)
 
-        if df["hidden_size"].notna().any():
-            hidden_vals = sorted(df["hidden_size"].dropna().unique())
-            fallback = sns.color_palette("viridis", n_colors=max(1, len(hidden_vals)))
-            hcols = {h: self.hidden_colors.get(h, fallback[i]) for i, h in enumerate(hidden_vals)}
-            fig, axes = plt.subplots(1, 3, figsize=(16, 5), sharex=True, sharey=True)
-            for ax, (col, label) in zip(axes, metric_cols):
-                for h, grp in df.groupby("hidden_size"):
+            if sub["hidden_size"].notna().any():
+                hidden_vals = sorted(sub["hidden_size"].dropna().unique())
+                fallback = sns.color_palette("viridis", n_colors=max(1, len(hidden_vals)))
+                hcols = {h: self.hidden_colors.get(h, fallback[i]) for i, h in enumerate(hidden_vals)}
+                fig = plt.figure(figsize=(10, 6))
+                for h, grp in sub.groupby("hidden_size"):
                     stats = grp.groupby("complexity")[col].agg(mean="mean", lo="min", hi="max").reset_index()
                     c = hcols.get(h)
-                    ax.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.12, color=c)
-                    ax.plot(stats["complexity"], stats["mean"], marker="o", color=c, label=f"h{h}")
-                ax.set_title(label)
-                ax.grid(True, alpha=0.3)
-            for ax in axes:
-                xticks, labels = self._complexity_ticks(df)
-                ax.set_xscale("log", base=2)
-                ax.set_xticks(xticks)
-                ax.set_xticklabels(labels, rotation=45, ha="right")
-            axes[0].set_ylabel("score")
-            axes[1].set_xlabel("complexity")
-            handles, labels_ = axes[0].get_legend_handles_labels()
-            fig.legend(handles, labels_, loc="upper center", bbox_to_anchor=(0.5, 0.98), ncol=min(4, max(1, len(labels_))), frameon=False)
-            fig.suptitle("negation metrics by complexity and hidden size")
-            fig.tight_layout(rect=[0, 0, 1, 0.90])
-            fig.savefig(out_dir / f"negation_metrics_by_complexity_by_hidden_{self.name}.png", dpi=150)
+                    plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.12, color=c)
+                    plt.plot(stats["complexity"], stats["mean"], marker="o", color=c, label=f"h{h}")
+                xticks, labels = self._complexity_ticks(sub)
+                plt.xscale("log", base=2)
+                plt.xticks(xticks, labels, rotation=45, ha="right")
+                plt.title(f"{label} by complexity and hidden size")
+                plt.xlabel("complexity")
+                plt.ylabel("score")
+                plt.grid(True, alpha=0.3)
+                plt.legend()
+                fig.tight_layout()
+                fig.savefig(out_dir / f"negation_{suffix}_by_complexity_by_hidden_{self.name}.png", dpi=150)
 
     def plot_negation_metric_slopes(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
@@ -621,37 +624,31 @@ class ComplexityMemory:
         out_dir.mkdir(parents=True, exist_ok=True)
         df = df.copy()
         df["run_id"] = df["run_name"].map(self._extract_run_id)
-        slope_df = df.groupby(["run_id", "complexity"]).agg(
-            n=("n", "mean"),
-            orth_x=("orth_x", "mean"),
-            r=("r", "mean"),
-        ).reset_index()
-
-        metric_cols = [("n", "n"), ("orth_x", "1-l_X"), ("r", "r")]
-        fig, axes = plt.subplots(1, 3, figsize=(17, 5), sharey=True)
-        for ax, (col, label) in zip(axes, metric_cols):
-            for rid, grp in slope_df.groupby("run_id"):
+        tag = str(profile_tag) if profile_tag else "default"
+        for col, label, suffix, color in self._leak_metric_specs():
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
+            slope_df = sub.groupby(["run_id", "complexity"]).agg(leak=("{}".format(col), "mean")).reset_index()
+            fig = plt.figure(figsize=(10, 6))
+            for _, grp in slope_df.groupby("run_id"):
                 grp = grp.sort_values("complexity")
                 if len(grp) < 2:
                     continue
-                ax.plot(grp["complexity"], grp[col], color="#808080", alpha=0.35, linewidth=1.0)
-            agg = slope_df.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
-            ax.plot(agg["complexity"], agg["mean"], color="#1f77b4", marker="o", linewidth=2.2, label="mean")
-            ax.plot(agg["complexity"], agg["median"], color="#1f77b4", marker="o", linestyle=":", linewidth=2.0, label="median")
-            ax.set_title(label)
-            ax.grid(True, alpha=0.3)
+                plt.plot(grp["complexity"], grp["leak"], color="#808080", alpha=0.35, linewidth=1.0)
+            agg = slope_df.groupby("complexity")["leak"].agg(mean="mean", median="median").reset_index()
+            plt.plot(agg["complexity"], agg["mean"], color=color, marker="o", linewidth=2.2, label="mean")
+            plt.plot(agg["complexity"], agg["median"], color=color, marker="o", linestyle=":", linewidth=2.0, label="median")
             xticks, labels = self._complexity_ticks(slope_df)
-            ax.set_xscale("log", base=2)
-            ax.set_xticks(xticks)
-            ax.set_xticklabels(labels, rotation=45, ha="right")
-        axes[0].set_ylabel("score")
-        axes[1].set_xlabel("complexity")
-        handles, labels_ = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels_, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=3, frameon=False)
-        tag = str(profile_tag) if profile_tag else "default"
-        fig.suptitle(f"negation metric slopes across complexity ({tag})")
-        fig.tight_layout(rect=[0, 0, 1, 0.88])
-        fig.savefig(out_dir / f"negation_metric_slopes_{tag}_{self.name}.png", dpi=150)
+            plt.xscale("log", base=2)
+            plt.xticks(xticks, labels, rotation=45, ha="right")
+            plt.title(f"{label} slopes across complexity ({tag})")
+            plt.xlabel("complexity")
+            plt.ylabel("score")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            fig.tight_layout()
+            fig.savefig(out_dir / f"negation_{suffix}_slopes_{tag}_{self.name}.png", dpi=150)
 
     def plot_topsim_vs_negation(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
@@ -664,38 +661,30 @@ class ComplexityMemory:
 
         out_dir = pathlib.Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        metric_cols = [("n", "n"), ("orth_x", "1-l_X"), ("r", "r")]
         cvals = np.log2(np.maximum(merged["complexity"].astype(float), 1.0))
-        fig, axes = plt.subplots(1, 3, figsize=(17, 5), sharex=True)
-        scatter_obj = None
-        for ax, (col, label) in zip(axes, metric_cols):
-            scatter_obj = ax.scatter(
-                merged["topsim_intensional_levenshtein"],
-                merged[col],
-                c=cvals,
-                cmap="viridis",
-                alpha=0.85,
-                edgecolors="none",
-            )
-            x = merged["topsim_intensional_levenshtein"].to_numpy(dtype=float)
-            y = merged[col].to_numpy(dtype=float)
+        tag = str(profile_tag) if profile_tag else "default"
+        for col, label, suffix, color in self._leak_metric_specs():
+            sub = merged[merged[col].notna()]
+            if sub.empty:
+                continue
+            x = sub["topsim_intensional_levenshtein"].to_numpy(dtype=float)
+            y = sub[col].to_numpy(dtype=float)
+            z = np.log2(np.maximum(sub["complexity"].to_numpy(dtype=float), 1.0))
+            fig = plt.figure(figsize=(8, 6))
+            sc = plt.scatter(x, y, c=z, cmap="viridis", alpha=0.85, edgecolors="none")
             mask = np.isfinite(x) & np.isfinite(y)
             if mask.sum() >= 2 and np.ptp(x[mask]) > 1e-12:
                 a, b = np.polyfit(x[mask], y[mask], deg=1)
                 xg = np.linspace(x[mask].min(), x[mask].max(), 100)
-                ax.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
-            ax.set_title(label)
-            ax.grid(True, alpha=0.3)
-            ax.set_xlabel("topsim intensional levenshtein")
-        axes[0].set_ylabel("negation metric")
-        if scatter_obj is not None:
-            cax = fig.add_axes([0.92, 0.16, 0.015, 0.68])
-            cbar = fig.colorbar(scatter_obj, cax=cax)
+                plt.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
+            plt.title(f"topsim vs {label} ({tag})")
+            plt.xlabel("topsim intensional levenshtein")
+            plt.ylabel(label)
+            plt.grid(True, alpha=0.3)
+            cbar = plt.colorbar(sc)
             cbar.set_label("log2(complexity)")
-        tag = str(profile_tag) if profile_tag else "default"
-        fig.suptitle(f"topsim vs negation structure ({tag})")
-        fig.subplots_adjust(left=0.06, right=0.89, bottom=0.14, top=0.86, wspace=0.30)
-        fig.savefig(out_dir / f"topsim_vs_negation_{tag}_{self.name}.png", dpi=150)
+            fig.tight_layout()
+            fig.savefig(out_dir / f"topsim_vs_negation_{suffix}_{tag}_{self.name}.png", dpi=150)
 
     def plot_topsim_interaction_n(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)

@@ -1,6 +1,7 @@
 import os, pathlib, sys
 import argparse
 import pickle
+import gc
 import pandas as pd
 import load
 import negation
@@ -63,6 +64,17 @@ if __name__ == "__main__":
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print(f"Average vocab length: {vocab_sum/vocab_count if vocab_count else 'n/a'}")
 
+    # Memory trim
+    # - predicates tables are not used in this analysis/plot flow.
+    # - if --latest-only keep only the latest language per run in memory.
+    for d in datapoints_list:
+        d["predicates"] = None
+        if args.latest_only:
+            langs = d.get("languages") or []
+            if langs:
+                d["languages"] = [max(langs, key=lambda x: x.get("epoch_number", -1))]
+    gc.collect()
+
     neg_top1_df = None
     if args.negation:
         _, neg_top1_df = negation.export_analysis(
@@ -84,7 +96,7 @@ if __name__ == "__main__":
         cm.plot_message_compression(group_by=("hidden_size",), out_dir=out_dir)
 
         if neg_top1_df is None:
-            top1_csv = cache_dir / f"negation_top_1_{experiment_path}.csv"
+            top1_csv = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}.csv"
             if top1_csv.is_file():
                 neg_top1_df = pd.read_csv(top1_csv)
                 print(f"Loaded existing negation top-1 for plots: {top1_csv}")

@@ -1,9 +1,10 @@
 import re
 import pathlib
+import multiprocessing as mp
+import heapq
 import pandas as pd
 import numpy as np
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 def _tokenize_messages(language: pd.DataFrame):
@@ -16,7 +17,7 @@ def _tokenize_messages(language: pd.DataFrame):
 def _build_presence_matrix(tokenized, vocab):
     '''Build binary matrix M of (|messages|, |vocab|).
     Set M[i,j]=1 if vocab[j] appears in message #i.'''
-    M = np.zeros((len(tokenized), len(vocab)), dtype=int)
+    M = np.zeros((len(tokenized), len(vocab)), dtype=np.uint8)
     tok2idx = {t: i for i, t in enumerate(vocab)}
     for i, toks in enumerate(tokenized):
         for t in toks:
@@ -48,15 +49,17 @@ def _score_cached(key, X, score_fn, score_cache):
     score_cache[key] = score_fn(X)
     return score_cache[key]
 
-def _expand_features(features, parents, operator, score_fn, score_cache=None):
-    '''Build composite features that strictly improve over both parent scores.'''
+def _expand_features(features, parents, operator, score_fn, score_cache=None, max_new=None):
+    '''Build composite features that strictly improve over both parent scores.
+    If max_new is set, keep only top candidates by score during generation.'''
     assert operator in ["or", "and"]
     if(operator == "or"): op_fn = np.logical_or
     if(operator == "and"): op_fn = np.logical_and
+    if(max_new is not None): max_new = int(max_new)
     items = list(parents.items())
     if(score_cache is None): parent_scores = {key: score_fn(X) for key, X in items}
     else: parent_scores = {key: _score_cached(key, X, score_fn, score_cache) for key, X in items}
-    new_features = {}
+    new_features, seen, order, top_heap = {}, set(), 0, []
     for i, (key_a, X_a) in enumerate(items):
         _, atoms_a = key_a
         for key_b, X_b in items[i+1:]:
@@ -64,12 +67,25 @@ def _expand_features(features, parents, operator, score_fn, score_cache=None):
             if(atoms_a & atoms_b): continue
             atoms = atoms_a | atoms_b
             key = (operator, frozenset(atoms))
-            if(key in features or key in new_features): continue
+            if(key in features or key in seen): continue
             X = op_fn(X_a, X_b)
             if score_cache is None: score = score_fn(X)
             else:                   score = _score_cached(key, X, score_fn, score_cache)
             if(score <= parent_scores[key_a] or score <= parent_scores[key_b]): continue
-            new_features[key] = X
+            seen.add(key)
+            if(max_new is None):
+                new_features[key] = X
+            else:
+                rank = (float(score), -order)
+                order += 1
+                item = (rank, key, X)
+                if(len(top_heap) < max_new): heapq.heappush(top_heap, item)
+                elif(rank > top_heap[0][0]): heapq.heapreplace(top_heap, item)
+
+    if(max_new is not None):
+        top_heap.sort(key=lambda x: x[0], reverse=True)
+        new_features = {key: X for _, key, X in top_heap}
+
     return new_features
 
 def _grow_features(vocab, M, score_fn, operator,
@@ -79,9 +95,7 @@ def _grow_features(vocab, M, score_fn, operator,
     if score_cache is None: score_cache = {}
     # First, score all single-token features
     features = _build_features(vocab, M)
-    # Cap number of candidates (especially for large vocabularies)
-    if max_candidates is not None and len(features) > max_candidates:
-        features = dict(sorted(features.items(), key=lambda kv: _score_cached(kv[0], kv[1], score_fn, score_cache), reverse=True)[:max_candidates])
+    # Keep all unary candidates by construction; caps apply to growth only.
     if(max_size is not None and max_size <= 1): return features
 
     # frontier are candidates created last round and parents for next expansion
@@ -95,18 +109,24 @@ def _grow_features(vocab, M, score_fn, operator,
         # Parent pruning - keep combinatorics tractable.
         round_top_k = None if current_size == 1 else top_k
         parents = _select_top_k(frontier, score_fn, top_k=round_top_k, score_cache=score_cache)
-        new_features = _expand_features(features, parents, operator=operator, score_fn=score_fn, score_cache=score_cache)
-        if(not new_features): break
-        # Cap how many newly-created candidates survive this round.
-        if max_active_round is not None and len(new_features) > max_active_round:
-            new_features = dict(sorted(new_features.items(), key=lambda kv: _score_cached(kv[0], kv[1], score_fn, score_cache), reverse=True)[:max_active_round])
-        # There is a global candidate budget over all rounds (otherwise explodes).
+        # Keep only the best candidates during generation to bound peak memory.
+        cap_new = None
         if max_candidates is not None:
             remaining = int(max_candidates) - len(features)
             if(remaining <= 0): break
-            if len(new_features) > remaining:
-                new_features = dict(sorted(new_features.items(), key=lambda kv: _score_cached(kv[0], kv[1], score_fn, score_cache), reverse=True)[:remaining])
-            if(not new_features): break
+            cap_new = remaining
+        if max_active_round is not None:
+            cap_new = min(cap_new, int(max_active_round)) if cap_new is not None else int(max_active_round)
+        if(cap_new is not None and cap_new <= 0): break
+        new_features = _expand_features(
+            features,
+            parents,
+            operator=operator,
+            score_fn=score_fn,
+            score_cache=score_cache,
+            max_new=cap_new,
+        )
+        if(not new_features): break
         # If feature size is unbounded, stop when the best new score no longer improves.
         # NB This is effectively not used/realistic in the current implementation
         round_best = max(_score_cached(k, X, score_fn, score_cache) for k, X in new_features.items())
@@ -123,16 +143,16 @@ def _search_limits_from_vocab(vocab_size: int, profile: str = "fast"):
     v = int(vocab_size)
     p = str(profile).strip().lower()
     if p == "slow":
-        if(v >= 2000): return 6, 48, 7000, 140000
-        if(v >= 800): return 7, 64, 10000, 220000
-        if(v >= 300): return 8, 80, 14000, 320000
-        if(v >= 120): return 10, 96, 20000, 450000
-        return 11, 120, 26000, 600000
+        if(v >= 2000): return 4, 24, 1200, 24000
+        if(v >= 800): return 5, 32, 1800, 36000
+        if(v >= 300): return 6, 40, 2500, 50000
+        if(v >= 120): return 7, 56, 3500, 70000
+        return 8, 72, 5000, 100000
 
-    if(v >= 1200): return 2, 16, 1200, 12000
-    if(v >= 400): return 3, 16, 1600, 16000
-    if(v >= 150): return 4, 20, 2000, 22000
-    return 5, 24, 2600, 28000
+    if(v >= 1200): return 2, 10, 400, 4000
+    if(v >= 400): return 3, 12, 600, 6000
+    if(v >= 150): return 4, 14, 800, 8000
+    return 5, 16, 1000, 10000
 
 def _entropy(X):
     '''H(X) = -Σ_x p(x) log p(x).'''
@@ -365,7 +385,9 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
         sort_order = ["n", "r", "l_T", "l_X"]
     ascending = [mapping[k] for k in sort_order]
     # pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
-    return pd.DataFrame(rows).sort_values(sort_order, ascending=ascending, na_position="last").head(top_rows)
+    report_df = pd.DataFrame(rows)
+    report_df = report_df.sort_values(sort_order, ascending=ascending, na_position="last").head(top_rows)
+    return report_df
 
 
 def _analysis_report(task):
@@ -382,7 +404,12 @@ def _analysis_report(task):
     report.insert(3, "epoch_analyzed", epoch_number)
     report.insert(4, "vocab_size", vocab_size)
     ordered_cols = [c for c in report.columns if c != "verified_predicates"] + ["verified_predicates"]
-    return report[ordered_cols]
+    report = report[ordered_cols]
+    return report
+
+def _analysis_report_indexed(args):
+    idx, task = args
+    return idx, _analysis_report(task)
 
 def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
     latest_only: bool = False, outputs_dir=None, profile: str = "fast", operator: str = "or",
@@ -405,9 +432,8 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
         if(latest_only): language_entries = [max(languages, key=lambda x: x.get("epoch_number", -1))]
         else:            language_entries = sorted(languages, key=lambda x: x.get("epoch_number", -1))
 
-        eval_df = dp["evaluation"]
-        assert eval_df is not None and not eval_df.empty, "a datapoint is missing evaluation dataframe"
-        vocab_size = eval_df["eval/vocab_used"].iloc[-1]
+        assert dp["evaluation"] is not None and not dp["evaluation"].empty, "a datapoint is missing evaluation dataframe"
+        vocab_size = dp["evaluation"]["eval/vocab_used"].iloc[-1]
         for lang_entry in language_entries:
             tasks.append((
                 lang_entry["language"],
@@ -420,14 +446,21 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
                 vocab_size,
             ))
 
-    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        futures = {
-            executor.submit(_analysis_report, task): idx
-            for idx, task in enumerate(tasks)
-        }
+    if n_jobs == 1:
+        for task in tqdm(tasks, total=len(tasks), desc="Negation analysis"):
+            report = _analysis_report(task)
+            all_top_rows.append(report)
+            top_one_rows.append(report.head(1))
+    else:
         reports_by_idx = {}
-        for future in tqdm(as_completed(futures), total=len(tasks), desc=f"Negation analysis ({n_jobs} jobs)"):
-            reports_by_idx[futures[future]] = future.result()
+        # maxtasksperchild=1 recycles workers after each task to hard-release memory.
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(processes=n_jobs, maxtasksperchild=1) as pool:
+            results = pool.imap_unordered(_analysis_report_indexed, enumerate(tasks), chunksize=1)
+            with tqdm(total=len(tasks), desc=f"Negation analysis ({n_jobs} jobs)") as pbar:
+                for idx, report in results:
+                    reports_by_idx[idx] = report
+                    pbar.update(1)
         for idx in sorted(reports_by_idx):
             report = reports_by_idx[idx]
             all_top_rows.append(report)
@@ -437,8 +470,8 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
     all_top_df = pd.concat(all_top_rows, ignore_index=True)
     top_one_df = pd.concat(top_one_rows, ignore_index=True)
 
-    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}.csv"
-    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}.csv"
+    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}_{operator}.csv"
+    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}_{operator}.csv"
     all_top_df.to_csv(all_top_path, index=False)
     top_one_df.to_csv(top_one_path, index=False)
     print(f"Saved negation top-rows CSV to: {all_top_path}")
