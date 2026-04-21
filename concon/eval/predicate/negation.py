@@ -470,8 +470,9 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
     all_top_df = pd.concat(all_top_rows, ignore_index=True)
     top_one_df = pd.concat(top_one_rows, ignore_index=True)
 
-    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}_{operator}.csv"
-    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}_{operator}.csv"
+    latest_suffix = "_latest" if latest_only else ""
+    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}_{operator}_{profile}{latest_suffix}.csv"
+    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}_{operator}_{profile}{latest_suffix}.csv"
     all_top_df.to_csv(all_top_path, index=False)
     top_one_df.to_csv(top_one_path, index=False)
     print(f"Saved negation top-rows CSV to: {all_top_path}")

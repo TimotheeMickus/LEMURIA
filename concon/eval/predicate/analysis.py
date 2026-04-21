@@ -18,6 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("experiment", nargs="?", help="experiment name under runs/")
     parser.add_argument("--negation", action="store_true", help="run negation analysis")
     parser.add_argument("--negation-top-rows", type=int, default=10, help="number of top rows per run")
+    parser.add_argument("--negation-profile", choices=["fast", "slow"], default="fast", help="search profile for negation feature growth")
     parser.add_argument("--feat-operator", choices=["or", "and"], default="or", help="feature composition operator for negation analysis")
     parser.add_argument("--latest-only", action="store_true", help="analyze only latest language per run (default: analyze all)")
     parser.add_argument("--n-jobs", type=int, default=1, help="parallel jobs for negation export")
@@ -75,19 +76,24 @@ if __name__ == "__main__":
                 d["languages"] = [max(langs, key=lambda x: x.get("epoch_number", -1))]
     gc.collect()
 
-    neg_top1_df = None
+    neg_plot_df = None
     if args.negation:
-        _, neg_top1_df = negation.export_analysis(
+        neg_plot_df, _ = negation.export_analysis(
             datapoints_list,
             experiment_name=experiment_path,
             top_rows=args.negation_top_rows,
+            profile=args.negation_profile,
             operator=args.feat_operator,
             latest_only=args.latest_only,
             n_jobs=args.n_jobs,
             outputs_dir=pathlib.Path(__file__).resolve().parent / "outputs",
         )
 
-    cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
+    plot_mode_suffix = "latest" if args.latest_only else "all_epochs"
+    plot_name = f"{experiment_path}_{plot_mode_suffix}"
+    cm = plots.ComplexityMemory(datapoints_list, name=plot_name)
+    neg_plot_name = f"{experiment_path}_{plot_mode_suffix}_{args.feat_operator}_{args.negation_profile}"
+    cm_neg = plots.ComplexityMemory(datapoints_list, name=neg_plot_name)
     if args.plots:
         out_dir = pathlib.Path(__file__).resolve().parent / "plots"
         # Plot: epochs to max accuracy/performance
@@ -95,17 +101,31 @@ if __name__ == "__main__":
         cm.plot_message_compression(group_by=("properties",), out_dir=out_dir)
         cm.plot_message_compression(group_by=("hidden_size",), out_dir=out_dir)
 
-        if neg_top1_df is None:
-            top1_csv = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}.csv"
-            if top1_csv.is_file():
-                neg_top1_df = pd.read_csv(top1_csv)
+        if neg_plot_df is None:
+            latest_suffix = "_latest" if args.latest_only else ""
+            top_rows_csv = cache_dir / f"negation_top_rows_{experiment_path}_{args.feat_operator}_{args.negation_profile}{latest_suffix}.csv"
+            top1_csv = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}_{args.negation_profile}{latest_suffix}.csv"
+            top_rows_csv_legacy = cache_dir / f"negation_top_rows_{experiment_path}_{args.feat_operator}{latest_suffix}.csv"
+            top1_csv_legacy = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}{latest_suffix}.csv"
+            if top_rows_csv.is_file():
+                neg_plot_df = pd.read_csv(top_rows_csv)
+                print(f"Loaded existing negation top-rows for plots: {top_rows_csv}")
+            elif top1_csv.is_file():
+                neg_plot_df = pd.read_csv(top1_csv)
                 print(f"Loaded existing negation top-1 for plots: {top1_csv}")
+            elif top_rows_csv_legacy.is_file():
+                neg_plot_df = pd.read_csv(top_rows_csv_legacy)
+                print(f"Loaded legacy negation top-rows for plots: {top_rows_csv_legacy}")
+            elif top1_csv_legacy.is_file():
+                neg_plot_df = pd.read_csv(top1_csv_legacy)
+                print(f"Loaded legacy negation top-1 for plots: {top1_csv_legacy}")
 
-        if neg_top1_df is not None and not neg_top1_df.empty:
-            cm.plot_negation_metrics_by_complexity(neg_top1_df, out_dir=out_dir)
-            cm.plot_negation_metric_slopes(neg_top1_df, profile_tag=args.feat_operator, out_dir=out_dir)
-            cm.plot_topsim_vs_negation(neg_top1_df, profile_tag=args.feat_operator, out_dir=out_dir)
-            cm.plot_topsim_interaction_n(neg_top1_df, profile_tag=args.feat_operator, out_dir=out_dir)
+        if neg_plot_df is not None and not neg_plot_df.empty:
+            cm_neg.plot_negation_metrics_by_complexity(neg_plot_df, out_dir=out_dir)
+            cm_neg.plot_negation_metrics_over_epochs(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
+            cm_neg.plot_negation_metric_slopes(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
+            cm_neg.plot_topsim_vs_negation(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
+            cm_neg.plot_topsim_interaction_n(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
         else:
-            print(f"[INFO] No negation top-1 dataframe available for negation-specific plots.")
+            print(f"[INFO] No negation dataframe available for negation-specific plots.")
     # cm.plot_message_compression(group_by=("negation","properties"))

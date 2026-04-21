@@ -182,6 +182,7 @@ class ComplexityMemory:
         out_path = out_dir / filename
         fig.tight_layout()
         fig.savefig(out_path, dpi=150)
+        plt.close(fig)
 
     def _plot_negation_scores_generic(self, neg_df, *, mode="greedy", filename="", label_mode="complexity", out_dir="plots"):
         prefix = f"{mode}_"
@@ -229,6 +230,7 @@ class ComplexityMemory:
         out_path = out_dir / filename
         fig.tight_layout()
         fig.savefig(out_path, dpi=150)
+        plt.close(fig)
 
     def plot_epochs_to_max(self, plot_df, out_dir="plots"):
         self._plot_epochs_generic(
@@ -468,6 +470,7 @@ class ComplexityMemory:
         out_path = out_dir / f"message_compression_by_{groupby_name}_{self.name}.png"
         fig.tight_layout()
         fig.savefig(out_path, dpi=150)
+        plt.close(fig)
 
     def _extract_run_id(self, run_name):
         m = re.search(r"__run=(\d+)", str(run_name))
@@ -566,6 +569,133 @@ class ComplexityMemory:
             ("leak_composite_t", "l_T (composite)", "leak_composite_t", "#1f77b4"),
         ]
 
+    def _negation_timeline_df(self, neg_df):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return None
+        if "epoch_analyzed" not in df.columns:
+            print("[WARN] Negation dataframe has no epoch_analyzed column; timeline plots skipped.")
+            return None
+
+        df = df.copy()
+        df["epoch_analyzed"] = pd.to_numeric(df["epoch_analyzed"], errors="coerce")
+        df = df.dropna(subset=["epoch_analyzed"])
+        if df.empty:
+            return None
+
+        order_cols = ["run_name", "epoch_analyzed", "n", "r", "l_T", "l_X"]
+        order_asc = [True, True, False, False, True, True]
+        ranked = df.sort_values(order_cols, ascending=order_asc, na_position="last")
+        key = ["run_name", "epoch_analyzed"]
+
+        best = ranked.groupby(key, as_index=False).first()
+        comp = ranked[ranked["atoms"] > 1]
+        if comp.empty:
+            best["l_T_composite"] = np.nan
+        else:
+            comp_best = comp.groupby(key, as_index=False).first()[key + ["l_T"]]
+            comp_best = comp_best.rename(columns={"l_T": "l_T_composite"})
+            best = best.merge(comp_best, on=key, how="left")
+
+        return best
+
+    def _plot_timeline_metric_set(self, timeline_df, metrics, title, filename, out_dir):
+        if timeline_df is None or timeline_df.empty:
+            return
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        complexities = sorted(pd.to_numeric(timeline_df["complexity"], errors="coerce").dropna().unique())
+        if not complexities:
+            return
+        prop_label = {}
+        for c in complexities:
+            props = (
+                timeline_df.loc[timeline_df["complexity"] == c, "properties"]
+                .dropna()
+                .astype(str)
+                .unique()
+            )
+            props = sorted(props, key=self._properties_sort_key)
+            if len(props) == 0:
+                prop_label[c] = str(int(c))
+            elif len(props) == 1:
+                prop_label[c] = props[0]
+            else:
+                prop_label[c] = "/".join(props)
+        palette = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+        c_map = {c: palette[i] for i, c in enumerate(complexities)}
+
+        fig, axes = plt.subplots(len(metrics), 1, figsize=(10, 4 * len(metrics)), sharex=True)
+        if len(metrics) == 1:
+            axes = [axes]
+
+        for ax, (col, label) in zip(axes, metrics):
+            sub_all = timeline_df[timeline_df[col].notna()]
+            for c in complexities:
+                sub = sub_all[sub_all["complexity"] == c]
+                if sub.empty:
+                    continue
+                stats = (
+                    sub.groupby("epoch_analyzed")[col]
+                    .agg(
+                        median="median",
+                        q25=lambda x: np.nanquantile(x, 0.25),
+                        q75=lambda x: np.nanquantile(x, 0.75),
+                    )
+                    .reset_index()
+                    .sort_values("epoch_analyzed")
+                )
+                colr = c_map[c]
+                ax.fill_between(stats["epoch_analyzed"], stats["q25"], stats["q75"], color=colr, alpha=0.15)
+                ax.plot(stats["epoch_analyzed"], stats["median"], color=colr, linewidth=2.0, label=prop_label[c])
+            ax.set_title(label)
+            ax.set_ylabel("score")
+            ax.grid(True, alpha=0.3)
+
+        axes[-1].set_xlabel("epoch")
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.suptitle(title, y=0.995)
+        if handles:
+            fig.legend(
+                handles,
+                labels,
+                loc="upper center",
+                bbox_to_anchor=(0.5, 0.955),
+                ncol=min(6, len(labels)),
+                frameon=False,
+                title="properties",
+            )
+            fig.tight_layout(rect=[0, 0, 1, 0.90])
+        else:
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(out_dir / filename, dpi=150)
+        plt.close(fig)
+
+    def plot_negation_metrics_over_epochs(self, neg_df, *, profile_tag="", out_dir="plots"):
+        timeline_df = self._negation_timeline_df(neg_df)
+        if timeline_df is None or timeline_df.empty:
+            return
+        if timeline_df["epoch_analyzed"].nunique() < 2:
+            print("[INFO] Negation timeline plots skipped (only one epoch available).")
+            return
+
+        tag = str(profile_tag) if profile_tag else "default"
+        self._plot_timeline_metric_set(
+            timeline_df,
+            metrics=[("n", "n"), ("l_X", "l_X"), ("l_T_composite", "l_T (composite)")],
+            title=f"negation metrics over epochs ({tag})",
+            filename=f"negation_timeline_n_lx_ltcomp_{tag}_{self.name}.png",
+            out_dir=out_dir,
+        )
+        self._plot_timeline_metric_set(
+            timeline_df,
+            metrics=[("n", "n"), ("r", "r")],
+            title=f"negation and remainder over epochs ({tag})",
+            filename=f"negation_timeline_n_r_{tag}_{self.name}.png",
+            out_dir=out_dir,
+        )
+
     def plot_negation_metrics_by_complexity(self, neg_df, *, out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
         if df is None or df.empty:
@@ -573,6 +703,57 @@ class ComplexityMemory:
 
         out_dir = pathlib.Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
+
+        # n-only plot
+        sub_n = df[df["n"].notna()]
+        if not sub_n.empty:
+            fig = plt.figure(figsize=(10, 6))
+            stats = sub_n.groupby("complexity")["n"].agg(mean="mean", median="median", lo="min", hi="max").reset_index()
+            plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color="#1f77b4")
+            plt.plot(stats["complexity"], stats["mean"], marker="o", color="#1f77b4", label="n mean")
+            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color="#1f77b4", label="n median")
+            xticks, labels = self._complexity_ticks(sub_n)
+            plt.xscale("log", base=2)
+            plt.xticks(xticks, labels, rotation=45, ha="right")
+            plt.title("n by complexity")
+            plt.xlabel("complexity")
+            plt.ylabel("score")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            fig.tight_layout()
+            fig.savefig(out_dir / f"negation_n_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+        # combined 4-metric view across complexities
+        fig = plt.figure(figsize=(10, 6))
+        plotted = 0
+        metric_defs = [
+            ("n", "n", "#1f77b4"),
+            ("l_X", "l_X", "#ff7f0e"),
+            ("leak_composite_t", "l_T (composite)", "#2ca02c"),
+            ("r", "r", "#d62728"),
+        ]
+        for col, label, color in metric_defs:
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
+            stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
+            plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+            plotted += 1
+        if plotted > 0:
+            xticks, labels = self._complexity_ticks(df)
+            plt.xscale("log", base=2)
+            plt.xticks(xticks, labels, rotation=45, ha="right")
+            plt.title("negation main metrics by complexity")
+            plt.xlabel("complexity")
+            plt.ylabel("score")
+            plt.grid(True, alpha=0.3)
+            plt.legend(ncol=2)
+            fig.tight_layout()
+            fig.savefig(out_dir / f"negation_main4_by_complexity_{self.name}.png", dpi=150)
+        plt.close(fig)
+
         for col, label, suffix, color in self._leak_metric_specs():
             sub = df[df[col].notna()]
             if sub.empty:
@@ -593,6 +774,7 @@ class ComplexityMemory:
             plt.legend()
             fig.tight_layout()
             fig.savefig(out_dir / f"negation_{suffix}_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
 
             if sub["hidden_size"].notna().any():
                 hidden_vals = sorted(sub["hidden_size"].dropna().unique())
@@ -614,6 +796,7 @@ class ComplexityMemory:
                 plt.legend()
                 fig.tight_layout()
                 fig.savefig(out_dir / f"negation_{suffix}_by_complexity_by_hidden_{self.name}.png", dpi=150)
+                plt.close(fig)
 
     def plot_negation_metric_slopes(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
@@ -649,6 +832,7 @@ class ComplexityMemory:
             plt.legend()
             fig.tight_layout()
             fig.savefig(out_dir / f"negation_{suffix}_slopes_{tag}_{self.name}.png", dpi=150)
+            plt.close(fig)
 
     def plot_topsim_vs_negation(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
@@ -685,6 +869,7 @@ class ComplexityMemory:
             cbar.set_label("log2(complexity)")
             fig.tight_layout()
             fig.savefig(out_dir / f"topsim_vs_negation_{suffix}_{tag}_{self.name}.png", dpi=150)
+            plt.close(fig)
 
     def plot_topsim_interaction_n(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
@@ -725,3 +910,4 @@ class ComplexityMemory:
         cbar.set_label("log2(complexity)")
         fig.tight_layout()
         fig.savefig(out_dir / f"topsim_n_interaction_{tag}_{self.name}.png", dpi=150)
+        plt.close(fig)
