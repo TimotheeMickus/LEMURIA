@@ -35,6 +35,22 @@ def _select_top_k(features, score_fn, top_k):
     '''Keep the k highest-scoring features according to score_fn.'''
     return dict(sorted(features.items(), key=lambda kv: score_fn(kv[1]), reverse=True)[:top_k])
 
+def _search_limits_from_vocab(vocab_size: int, profile: str = "fast"):
+    """Bounds for search size by vocabulary size: (max_feat_size, top_k, max_active_round, max_candidates)."""
+    v = int(vocab_size)
+    p = str(profile).strip().lower()
+    if p == "slow":
+        if(v >= 2000): return 6, 48, 7000, 140000
+        if(v >= 800): return 7, 64, 10000, 220000
+        if(v >= 300): return 8, 80, 14000, 320000
+        if(v >= 120): return 10, 96, 20000, 450000
+        return 11, 120, 26000, 600000
+
+    if(v >= 1200): return 2, 16, 1200, 12000
+    if(v >= 400): return 3, 16, 1600, 16000
+    if(v >= 150): return 4, 20, 2000, 22000
+    return 5, 24, 2600, 28000
+
 def _expand_features(features, parents, operator, score_fn):
     '''Build composite features that strictly improve over both parent scores.'''
     assert operator in ["or", "and"]
@@ -57,22 +73,41 @@ def _expand_features(features, parents, operator, score_fn):
             new_features[key] = X
     return new_features
 
-def _grow_features(vocab, M, score_fn, operator, top_k=None, max_size=None):
+def _grow_features(vocab, M, score_fn, operator,
+    top_k=None, max_size=None, max_active_round=None, max_candidates=None):
     '''Grow features over max_size rounds or as long as score improves.'''
+    # First, single-token features
     features = _build_features(vocab, M)
-    if(max_size is not None and max_size <= 1):
-        return features
+    # Cap number of candidates (especially for large vocabularies)
+    if max_candidates is not None and len(features) > max_candidates:
+        features = dict(sorted(features.items(), key=lambda kv: score_fn(kv[1]), reverse=True)[:max_candidates])
+    if(max_size is not None and max_size <= 1): return features
 
+    # frontier are candidates created last round and parents for next expansion
     frontier = dict(features)
     current_size = 1
     best_score = max(score_fn(X) for X in features.values())
 
     while True:
+        # Avoid fabricating large, arbitrary features.
         if(max_size is not None and current_size >= max_size): break
+        # Optional parent pruning after round 1 to keep combinatorics tractable.
         round_top_k = None if current_size == 1 else top_k
         parents = _select_top_k(frontier, score_fn, top_k=round_top_k)
         new_features = _expand_features(features, parents, operator=operator, score_fn=score_fn)
         if(not new_features): break
+        # Cap how many newly-created candidates survive this round.
+        if max_active_round is not None and len(new_features) > max_active_round:
+            new_features = dict(sorted(new_features.items(), key=lambda kv: score_fn(kv[1]), reverse=True)[:max_active_round])
+        # There is a global candidate budget over all rounds (otherwise explodes).
+        if max_candidates is not None:
+            remaining = int(max_candidates) - len(features)
+            if(remaining <= 0): break
+            if len(new_features) > remaining:
+                new_features = dict(sorted(new_features.items(), key=lambda kv: score_fn(kv[1]), reverse=True)[:remaining])
+            if(not new_features): break
+        # If feature size is unbounded, stop when the best new score no longer improves.
+        # NB This is effectively not used/realistic in the current implementation
         round_best = max(score_fn(X) for X in new_features.values())
         if(max_size is None and round_best <= best_score): break
         features.update(new_features)
@@ -179,7 +214,8 @@ def _signal_conservation(R, V, X):
     if(h <= 0): return np.nan
     return _mutual_information(R_0, V_0) / h
 
-def analysis(language, sort_order: list = None, top_rows=10):
+def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fast", operator: str = "or"):
+    assert operator in ["or", "and"], "operator must be 'or' or 'and'"
     # language: pd.DataFrame with "msg" and "pred_str" columns
     # V: np.ndarray shape (n_msgs,), predicate values (str/object)
     # N: np.ndarray shape (n_msgs,), negation flags (bool)
@@ -192,9 +228,11 @@ def analysis(language, sort_order: list = None, top_rows=10):
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
     # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
+    max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(len(voc), profile=profile)
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
     # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
-    features = _grow_features(voc, M, score_fn, operator="or", top_k=20, max_size=None)
+    features = _grow_features(voc, M, score_fn, operator=operator, top_k=top_k, 
+        max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates)
     # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
     unary_features = {
         a: features[("tok", frozenset({a}))].astype(np.uint8) 
@@ -228,7 +266,8 @@ def analysis(language, sort_order: list = None, top_rows=10):
     return pd.DataFrame(rows).sort_values(sort_order, ascending=ascending, na_position="last").head(top_rows)
 
 
-def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10, latest_only: bool = False, outputs_dir=None):
+def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10, 
+    latest_only: bool = False, outputs_dir=None, profile: str = "fast", operator: str = "or"):
     """Perform analysis over datapoints and export a csv with top rows and a csv with the one top row."""
     if(outputs_dir is None): outputs_dir = pathlib.Path(__file__).resolve().parent / "outputs"
     outputs_dir = pathlib.Path(outputs_dir)
@@ -245,7 +284,7 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10, l
         else:            language_entries = sorted(languages, key=lambda x: x.get("epoch_number", -1))
 
         for lang_entry in language_entries:
-            report = analysis(lang_entry["language"], top_rows=top_rows)
+            report = analysis(lang_entry["language"], top_rows=top_rows, profile=profile, operator=operator)
             report.insert(0, "run_name", dp["run_name"])
             report.insert(1, "properties", dp["config"]["properties"])
             report.insert(2, "epoch_analyzed", lang_entry["epoch_number"])
@@ -288,9 +327,13 @@ if __name__ == "__main__":
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
     # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
+    max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(
+        len(voc), profile="fast"
+    )
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
     # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
-    features = _grow_features(voc, M, score_fn, operator="or", top_k=20, max_size=None)
+    features = _grow_features(voc, M, score_fn, operator="or", top_k=top_k, 
+        max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates)
     # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
     unary_features = {
         a: features[("tok", frozenset({a}))].astype(np.uint8) 

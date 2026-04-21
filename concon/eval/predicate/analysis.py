@@ -16,6 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("experiment", nargs="?", help="experiment name under runs/")
     parser.add_argument("--negation", action="store_true", help="run negation analysis")
     parser.add_argument("--negation-top-rows", type=int, default=10, help="number of top rows per run")
+    parser.add_argument("--feat-operator", choices=["or", "and"], default="or", help="feature composition operator for negation analysis")
     parser.add_argument("--latest-only", action="store_true", help="analyze only latest language per run (default: analyze all)")
     parser.add_argument("--plots", action="store_true", help="generate plots")
     args = parser.parse_args()
@@ -66,6 +67,7 @@ if __name__ == "__main__":
             datapoints_list,
             experiment_name=experiment_path,
             top_rows=args.negation_top_rows,
+            operator=args.feat_operator,
             latest_only=args.latest_only,
             outputs_dir=pathlib.Path(__file__).resolve().parent / "outputs",
         )
