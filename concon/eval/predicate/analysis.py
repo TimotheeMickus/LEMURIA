@@ -1,6 +1,7 @@
 import os, pathlib, sys
 import argparse
 import pickle
+import pandas as pd
 import load
 import negation
 import plots
@@ -48,7 +49,6 @@ if __name__ == "__main__":
         print(f"Saved datapoint cache to {cache_path}")
     for d in datapoints_list:
         total += 1
-        avg_used_vocab = 0
         if d['evaluation'] is not None:
             has_eval += 1
             if "eval/vocab_used" in d["evaluation"].columns and not d["evaluation"].empty:
@@ -62,8 +62,9 @@ if __name__ == "__main__":
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print(f"Average vocab length: {vocab_sum/vocab_count if vocab_count else 'n/a'}")
 
+    neg_top1_df = None
     if args.negation:
-        negation.export_analysis(
+        _, neg_top1_df = negation.export_analysis(
             datapoints_list,
             experiment_name=experiment_path,
             top_rows=args.negation_top_rows,
@@ -72,11 +73,25 @@ if __name__ == "__main__":
             outputs_dir=pathlib.Path(__file__).resolve().parent / "outputs",
         )
 
-    run_plots = args.plots or (args.negation is None)
     cm = plots.ComplexityMemory(datapoints_list, name=experiment_path)
-    if run_plots:
+    if args.plots:
+        out_dir = pathlib.Path(__file__).resolve().parent / "plots"
         # Plot: epochs to max accuracy/performance
-        cm.plot_time_to_max_accuracy()
-        cm.plot_message_compression(group_by=("properties",))
-        cm.plot_message_compression(group_by=("hidden_size",))
+        cm.plot_time_to_max_accuracy(out_dir=out_dir)
+        cm.plot_message_compression(group_by=("properties",), out_dir=out_dir)
+        cm.plot_message_compression(group_by=("hidden_size",), out_dir=out_dir)
+
+        if neg_top1_df is None:
+            top1_csv = cache_dir / f"negation_top_1_{experiment_path}.csv"
+            if top1_csv.is_file():
+                neg_top1_df = pd.read_csv(top1_csv)
+                print(f"Loaded existing negation top-1 for plots: {top1_csv}")
+
+        if neg_top1_df is not None and not neg_top1_df.empty:
+            cm.plot_negation_metrics_by_complexity(neg_top1_df, out_dir=out_dir)
+            cm.plot_negation_metric_slopes(neg_top1_df, profile_tag=args.feat_operator, out_dir=out_dir)
+            cm.plot_topsim_vs_negation(neg_top1_df, profile_tag=args.feat_operator, out_dir=out_dir)
+            cm.plot_topsim_interaction_n(neg_top1_df, profile_tag=args.feat_operator, out_dir=out_dir)
+        else:
+            print(f"[INFO] No negation top-1 dataframe available for negation-specific plots.")
     # cm.plot_message_compression(group_by=("negation","properties"))

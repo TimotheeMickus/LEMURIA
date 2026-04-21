@@ -355,9 +355,10 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
         eval_df = dp["evaluation"]
         assert eval_df is not None and not eval_df.empty, "a datapoint is missing evaluation dataframe"
         report.insert(0, "run_name", dp["run_name"])
-        report.insert(1, "properties", dp["config"]["properties"])
-        report.insert(2, "epoch_analyzed", lang_entry["epoch_number"])
-        report.insert(3, "vocab_size", eval_df["eval/vocab_used"].iloc[-1])
+        report.insert(1, "operator", operator)
+        report.insert(2, "properties", dp["config"]["properties"])
+        report.insert(3, "epoch_analyzed", lang_entry["epoch_number"])
+        report.insert(4, "vocab_size", eval_df["eval/vocab_used"].iloc[-1])
         ordered_cols = [c for c in report.columns if c != "verified_predicates"] + ["verified_predicates"]
         report = report[ordered_cols]
 
