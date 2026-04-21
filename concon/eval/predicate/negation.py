@@ -30,7 +30,10 @@ def _parse_predicate(s):
 
 def _build_features(vocab, M):
     '''For each token t, define a binary feature vector over messages: X_t(S) = 1[t in s].'''
-    return {("tok", frozenset({tok})): M[:, j].astype(bool) for j, tok in enumerate(vocab)}
+    features = {}
+    for j, tok in tqdm(enumerate(vocab), total=len(vocab), desc="token features", leave=False, dynamic_ncols=True):
+        features[("tok", frozenset({tok}))] = M[:, j].astype(bool)
+    return features
 
 def _select_top_k(features, score_fn, top_k, score_cache=None):
     '''Keep the k highest-scoring features according to score_fn.'''
@@ -43,22 +46,6 @@ def _score_cached(key, X, score_fn, score_cache):
     if key in score_cache: return score_cache[key]
     score_cache[key] = score_fn(X)
     return score_cache[key]
-
-def _search_limits_from_vocab(vocab_size: int, profile: str = "fast"):
-    """Bounds for search size by vocabulary size: (max_feat_size, top_k, max_active_round, max_candidates)."""
-    v = int(vocab_size)
-    p = str(profile).strip().lower()
-    if p == "slow":
-        if(v >= 2000): return 6, 48, 7000, 140000
-        if(v >= 800): return 7, 64, 10000, 220000
-        if(v >= 300): return 8, 80, 14000, 320000
-        if(v >= 120): return 10, 96, 20000, 450000
-        return 11, 120, 26000, 600000
-
-    if(v >= 1200): return 2, 16, 1200, 12000
-    if(v >= 400): return 3, 16, 1600, 16000
-    if(v >= 150): return 4, 20, 2000, 22000
-    return 5, 24, 2600, 28000
 
 def _expand_features(features, parents, operator, score_fn, score_cache=None):
     '''Build composite features that strictly improve over both parent scores.'''
@@ -134,6 +121,22 @@ def _grow_features(vocab, M, score_fn, operator,
 
     return features
 
+def _search_limits_from_vocab(vocab_size: int, profile: str = "fast"):
+    """Bounds for search size by vocabulary size: (max_feat_size, top_k, max_active_round, max_candidates)."""
+    v = int(vocab_size)
+    p = str(profile).strip().lower()
+    if p == "slow":
+        if(v >= 2000): return 6, 48, 7000, 140000
+        if(v >= 800): return 7, 64, 10000, 220000
+        if(v >= 300): return 8, 80, 14000, 320000
+        if(v >= 120): return 10, 96, 20000, 450000
+        return 11, 120, 26000, 600000
+
+    if(v >= 1200): return 2, 16, 1200, 12000
+    if(v >= 400): return 3, 16, 1600, 16000
+    if(v >= 150): return 4, 20, 2000, 22000
+    return 5, 24, 2600, 28000
+
 def _entropy(X):
     '''H(X) = -Σ_x p(x) log p(x).'''
     counts_x = Counter(X)
@@ -201,10 +204,10 @@ def _build_T(key, features):
     B = np.column_stack(cols) # shape: (n_msgs, |atoms|)
     return [tuple(row) for row in B]
 
-def _build_R(key, tok):
+def _build_R(key, tok_sets):
     # key = (op, frozenset(atoms))
     _, atoms = key
-    return [frozenset(t for t in msg if t not in set(atoms)) for msg in tok]
+    return [msg_tokens.difference(atoms) for msg_tokens in tok_sets]
 
 def _negation_strength(X, N, V):
     '''I(X;N|V) / H(N|V).
@@ -238,6 +241,11 @@ def _signal_conservation(R, V, X):
     if(h <= 0): return np.nan
     return _mutual_information(R_0, V_0) / h
 
+def _prefilter_size(n_features, top_rows, profile):
+    if str(profile).strip().lower() == "slow": return int(n_features)
+    k = max(int(top_rows) * 20, 300)
+    return min(int(n_features), k)
+
 def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fast", operator: str = "or"):
     assert operator in ["or", "and"], "operator must be 'or' or 'and'"
     # language: pd.DataFrame with "msg" and "pred_str" columns
@@ -247,6 +255,9 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     # tok: list[list[str]], length n_msgs
     # voc: list[str], length n_vocab
     tok, voc = _tokenize_messages(language)
+    # Precompute token-sets used by _build_R.
+    tok_sets = [frozenset(msg) for msg in tok]
+    pred_labels = language["pred_str"].astype(str).to_numpy()
     # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
     M = _build_presence_matrix(tok, voc)
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
@@ -265,24 +276,47 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
         for a in atoms
         }
 
-    rows = []
-    for key, X in tqdm(features.items(), total=len(features), desc="feature scoring", leave=False, dynamic_ncols=True):
+    # n determines what candidates we keep; we compute other metrics after
+    cheap_rows = []
+    for key, X in tqdm(features.items(), total=len(features), desc="feature pre-scoring", leave=False, dynamic_ncols=True):
         op, atoms = key
-        atom_count = len(atoms)
+        cheap_rows.append({
+            "_key": key,
+            "_X": X,
+            "feature": f"{op}({','.join(sorted(atoms))})",
+            "n": _score_cached(key, X, score_fn, score_cache),
+            "l_X": _leak_unary(X, V, N),
+            "atoms": len(atoms),
+            "support": float(np.mean(X)),
+        })
+
+    # metrics for "survivors"
+    prefilter_k = _prefilter_size(len(cheap_rows), top_rows=top_rows, profile=profile)
+    def _prefilter_rank(row):
+        n = row["n"] if np.isfinite(row["n"]) else -np.inf
+        lx = row["l_X"] if np.isfinite(row["l_X"]) else np.inf
+        return (n, -lx, row["support"], -row["atoms"])
+    survivors = sorted(cheap_rows, key=_prefilter_rank, reverse=True)[:prefilter_k]
+
+    rows = []
+    for row in tqdm(survivors, total=len(survivors), desc="feature scoring", leave=False, dynamic_ncols=True):
+        key, X = row["_key"], row["_X"]
+        atom_count = row["atoms"]
         if(atom_count == 1): l_T = 0.0
         else:
             T = _build_T(key, unary_features)
             l_T = _leak_composite(T, V, X)
-        R = _build_R(key, tok)
-        verified_predicates = language.loc[np.asarray(X, dtype=bool), "pred_str"].astype(str).drop_duplicates().tolist()
+        R = _build_R(key, tok_sets)
+        mask = np.asarray(X, dtype=bool)
+        verified_predicates = pd.unique(pred_labels[mask]).tolist()
         rows.append({
-            "feature": f"{op}({','.join(sorted(atoms))})",
-            "n": _score_cached(key, X, score_fn, score_cache),
-            "l_X": _leak_unary(X, V, N),
+            "feature": row["feature"],
+            "n": row["n"],
+            "l_X": row["l_X"],
             "l_T": l_T,
             "r": _signal_conservation(R, V, X),
             "atoms": atom_count,
-            "support": float(np.mean(X)),
+            "support": row["support"],
             "verified_predicates": " ; ".join(verified_predicates),
         })
     mapping = {"n": False, "r": False, "support": False, "atoms": True, "l_T": True, "l_X": True}
@@ -318,10 +352,12 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
 
     for dp, lang_entry in tqdm(tasks, desc="Negation analysis"):
         report = analysis(lang_entry["language"], top_rows=top_rows, profile=profile, operator=operator)
+        eval_df = dp["evaluation"]
+        assert eval_df is not None and not eval_df.empty, "a datapoint is missing evaluation dataframe"
         report.insert(0, "run_name", dp["run_name"])
         report.insert(1, "properties", dp["config"]["properties"])
         report.insert(2, "epoch_analyzed", lang_entry["epoch_number"])
-        report.insert(3, "vocab_size", dp["evaluation"]["eval/vocab_used"].iloc[-1])
+        report.insert(3, "vocab_size", eval_df["eval/vocab_used"].iloc[-1])
         ordered_cols = [c for c in report.columns if c != "verified_predicates"] + ["verified_predicates"]
         report = report[ordered_cols]
 
@@ -355,6 +391,7 @@ if __name__ == "__main__":
     # tok: list[list[str]], length n_msgs
     # voc: list[str], length n_vocab
     tok, voc = _tokenize_messages(language)
+    tok_sets = [frozenset(msg) for msg in tok]
     # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
     M = _build_presence_matrix(tok, voc)
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
@@ -378,7 +415,7 @@ if __name__ == "__main__":
     for key, X in features.items():
         op, atoms = key
         T = _build_T(key, unary_features)
-        R = _build_R(key, tok)
+        R = _build_R(key, tok_sets)
         rows.append({
             "feature": f"{op}({','.join(sorted(atoms))})",
             "n": _negation_strength(X, N, V),
@@ -389,5 +426,5 @@ if __name__ == "__main__":
             "support": float(np.mean(X)),
         })
     # report: pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
-    report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X"], ascending=[False, False, True, True, False], na_position="last")
+    report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X", "support"], ascending=[False, False, True, True, False], na_position="last")
     print(report.head(20).to_string(index=False))
