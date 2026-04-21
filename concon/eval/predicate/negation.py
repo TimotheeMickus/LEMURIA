@@ -85,10 +85,10 @@ def _expand_features(features, parents, operator, score_fn, score_cache=None):
     return new_features
 
 def _grow_features(vocab, M, score_fn, operator,
-    top_k=None, max_size=None, max_active_round=None, max_candidates=None):
+    top_k=None, max_size=None, max_active_round=None, max_candidates=None, score_cache=None):
     '''Grow features over max_size rounds or as long as score improves.'''
     # Cache scores by feature key to avoid recomputing MI for the same candidate.
-    score_cache = {}
+    if score_cache is None: score_cache = {}
     # First, score all single-token features
     features = _build_features(vocab, M)
     # Cap number of candidates (especially for large vocabularies)
@@ -172,6 +172,13 @@ def _conditional_mi(X, Y, Z):
     h_xyz = _joint_entropy(X,Y,Z)
     return h_xz + h_yz - h_z - h_xyz
 
+def _safe_normalize(num, den):
+    den = float(den)
+    if(not np.isfinite(den) or den <= 0.0): return np.nan
+    out = float(num) / den
+    if(not np.isfinite(out)): return np.nan
+    return out
+
 # S : set of all signals
 # s : one observed signal
 # X : candidate negation feature
@@ -202,12 +209,12 @@ def _build_R(key, tok):
 def _negation_strength(X, N, V):
     '''I(X;N|V) / H(N|V).
     Measures if a feature marks polarity relative to predicate value.'''
-    return _conditional_mi(X, N, V) / _conditional_entropy(N, V)
+    return _safe_normalize(_conditional_mi(X, N, V), _conditional_entropy(N, V))
 
 def _leak_unary(X, V, N):
     '''I(X;V|N) / H(V|N).
     Measures if the presence of a feature carries information on predicate value.'''
-    return _conditional_mi(X, V, N) / _conditional_entropy(V, N)
+    return _safe_normalize(_conditional_mi(X, V, N), _conditional_entropy(V, N))
 
 def _leak_composite(T, V, X):
     '''I(T;V|X=1) / H(V|X=1).
@@ -246,10 +253,11 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
     max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(len(voc), profile=profile)
+    score_cache = {}
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
     # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
     features = _grow_features(voc, M, score_fn, operator=operator, top_k=top_k, 
-        max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates)
+        max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates, score_cache=score_cache)
     # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
     unary_features = {
         a: features[("tok", frozenset({a}))].astype(np.uint8) 
@@ -260,16 +268,20 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     rows = []
     for key, X in tqdm(features.items(), total=len(features), desc="feature scoring", leave=False, dynamic_ncols=True):
         op, atoms = key
-        T = _build_T(key, unary_features)
+        atom_count = len(atoms)
+        if(atom_count == 1): l_T = 0.0
+        else:
+            T = _build_T(key, unary_features)
+            l_T = _leak_composite(T, V, X)
         R = _build_R(key, tok)
         verified_predicates = language.loc[np.asarray(X, dtype=bool), "pred_str"].astype(str).drop_duplicates().tolist()
         rows.append({
             "feature": f"{op}({','.join(sorted(atoms))})",
-            "n": _negation_strength(X, N, V),
+            "n": _score_cached(key, X, score_fn, score_cache),
             "l_X": _leak_unary(X, V, N),
-            "l_T": _leak_composite(T, V, X),
+            "l_T": l_T,
             "r": _signal_conservation(R, V, X),
-            "atoms": len(atoms),
+            "atoms": atom_count,
             "support": float(np.mean(X)),
             "verified_predicates": " ; ".join(verified_predicates),
         })
