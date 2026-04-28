@@ -1,3 +1,5 @@
+#! This works (probably only) for unary predicates
+
 import re
 import pathlib
 import multiprocessing as mp
@@ -90,7 +92,7 @@ def _expand_features(features, parents, operator, score_fn, score_cache=None, ma
 
 def _grow_features(vocab, M, score_fn, operator,
     top_k=None, max_size=None, max_active_round=None, max_candidates=None, score_cache=None):
-    '''Grow features over max_size rounds or as long as score improves.'''
+    '''Grow features by one atom per round up to max_size atoms.'''
     # Cache scores by feature key to avoid recomputing MI for the same candidate.
     if score_cache is None: score_cache = {}
     # First, score all single-token features
@@ -98,6 +100,8 @@ def _grow_features(vocab, M, score_fn, operator,
     # Keep all unary candidates by construction; caps apply to growth only.
     if(max_size is not None and max_size <= 1): return features
 
+    # Keep unary features available every round so growth is k -> k+1.
+    unary = dict(features)
     # frontier are candidates created last round and parents for next expansion
     frontier = dict(features)
     current_size = 1
@@ -109,6 +113,8 @@ def _grow_features(vocab, M, score_fn, operator,
         # Parent pruning - keep combinatorics tractable.
         round_top_k = None if current_size == 1 else top_k
         parents = _select_top_k(frontier, score_fn, top_k=round_top_k, score_cache=score_cache)
+        # Mix current frontier with unary atoms to enable 1+2, 1+3, ...
+        parents = {**unary, **parents}
         # Keep only the best candidates during generation to bound peak memory.
         cap_new = None
         if max_candidates is not None:
@@ -126,6 +132,8 @@ def _grow_features(vocab, M, score_fn, operator,
             score_cache=score_cache,
             max_new=cap_new,
         )
+        if max_size is not None:
+            new_features = {k: X for k, X in new_features.items() if len(k[1]) <= max_size}
         if(not new_features): break
         # If feature size is unbounded, stop when the best new score no longer improves.
         # NB This is effectively not used/realistic in the current implementation
@@ -287,6 +295,12 @@ def _signal_conservation(R, V, X):
     if(h <= 0): return np.nan
     return _mutual_information(R_0, V_0) / h
 
+def _signal_conservation_global(R, V):
+    '''Test variant: I(R;V) / H(V), without conditioning on X=1.'''
+    h = _entropy(V)
+    if(h <= 0): return np.nan
+    return _mutual_information(R, V) / h
+
 def _prefilter_size(n_features, top_rows, profile):
     if str(profile).strip().lower() == "slow": return int(n_features)
     k = max(int(top_rows) * 20, 300)
@@ -346,7 +360,7 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
             "n": _score_cached(key, X, score_fn, score_cache),
             "l_X": _safe_normalize(_cmi_binary_xv_given_n(X, N_codes, VN_codes, count_n, count_vn, n_total), h_v_given_n),
             "atoms": len(atoms),
-            "support": float(np.mean(X)),
+            "support": float(np.mean(np.bincount(V_codes, weights=np.asarray(X, dtype=np.uint8), minlength=len(count_v)) > 0)),
         })
 
     # metrics for "survivors"
@@ -483,14 +497,23 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
 
 if __name__ == "__main__":
     import pathlib
-    # DEBUG, choose existing directory
+    import sys
+    # for quick single-datapoint analysis; choose existing directory
     # language: pd.DataFrame with "msg" and "pred_str" columns
-    language = pd.read_csv(
-        pathlib.Path(__file__).resolve().parents[3] / "runs" / "n_complexity_memory" / "props=16__d=1-2__cand=2__enc=node_averager__cs=balanced__t=2026-03-27_12-40-18__run=0" / "msgs.e7.csv"
-    )
+    op = sys.argv[2] if len(sys.argv) > 2 else "or"
+    experiment_input = sys.argv[1] if len(sys.argv) > 1 else input("Analyse: ").strip()
+    input_path = pathlib.Path(__file__).resolve().parents[3] / "runs" / "toyset" / experiment_input
+    language = pd.read_csv(input_path)
+    # display
+    parsed = language["pred_str"].map(_parse_predicate)
+    language_display = (language.assign(predicate=parsed.str[0], pol=np.where(parsed.str[1], "neg", "pos"))
+        .pivot_table(index="predicate", columns="pol", values="msg", aggfunc=lambda s: " | ".join(pd.unique(s.astype(str))), fill_value="")
+        .rename_axis(None, axis=1).reset_index().reindex(columns=["predicate", "pos", "neg"], fill_value=""))
+    print(language_display.sort_values("predicate").to_string(index=False))
     # V: np.ndarray shape (n_msgs,), predicate values (str/object)
     # N: np.ndarray shape (n_msgs,), negation flags (bool)
     V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
+    V_codes = pd.factorize(V, sort=False)[0].astype(np.int64, copy=False)
     # tok: list[list[str]], length n_msgs
     # voc: list[str], length n_vocab
     tok, voc = _tokenize_messages(language)
@@ -500,12 +523,11 @@ if __name__ == "__main__":
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
     # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
-    max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(
-        len(voc), profile="fast"
-    )
+    max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(len(voc), profile="slow")
+    max_size = len(voc)
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
     # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
-    features = _grow_features(voc, M, score_fn, operator="or", top_k=top_k, 
+    features = _grow_features(voc, M, score_fn, operator=op, top_k=top_k, 
         max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates)
     # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
     unary_features = {
@@ -525,9 +547,10 @@ if __name__ == "__main__":
             "l_X": _leak_unary(X, V, N),
             "l_T": _leak_composite(T, V, X),
             "r": _signal_conservation(R, V, X),
+            "r_global": _signal_conservation_global(R, V),
             "atoms": len(atoms),
-            "support": float(np.mean(X)),
+            "support": float(np.mean(np.bincount(V_codes, weights=np.asarray(X, dtype=np.uint8), minlength=len(np.bincount(V_codes))) > 0)),
         })
     # report: pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
     report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X", "support"], ascending=[False, False, True, True, False], na_position="last")
-    print(report.head(20).to_string(index=False))
+    print(report.head(20).to_string(index=False, float_format=lambda x: f"{x:.3f}"))

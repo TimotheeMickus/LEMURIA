@@ -19,3 +19,4 @@ concon/eval/predicate/verify_n_cm.txt
 concon/eval/predicate/verify_n-n_cm.txt
 concon/eval/predicate/backup
 concon/eval/predicate/negation.py
+scripts/cluster
