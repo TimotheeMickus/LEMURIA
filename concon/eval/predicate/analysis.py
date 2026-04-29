@@ -3,6 +3,7 @@ import argparse
 import pickle
 import gc
 import pandas as pd
+import numpy as np
 import load
 import negation
 import plots
@@ -21,9 +22,15 @@ if __name__ == "__main__":
     parser.add_argument("--negation-profile", choices=["fast", "slow"], default="fast", help="search profile for negation feature growth")
     parser.add_argument("--feat-operator", choices=["or", "and"], default="or", help="feature composition operator for negation analysis")
     parser.add_argument("--latest-only", action="store_true", help="analyze only latest language per run (default: analyze all)")
+    parser.add_argument("--best-accuracy", action="store_true", help="analyze only the language dump closest to the first epoch that reached max eval accuracy")
+    parser.add_argument("--min-eval-accuracy", type=float, default=None, help="analyze only runs whose max eval/accuracy is >= threshold (e.g. 0.95)")
     parser.add_argument("--n-jobs", type=int, default=1, help="parallel jobs for negation export")
     parser.add_argument("--plots", action="store_true", help="generate plots")
     args = parser.parse_args()
+    if args.latest_only and args.best_accuracy:
+        parser.error("--latest-only and --best-accuracy are mutually exclusive.")
+    if args.min_eval_accuracy is not None and not (0.0 <= args.min_eval_accuracy <= 1.0):
+        parser.error("--min-eval-accuracy must be in [0, 1].")
     experiment_path = args.experiment or input("Experiment name: ")
 
     # ----- DEBUG / TESTING ONLY -----
@@ -65,35 +72,95 @@ if __name__ == "__main__":
     print(f"Of which {has_eval} have eval, {has_pred} have pred, {has_lang} have lang.")
     print(f"Average vocab length: {vocab_sum/vocab_count if vocab_count else 'n/a'}")
 
+    if args.min_eval_accuracy is not None:
+        def _max_eval_accuracy(dp):
+            ev = dp.get("evaluation")
+            if ev is None or ev.empty or "eval/accuracy" not in ev.columns:
+                return np.nan
+            vals = pd.to_numeric(ev["eval/accuracy"], errors="coerce")
+            return float(vals.max()) if vals.notna().any() else np.nan
+        before = len(datapoints_list)
+        filtered = []
+        for dp in datapoints_list:
+            m = _max_eval_accuracy(dp)
+            if np.isfinite(m) and m >= args.min_eval_accuracy:
+                filtered.append(dp)
+        datapoints_list = filtered
+        after = len(datapoints_list)
+        print(f"Filtered by --min-eval-accuracy={args.min_eval_accuracy:.3f}: kept {after}/{before} runs.")
+
     # Memory trim
     # - predicates tables are not used in this analysis/plot flow.
     # - if --latest-only keep only the latest language per run in memory.
+    # - if --best-accuracy keep only the language closest to first max-accuracy epoch.
+    def _best_accuracy_epoch(eval_df):
+        if eval_df is None or eval_df.empty: return None
+        if "eval/accuracy" not in eval_df.columns or "epoch" not in eval_df.columns: return None
+        acc = pd.to_numeric(eval_df["eval/accuracy"], errors="coerce")
+        ep = pd.to_numeric(eval_df["epoch"], errors="coerce")
+        valid = acc.notna() & ep.notna()
+        if not valid.any(): return None
+        acc_v = acc[valid]
+        ep_v = ep[valid]
+        m = float(acc_v.max())
+        hit = (acc_v - m).abs() <= 1e-12
+        if not hit.any(): return None
+        return int(ep_v.loc[hit].iloc[0])
+
+    def _select_language_for_epoch(langs, target_epoch):
+        if not langs: return []
+        if target_epoch is None: return [max(langs, key=lambda x: x.get("epoch_number", -1))]
+        exact = [x for x in langs if x.get("epoch_number", None) == target_epoch]
+        if exact: return [exact[0]]
+        chosen = min(langs, key=lambda x: (abs(int(x.get("epoch_number", -10**9)) - target_epoch), x.get("epoch_number", 10**9) > target_epoch))
+        return [chosen]
+
     for d in datapoints_list:
         d["predicates"] = None
         if args.latest_only:
             langs = d.get("languages") or []
             if langs:
                 d["languages"] = [max(langs, key=lambda x: x.get("epoch_number", -1))]
+        elif args.best_accuracy:
+            langs = d.get("languages") or []
+            if langs:
+                best_ep = _best_accuracy_epoch(d.get("evaluation"))
+                d["languages"] = _select_language_for_epoch(langs, best_ep)
     gc.collect()
 
     neg_plot_df = None
+    neg_plot_df_top1 = None
     if args.negation:
-        neg_plot_df, _ = negation.export_analysis(
+        neg_plot_df, neg_plot_df_top1 = negation.export_analysis(
             datapoints_list,
             experiment_name=experiment_path,
             top_rows=args.negation_top_rows,
             profile=args.negation_profile,
             operator=args.feat_operator,
             latest_only=args.latest_only,
+            best_accuracy_only=args.best_accuracy,
             n_jobs=args.n_jobs,
             outputs_dir=pathlib.Path(__file__).resolve().parent / "outputs",
         )
 
-    plot_mode_suffix = "latest" if args.latest_only else "all_epochs"
+    if args.latest_only:
+        plot_mode_suffix = "latest"
+    elif args.best_accuracy:
+        plot_mode_suffix = "best_accuracy"
+    else:
+        plot_mode_suffix = "all_epochs"
     plot_name = f"{experiment_path}_{plot_mode_suffix}"
     cm = plots.ComplexityMemory(datapoints_list, name=plot_name)
     neg_plot_name = f"{experiment_path}_{plot_mode_suffix}_{args.feat_operator}_{args.negation_profile}"
     cm_neg = plots.ComplexityMemory(datapoints_list, name=neg_plot_name)
+
+    if args.latest_only:
+        mode_suffix = "_latest"
+    elif args.best_accuracy:
+        mode_suffix = "_best_accuracy"
+    else:
+        mode_suffix = ""
+
     if args.plots:
         out_dir = pathlib.Path(__file__).resolve().parent / "plots"
         # Plot: epochs to max accuracy/performance
@@ -102,27 +169,28 @@ if __name__ == "__main__":
         cm.plot_message_compression(group_by=("hidden_size",), out_dir=out_dir)
 
         if neg_plot_df is None:
-            latest_suffix = "_latest" if args.latest_only else ""
-            top_rows_csv = cache_dir / f"negation_top_rows_{experiment_path}_{args.feat_operator}_{args.negation_profile}{latest_suffix}.csv"
-            top1_csv = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}_{args.negation_profile}{latest_suffix}.csv"
-            top_rows_csv_legacy = cache_dir / f"negation_top_rows_{experiment_path}_{args.feat_operator}{latest_suffix}.csv"
-            top1_csv_legacy = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}{latest_suffix}.csv"
+            top_rows_csv = cache_dir / f"negation_top_rows_{experiment_path}_{args.feat_operator}_{args.negation_profile}{mode_suffix}.csv"
+            top1_csv = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}_{args.negation_profile}{mode_suffix}.csv"
             if top_rows_csv.is_file():
                 neg_plot_df = pd.read_csv(top_rows_csv)
                 print(f"Loaded existing negation top-rows for plots: {top_rows_csv}")
             elif top1_csv.is_file():
                 neg_plot_df = pd.read_csv(top1_csv)
-                print(f"Loaded existing negation top-1 for plots: {top1_csv}")
-            elif top_rows_csv_legacy.is_file():
-                neg_plot_df = pd.read_csv(top_rows_csv_legacy)
-                print(f"Loaded legacy negation top-rows for plots: {top_rows_csv_legacy}")
-            elif top1_csv_legacy.is_file():
-                neg_plot_df = pd.read_csv(top1_csv_legacy)
-                print(f"Loaded legacy negation top-1 for plots: {top1_csv_legacy}")
+                print(f"Loaded existing negation top-1 for plots (fallback for all negation plots): {top1_csv}")
+
+        if neg_plot_df_top1 is None:
+            top1_csv = cache_dir / f"negation_top_1_{experiment_path}_{args.feat_operator}_{args.negation_profile}{mode_suffix}.csv"
+            if top1_csv.is_file():
+                neg_plot_df_top1 = pd.read_csv(top1_csv)
+                print(f"Loaded existing negation top-1 for reaper plots: {top1_csv}")
 
         if neg_plot_df is not None and not neg_plot_df.empty:
             cm_neg.plot_negation_metrics_by_complexity(neg_plot_df, out_dir=out_dir)
             cm_neg.plot_negation_metrics_over_epochs(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
+            if neg_plot_df_top1 is not None and not neg_plot_df_top1.empty:
+                cm_neg.plot_negation_metrics_by_reaper_interval(neg_plot_df_top1, profile_tag=args.feat_operator, out_dir=out_dir)
+            else:
+                print("[WARN] Reaper-interval plots skipped: strict top-1 dataframe is required but not available.")
             cm_neg.plot_negation_metric_slopes(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
             cm_neg.plot_topsim_vs_negation(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)
             cm_neg.plot_topsim_interaction_n(neg_plot_df, profile_tag=args.feat_operator, out_dir=out_dir)

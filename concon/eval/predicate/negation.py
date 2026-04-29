@@ -236,6 +236,22 @@ def _safe_normalize(num, den):
     if(not np.isfinite(out)): return np.nan
     return out
 
+def _safe_f1_2(a, b):
+    """Two-term harmonic mean: 2ab/(a+b)."""
+    if not (np.isfinite(a) and np.isfinite(b)): return np.nan
+    den = a + b
+    if den <= 0.0: return np.nan
+    out = 2.0 * a * b / den
+    return float(out) if np.isfinite(out) else np.nan
+
+def _safe_f1_3(a, b, c):
+    """Three-term harmonic mean: 3abc/(a+b+c)."""
+    if not (np.isfinite(a) and np.isfinite(b) and np.isfinite(c)): return np.nan
+    den = a + b + c
+    if den <= 0.0: return np.nan
+    out = 3.0 * a * b * c / den
+    return float(out) if np.isfinite(out) else np.nan
+
 # S : set of all signals
 # s : one observed signal
 # X : candidate negation feature
@@ -380,6 +396,7 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
             T = _build_T(key, unary_features)
             l_T = _leak_composite(T, V, X)
         R = _build_R(key, tok_sets)
+        r_val = _signal_conservation(R, V, X)
         mask = np.asarray(X, dtype=bool)
         verified_predicates = pd.unique(pred_labels[mask]).tolist()
         rows.append({
@@ -387,7 +404,10 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
             "n": row["n"],
             "l_X": row["l_X"],
             "l_T": l_T,
-            "r": _signal_conservation(R, V, X),
+            "r": r_val,
+            "F1_nT": _safe_f1_2(row["n"], 1.0 - l_T),
+            # Three-way harmonic mean over n, (1-l_T), r.
+            "F1_nTr": _safe_f1_3(row["n"], 1.0 - l_T, r_val),
             "atoms": atom_count,
             "support": row["support"],
             "verified_predicates": " ; ".join(verified_predicates),
@@ -405,7 +425,7 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
 
 
 def _analysis_report(task):
-    language_df, top_rows, profile, operator, run_name, properties, epoch_number, vocab_size = task
+    language_df, top_rows, profile, operator, run_name, properties, epoch_number, vocab_size, eval_accuracy = task
     report = analysis(
         language_df,
         top_rows=top_rows,
@@ -417,6 +437,7 @@ def _analysis_report(task):
     report.insert(2, "properties", properties)
     report.insert(3, "epoch_analyzed", epoch_number)
     report.insert(4, "vocab_size", vocab_size)
+    report.insert(5, "eval_accuracy", eval_accuracy)
     ordered_cols = [c for c in report.columns if c != "verified_predicates"] + ["verified_predicates"]
     report = report[ordered_cols]
     return report
@@ -425,13 +446,46 @@ def _analysis_report_indexed(args):
     idx, task = args
     return idx, _analysis_report(task)
 
+def _best_accuracy_epoch(eval_df):
+    """Return first epoch reaching max eval/accuracy, or None if unavailable."""
+    if eval_df is None or eval_df.empty: return None
+    if "eval/accuracy" not in eval_df.columns or "epoch" not in eval_df.columns: return None
+    acc = pd.to_numeric(eval_df["eval/accuracy"], errors="coerce")
+    ep = pd.to_numeric(eval_df["epoch"], errors="coerce")
+    mask_valid = acc.notna() & ep.notna()
+    if not mask_valid.any(): return None
+    acc_valid = acc[mask_valid]
+    ep_valid = ep[mask_valid]
+    max_acc = float(acc_valid.max())
+    # First epoch that reaches the maximum (with tiny tolerance for float noise).
+    hit = np.isclose(acc_valid.to_numpy(dtype=np.float64), max_acc, rtol=0.0, atol=1e-12)
+    if not np.any(hit): return None
+    return int(ep_valid.iloc[np.argmax(hit)])
+
+def _select_language_for_epoch(languages, target_epoch):
+    """Select one language entry for the desired epoch, with fallback to closest available."""
+    if not languages: return None
+    if target_epoch is None:
+        return max(languages, key=lambda x: x.get("epoch_number", -1))
+    # Exact epoch match if available.
+    exact = [x for x in languages if x.get("epoch_number", None) == target_epoch]
+    if exact:
+        return exact[0]
+    # Fallback: closest dumped epoch to target; prefer earlier on ties.
+    return min(
+        languages,
+        key=lambda x: (abs(int(x.get("epoch_number", -10**9)) - target_epoch), x.get("epoch_number", 10**9) > target_epoch),
+    )
+
 def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
-    latest_only: bool = False, outputs_dir=None, profile: str = "fast", operator: str = "or",
-    n_jobs: int = 1):
+    latest_only: bool = False, best_accuracy_only: bool = False, outputs_dir=None,
+    profile: str = "fast", operator: str = "or", n_jobs: int = 1):
     """Perform analysis over datapoints and export a csv with top rows and a csv with the one top row."""
     if(outputs_dir is None): outputs_dir = pathlib.Path(__file__).resolve().parent / "outputs"
     outputs_dir = pathlib.Path(outputs_dir)
     outputs_dir.mkdir(parents=True, exist_ok=True)
+    if latest_only and best_accuracy_only:
+        raise ValueError("latest_only and best_accuracy_only are mutually exclusive.")
 
     all_top_rows = []
     top_one_rows = []
@@ -439,16 +493,30 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
 
     # Build a task queue (show progress)
     tasks = []
+    def _eval_acc_for_epoch(eval_df, epoch):
+        if eval_df is None or eval_df.empty: return np.nan
+        if "eval/accuracy" not in eval_df.columns: return np.nan
+        if "epoch" in eval_df.columns:
+            match = eval_df.loc[eval_df["epoch"] == epoch, "eval/accuracy"]
+            if not match.empty: return float(match.iloc[-1])
+        return np.nan
+
     for dp in datapoints_list:
         languages = dp["languages"]
         assert languages, "a datapoint is missing languages"
 
-        if(latest_only): language_entries = [max(languages, key=lambda x: x.get("epoch_number", -1))]
-        else:            language_entries = sorted(languages, key=lambda x: x.get("epoch_number", -1))
+        if latest_only:
+            language_entries = [max(languages, key=lambda x: x.get("epoch_number", -1))]
+        elif best_accuracy_only:
+            best_epoch = _best_accuracy_epoch(dp.get("evaluation"))
+            language_entries = [_select_language_for_epoch(languages, best_epoch)]
+        else:
+            language_entries = sorted(languages, key=lambda x: x.get("epoch_number", -1))
 
         assert dp["evaluation"] is not None and not dp["evaluation"].empty, "a datapoint is missing evaluation dataframe"
         vocab_size = dp["evaluation"]["eval/vocab_used"].iloc[-1]
         for lang_entry in language_entries:
+            epoch_number = lang_entry["epoch_number"]
             tasks.append((
                 lang_entry["language"],
                 top_rows,
@@ -456,8 +524,9 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
                 operator,
                 dp["run_name"],
                 dp["config"]["properties"],
-                lang_entry["epoch_number"],
+                epoch_number,
                 vocab_size,
+                    _eval_acc_for_epoch(dp["evaluation"], epoch_number),
             ))
 
     if n_jobs == 1:
@@ -484,9 +553,11 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
     all_top_df = pd.concat(all_top_rows, ignore_index=True)
     top_one_df = pd.concat(top_one_rows, ignore_index=True)
 
-    latest_suffix = "_latest" if latest_only else ""
-    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}_{operator}_{profile}{latest_suffix}.csv"
-    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}_{operator}_{profile}{latest_suffix}.csv"
+    if latest_only:         mode_suffix = "_latest"
+    elif best_accuracy_only: mode_suffix = "_best_accuracy"
+    else:                   mode_suffix = ""
+    all_top_path = outputs_dir / f"negation_top_rows_{experiment_name}_{operator}_{profile}{mode_suffix}.csv"
+    top_one_path = outputs_dir / f"negation_top_1_{experiment_name}_{operator}_{profile}{mode_suffix}.csv"
     all_top_df.to_csv(all_top_path, index=False)
     top_one_df.to_csv(top_one_path, index=False)
     print(f"Saved negation top-rows CSV to: {all_top_path}")

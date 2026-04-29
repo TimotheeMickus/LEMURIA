@@ -480,6 +480,9 @@ class ComplexityMemory:
         rows = []
         for dp in self.datapoints:
             cfg = dp.get("config", {})
+            reaper_interval = cfg.get("beth_reaper_step")
+            if reaper_interval is None:
+                reaper_interval = cfg.get("reaper_step")
             rows.append({
                 "run_name": str(dp.get("run_name", "")),
                 "complexity": cfg.get("num_predicates"),
@@ -487,6 +490,7 @@ class ComplexityMemory:
                 "properties": str(cfg.get("properties")),
                 "no_negation": cfg.get("no_negation", False),
                 "no_conjunction": cfg.get("no_conjunction", False),
+                "reaper_interval": reaper_interval,
             })
         return pd.DataFrame(rows).drop_duplicates(subset=["run_name"])
 
@@ -529,15 +533,15 @@ class ComplexityMemory:
 
         df = neg_df.copy()
         df["run_name"] = df["run_name"].astype(str)
-        meta = self._build_run_meta_df()[["run_name", "complexity", "hidden_size", "no_negation", "no_conjunction", "properties"]]
-        needed_meta = [c for c in ["complexity", "hidden_size", "no_negation", "no_conjunction"] if c not in df.columns]
+        meta = self._build_run_meta_df()[["run_name", "complexity", "hidden_size", "no_negation", "no_conjunction", "properties", "reaper_interval"]]
+        needed_meta = [c for c in ["complexity", "hidden_size", "no_negation", "no_conjunction", "reaper_interval"] if c not in df.columns]
         if needed_meta:
             df = df.merge(meta[["run_name"] + needed_meta], on="run_name", how="left")
         if "properties" not in df.columns:
             df = df.merge(meta[["run_name", "properties"]], on="run_name", how="left")
         if "no_negation" in df.columns:
             df = df[df["no_negation"] == False]
-        for c in ["complexity", "hidden_size", "n", "l_X", "l_T", "r", "atoms", "support"]:
+        for c in ["complexity", "hidden_size", "reaper_interval", "n", "l_X", "l_T", "r", "atoms", "support"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         if "properties" in df.columns:
@@ -546,6 +550,77 @@ class ComplexityMemory:
         df["leak_x"] = df["l_X"]
         df["leak_composite_t"] = np.where(df["atoms"] > 1, df["l_T"], np.nan)
         return df.dropna(subset=["complexity", "n"])
+
+    def plot_negation_metrics_by_reaper_interval(self, neg_df, *, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "reaper_interval" not in df.columns:
+            return
+
+        df = df.copy()
+        df = df[df["reaper_interval"].notna()]
+        df = df[df["reaper_interval"] > 0]
+        if df.empty:
+            print("[INFO] Reaper-interval plots skipped (no valid reaper interval in config).")
+            return
+
+        # F1 between negation score and non-leak composite score.
+        non_leak_t = 1.0 - df["leak_composite_t"]
+        denom = df["n"] + non_leak_t
+        df["f1_nT"] = np.where((denom > 0) & np.isfinite(non_leak_t), 2.0 * df["n"] * non_leak_t / denom, np.nan)
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = str(profile_tag) if profile_tag else "default"
+
+        complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+        if not complexities:
+            return
+        palette = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+        c_map = {c: palette[i] for i, c in enumerate(complexities)}
+        c_label = {}
+        for c in complexities:
+            props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+            props = sorted(props, key=self._properties_sort_key)
+            c_label[c] = props[0] if len(props) else str(int(c))
+
+        def _plot_interval_metric(metric_col, metric_label, file_suffix):
+            sub = df[df[metric_col].notna()]
+            if sub.empty:
+                return
+            interval_ticks = sorted(pd.to_numeric(sub["reaper_interval"], errors="coerce").dropna().unique())
+            fig = plt.figure(figsize=(10, 6))
+            for c in complexities:
+                g = sub[sub["complexity"] == c]
+                if g.empty:
+                    continue
+                stats = (
+                    g.groupby("reaper_interval")[metric_col]
+                    .agg(mean="mean")
+                    .reset_index()
+                    .sort_values("reaper_interval")
+                )
+                col = c_map[c]
+                plt.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=col, label=f"{c_label[c]} mean")
+
+            plt.xscale("log")
+            if interval_ticks:
+                plt.xticks(interval_ticks, [str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
+            plt.xlabel("reaper interval")
+            plt.ylabel(metric_label)
+            plt.title(f"{metric_label} by reaper interval ({tag})")
+            plt.grid(True, alpha=0.3)
+            plt.legend(ncol=2, title="properties")
+            fig.tight_layout()
+            fig.savefig(out_dir / f"negation_{file_suffix}_by_reaper_interval_{tag}_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+        _plot_interval_metric("f1_nT", "F1_nT", "f1_nt")
+        _plot_interval_metric("n", "n", "n")
+        _plot_interval_metric("l_X", "l_X", "l_x")
+        _plot_interval_metric("leak_composite_t", "l_T (composite)", "l_t_composite")
+        _plot_interval_metric("r", "r", "r")
 
     def _complexity_ticks(self, df):
         xticks = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
