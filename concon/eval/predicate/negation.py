@@ -263,8 +263,8 @@ def _safe_f1_3(a, b, c):
 # R(s) : for a signal s, the remainder after removing the atoms of X
 #        i.e. R(s) = s \ {t1, ..., tk} if X = {t1, ..., tk}
 # n = I(X;N|V)/H(N|V) : X marque-t-il l'opposition de polarité relativement à V ?
-# l_X = I(X;V|N)/H(V|N) : la présence de X divulgue-t-elle de l'information sur la valeur du prédicat ?
-# l_T = I(T;V|X=1)/H(V|X=1) : si X est composé, son état interne divulgue-t-il la valeur du prédicat ?
+# l_X = 1 - I(X;V|N)/H(V|N) : la présence de X divulgue-t-elle de l'information sur la valeur du prédicat ?
+# l_T = 1 - I(T;V|X=1)/H(V|X=1) : si X est composé, son état interne divulgue-t-il la valeur du prédicat ?
 # r = I(R;V|X=1)/H(V|X=1) : après retrait de X, le reste du signal R conserve-t-il la valeur du prédicat ? (ancien u_T')
 
 def _build_T(key, features):
@@ -283,6 +283,11 @@ def _negation_strength(X, N, V):
     '''I(X;N|V) / H(N|V).
     Measures if a feature marks polarity relative to predicate value.'''
     return _safe_normalize(_conditional_mi(X, N, V), _conditional_entropy(N, V))
+
+def _negation_strength_global(X, N):
+    '''I(X;N) / H(N).
+    Unconditioned polarity informativeness (global variant).'''
+    return _safe_normalize(_mutual_information(X, N), _entropy(N))
 
 def _leak_unary(X, V, N):
     '''I(X;V|N) / H(V|N).
@@ -310,6 +315,10 @@ def _signal_conservation(R, V, X):
     h = _entropy(V_0)
     if(h <= 0): return np.nan
     return _mutual_information(R_0, V_0) / h
+
+def _orthogonality(X, R):
+    '''I(X;R) in bits. Lower is more orthogonal.'''
+    return _mutual_information(X, R)
 
 def _signal_conservation_global(R, V):
     '''Test variant: I(R;V) / H(V), without conditioning on X=1.'''
@@ -340,6 +349,7 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     # Entropy denominators do not depend on candidate feature X.
     h_n_given_v = _conditional_entropy(N, V)
     h_v_given_n = _conditional_entropy(V, N)
+    h_n = _entropy(N)
     # Pre-encode conditioning variables for fast binary-X CMI.
     V_codes = pd.factorize(V, sort=False)[0].astype(np.int64, copy=False)
     N_codes = N.astype(np.int64, copy=False)
@@ -397,24 +407,30 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
             l_T = _leak_composite(T, V, X)
         R = _build_R(key, tok_sets)
         r_val = _signal_conservation(R, V, X)
+        l_x_good = 1.0 - row["l_X"]
+        l_t_good = 1.0 - l_T
+        o_good = 1.0 - _orthogonality(X, R)
         mask = np.asarray(X, dtype=bool)
         verified_predicates = pd.unique(pred_labels[mask]).tolist()
         rows.append({
             "feature": row["feature"],
             "n": row["n"],
-            "l_X": row["l_X"],
-            "l_T": l_T,
+            "n_global": _safe_normalize(_mutual_information(X, N), h_n),
+            "l_X": l_x_good,
+            "l_T": l_t_good,
             "r": r_val,
-            "F1_nT": _safe_f1_2(row["n"], 1.0 - l_T),
-            # Three-way harmonic mean over n, (1-l_T), r.
-            "F1_nTr": _safe_f1_3(row["n"], 1.0 - l_T, r_val),
+            "o": o_good,
+            "F1_nr": _safe_f1_2(row["n"], r_val),
+            "F1_nT": _safe_f1_2(row["n"], l_t_good),
+            # Three-way harmonic mean over n, l_T, r (all high=good).
+            "F1_nTr": _safe_f1_3(row["n"], l_t_good, r_val),
             "atoms": atom_count,
             "support": row["support"],
             "verified_predicates": " ; ".join(verified_predicates),
         })
-    mapping = {"n": False, "r": False, "support": False, "atoms": True, "l_T": True, "l_X": True}
+    mapping = {"n": False, "n_global": False, "r": False, "o": False, "support": False, "atoms": True, "l_T": False, "l_X": False}
     if sort_order is not None:
-        assert set(sort_order).issubset({"n", "r", "l_T", "l_X", "atoms", "support"}), "invalid key in sort_order"
+        assert set(sort_order).issubset({"n", "n_global", "r", "o", "l_T", "l_X", "atoms", "support"}), "invalid key in sort_order"
     else:
         sort_order = ["n", "r", "l_T", "l_X"]
     ascending = [mapping[k] for k in sort_order]
@@ -594,12 +610,10 @@ if __name__ == "__main__":
     # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
     # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
-    max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(len(voc), profile="slow")
-    max_size = len(voc)
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
     # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
-    features = _grow_features(voc, M, score_fn, operator=op, top_k=top_k, 
-        max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates)
+    features = _grow_features(voc, M, score_fn, operator=op, top_k=None,
+        max_size=len(voc), max_active_round=None, max_candidates=None)
     # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
     unary_features = {
         a: features[("tok", frozenset({a}))].astype(np.uint8) 
@@ -612,16 +626,25 @@ if __name__ == "__main__":
         op, atoms = key
         T = _build_T(key, unary_features)
         R = _build_R(key, tok_sets)
+        n_val = _negation_strength(X, N, V)
+        l_x_leak = _leak_unary(X, V, N)
+        l_t_leak = _leak_composite(T, V, X)
+        r_val = _signal_conservation(R, V, X)
         rows.append({
             "feature": f"{op}({','.join(sorted(atoms))})",
-            "n": _negation_strength(X, N, V),
-            "l_X": _leak_unary(X, V, N),
-            "l_T": _leak_composite(T, V, X),
-            "r": _signal_conservation(R, V, X),
+            "n": n_val,
+            "n_global": _negation_strength_global(X, N),
+            "l_X": 1.0 - l_x_leak,
+            "l_T": 1.0 - l_t_leak,
+            "r": r_val,
+            "o": 1.0 - _orthogonality(X, R),
             "r_global": _signal_conservation_global(R, V),
+            "F1_nr": _safe_f1_2(n_val, r_val),
+            "F1_nT": _safe_f1_2(n_val, 1.0 - l_t_leak),
+            "F1_nTr": _safe_f1_3(n_val, 1.0 - l_t_leak, r_val),
             "atoms": len(atoms),
             "support": float(np.mean(np.bincount(V_codes, weights=np.asarray(X, dtype=np.uint8), minlength=len(np.bincount(V_codes))) > 0)),
         })
     # report: pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
-    report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X", "support"], ascending=[False, False, True, True, False], na_position="last")
+    report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X", "support"], ascending=[False, False, False, False, False], na_position="last")
     print(report.head(20).to_string(index=False, float_format=lambda x: f"{x:.3f}"))

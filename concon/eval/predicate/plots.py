@@ -551,7 +551,7 @@ class ComplexityMemory:
         df["leak_composite_t"] = np.where(df["atoms"] > 1, df["l_T"], np.nan)
         return df.dropna(subset=["complexity", "n"])
 
-    def plot_negation_metrics_by_reaper_interval(self, neg_df, *, profile_tag="", out_dir="plots"):
+    def plot_negation_metrics_by_reaper_interval(self, neg_df, *, profile_tag="", out_dir="plots", metrics=None):
         df = self._prepare_negation_top_df(neg_df)
         if df is None or df.empty:
             return
@@ -585,11 +585,30 @@ class ComplexityMemory:
             props = sorted(props, key=self._properties_sort_key)
             c_label[c] = props[0] if len(props) else str(int(c))
 
+        if metrics is None:
+            metrics = ["f1_nT", "n", "l_X", "leak_composite_t", "r"]
+
+        metric_spec = {
+            "f1_nT": ("F1_nT", "f1_nt"),
+            "n": ("n", "n"),
+            "l_X": ("l_X", "l_x"),
+            "leak_composite_t": ("l_T (composite)", "l_t_composite"),
+            "r": ("r", "r"),
+        }
+
+        def _clean_interval_ticks(values):
+            ticks = sorted(pd.to_numeric(values, errors="coerce").dropna().unique())
+            if len(ticks) <= 10:
+                return ticks
+            # Keep ticks legible when many intervals are present.
+            idx = np.unique(np.linspace(0, len(ticks) - 1, num=10).round().astype(int))
+            return [ticks[i] for i in idx]
+
         def _plot_interval_metric(metric_col, metric_label, file_suffix):
             sub = df[df[metric_col].notna()]
             if sub.empty:
                 return
-            interval_ticks = sorted(pd.to_numeric(sub["reaper_interval"], errors="coerce").dropna().unique())
+            interval_ticks = _clean_interval_ticks(sub["reaper_interval"])
             fig = plt.figure(figsize=(10, 6))
             for c in complexities:
                 g = sub[sub["complexity"] == c]
@@ -606,7 +625,9 @@ class ComplexityMemory:
 
             plt.xscale("log")
             if interval_ticks:
-                plt.xticks(interval_ticks, [str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
+                labels = [str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks]
+                rot = 0 if len(interval_ticks) <= 8 else 45
+                plt.xticks(interval_ticks, labels, rotation=rot, ha="right" if rot else "center")
             plt.xlabel("reaper interval")
             plt.ylabel(metric_label)
             plt.title(f"{metric_label} by reaper interval ({tag})")
@@ -616,11 +637,12 @@ class ComplexityMemory:
             fig.savefig(out_dir / f"negation_{file_suffix}_by_reaper_interval_{tag}_{self.name}.png", dpi=150)
             plt.close(fig)
 
-        _plot_interval_metric("f1_nT", "F1_nT", "f1_nt")
-        _plot_interval_metric("n", "n", "n")
-        _plot_interval_metric("l_X", "l_X", "l_x")
-        _plot_interval_metric("leak_composite_t", "l_T (composite)", "l_t_composite")
-        _plot_interval_metric("r", "r", "r")
+        for metric in metrics:
+            spec = metric_spec.get(metric)
+            if spec is None:
+                continue
+            label, suffix = spec
+            _plot_interval_metric(metric, label, suffix)
 
     def _complexity_ticks(self, df):
         xticks = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
@@ -820,13 +842,13 @@ class ComplexityMemory:
             xticks, labels = self._complexity_ticks(df)
             plt.xscale("log", base=2)
             plt.xticks(xticks, labels, rotation=45, ha="right")
-            plt.title("negation main metrics by complexity")
+            plt.title("negation by complexity")
             plt.xlabel("complexity")
             plt.ylabel("score")
             plt.grid(True, alpha=0.3)
             plt.legend(ncol=2)
             fig.tight_layout()
-            fig.savefig(out_dir / f"negation_main4_by_complexity_{self.name}.png", dpi=150)
+            fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
         plt.close(fig)
 
         for col, label, suffix, color in self._leak_metric_specs():
