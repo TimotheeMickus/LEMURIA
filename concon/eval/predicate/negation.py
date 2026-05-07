@@ -150,6 +150,9 @@ def _search_limits_from_vocab(vocab_size: int, profile: str = "fast"):
     """Bounds for search size by vocabulary size: (max_feat_size, top_k, max_active_round, max_candidates)."""
     v = int(vocab_size)
     p = str(profile).strip().lower()
+    if p == "unbounded":
+        # No hard caps on growth; stop only when no improving feature is found.
+        return None, None, None, None
     if p == "slow":
         if(v >= 2000): return 4, 24, 1200, 24000
         if(v >= 800): return 5, 32, 1800, 36000
@@ -263,9 +266,9 @@ def _safe_f1_3(a, b, c):
 # R(s) : for a signal s, the remainder after removing the atoms of X
 #        i.e. R(s) = s \ {t1, ..., tk} if X = {t1, ..., tk}
 # n = I(X;N|V)/H(N|V) : X marque-t-il l'opposition de polarité relativement à V ?
-# l_X = 1 - I(X;V|N)/H(V|N) : la présence de X divulgue-t-elle de l'information sur la valeur du prédicat ?
-# l_T = 1 - I(T;V|X=1)/H(V|X=1) : si X est composé, son état interne divulgue-t-il la valeur du prédicat ?
-# r = I(R;V|X=1)/H(V|X=1) : après retrait de X, le reste du signal R conserve-t-il la valeur du prédicat ? (ancien u_T')
+# h = 1 - I(X;V|N)/H(V|N) : homogénéité (non-divulgation de la valeur du prédicat)
+# t = I(T;V|X=1)/H(V|X=1) : value entanglement (fuite interne du feature composé)
+# c = I(R;V|X=1)/H(V|X=1) : signal conservation après retrait de X (ancien u_T')
 
 def _build_T(key, features):
     # key = (op, frozenset(atoms))
@@ -289,12 +292,12 @@ def _negation_strength_global(X, N):
     Unconditioned polarity informativeness (global variant).'''
     return _safe_normalize(_mutual_information(X, N), _entropy(N))
 
-def _leak_unary(X, V, N):
-    '''I(X;V|N) / H(V|N).
+def _homogeneity(X, V, N):
+    '''1 - I(X;V|N) / H(V|N).
     Measures if the presence of a feature carries information on predicate value.'''
-    return _safe_normalize(_conditional_mi(X, V, N), _conditional_entropy(V, N))
+    return 1 - _safe_normalize(_conditional_mi(X, V, N), _conditional_entropy(V, N))
 
-def _leak_composite(T, V, X):
+def _value_entanglement(T, V, X):
     '''I(T;V|X=1) / H(V|X=1).
     If the feature is composite, measures if its internal state carries information on predicate value.'''
     X = np.asarray(X).astype(bool)
@@ -305,7 +308,7 @@ def _leak_composite(T, V, X):
     if(h <= 0): return np.nan
     return _mutual_information(T_0, V_0) / h
 
-def _signal_conservation(R, V, X):
+def _value_conservation(R, V, X):
     '''I(R;V|X=1) / H(V|X=1).
     After feature is removed from the signal, measures if its remainder carry information on predicate value.'''
     X = np.asarray(X, dtype=bool)
@@ -320,14 +323,14 @@ def _orthogonality(X, R):
     '''I(X;R) in bits. Lower is more orthogonal.'''
     return _mutual_information(X, R)
 
-def _signal_conservation_global(R, V):
+def _value_conservation_global(R, V):
     '''Test variant: I(R;V) / H(V), without conditioning on X=1.'''
     h = _entropy(V)
     if(h <= 0): return np.nan
     return _mutual_information(R, V) / h
 
 def _prefilter_size(n_features, top_rows, profile):
-    if str(profile).strip().lower() == "slow": return int(n_features)
+    if str(profile).strip().lower() in {"slow", "unbounded"}: return int(n_features)
     k = max(int(top_rows) * 20, 300)
     return min(int(n_features), k)
 
@@ -384,7 +387,7 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
             "_X": X,
             "feature": f"{op}({','.join(sorted(atoms))})",
             "n": _score_cached(key, X, score_fn, score_cache),
-            "l_X": _safe_normalize(_cmi_binary_xv_given_n(X, N_codes, VN_codes, count_n, count_vn, n_total), h_v_given_n),
+            "h": _safe_normalize(_cmi_binary_xv_given_n(X, N_codes, VN_codes, count_n, count_vn, n_total), h_v_given_n),
             "atoms": len(atoms),
             "support": float(np.mean(np.bincount(V_codes, weights=np.asarray(X, dtype=np.uint8), minlength=len(count_v)) > 0)),
         })
@@ -393,46 +396,45 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     prefilter_k = _prefilter_size(len(cheap_rows), top_rows=top_rows, profile=profile)
     def _prefilter_rank(row):
         n = row["n"] if np.isfinite(row["n"]) else -np.inf
-        lx = row["l_X"] if np.isfinite(row["l_X"]) else np.inf
-        return (n, -lx, row["support"], -row["atoms"])
+        h = row["h"] if np.isfinite(row["h"]) else -np.inf
+        return (n, h, row["support"], -row["atoms"])
     survivors = sorted(cheap_rows, key=_prefilter_rank, reverse=True)[:prefilter_k]
 
     rows = []
     for row in survivors:
         key, X = row["_key"], row["_X"]
         atom_count = row["atoms"]
-        if(atom_count == 1): l_T = 0.0
+        if(atom_count == 1): t = 0.0
         else:
             T = _build_T(key, unary_features)
-            l_T = _leak_composite(T, V, X)
+            t = _value_entanglement(T, V, X)
         R = _build_R(key, tok_sets)
-        r_val = _signal_conservation(R, V, X)
-        l_x_good = 1.0 - row["l_X"]
-        l_t_good = 1.0 - l_T
-        o_good = 1.0 - _orthogonality(X, R)
+        c = _value_conservation(R, V, X)
+        h = row["h"]
+        o = _orthogonality(X, R)
         mask = np.asarray(X, dtype=bool)
         verified_predicates = pd.unique(pred_labels[mask]).tolist()
         rows.append({
             "feature": row["feature"],
             "n": row["n"],
             "n_global": _safe_normalize(_mutual_information(X, N), h_n),
-            "l_X": l_x_good,
-            "l_T": l_t_good,
-            "r": r_val,
-            "o": o_good,
-            "F1_nr": _safe_f1_2(row["n"], r_val),
-            "F1_nT": _safe_f1_2(row["n"], l_t_good),
+            "h": h,
+            "t": t,
+            "c": c,
+            "o": o,
+            "F1_nr": _safe_f1_2(row["n"], c),
+            "F1_nT": _safe_f1_2(row["n"], 1.0 - t),
             # Three-way harmonic mean over n, l_T, r (all high=good).
-            "F1_nTr": _safe_f1_3(row["n"], l_t_good, r_val),
+            "F1_nTr": _safe_f1_3(row["n"], 1.0 - t, c),
             "atoms": atom_count,
             "support": row["support"],
             "verified_predicates": " ; ".join(verified_predicates),
         })
-    mapping = {"n": False, "n_global": False, "r": False, "o": False, "support": False, "atoms": True, "l_T": False, "l_X": False}
+    mapping = {"n": False, "n_global": False, "c": False, "o": False, "support": False, "atoms": True, "t": True, "h": False}
     if sort_order is not None:
-        assert set(sort_order).issubset({"n", "n_global", "r", "o", "l_T", "l_X", "atoms", "support"}), "invalid key in sort_order"
+        assert set(sort_order).issubset({"n", "n_global", "c", "o", "t", "h", "atoms", "support"}), "invalid key in sort_order"
     else:
-        sort_order = ["n", "r", "l_T", "l_X"]
+        sort_order = ["n", "c", "t", "h"]
     ascending = [mapping[k] for k in sort_order]
     # pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
     report_df = pd.DataFrame(rows)
@@ -587,9 +589,75 @@ if __name__ == "__main__":
     import sys
     # for quick single-datapoint analysis; choose existing directory
     # language: pd.DataFrame with "msg" and "pred_str" columns
-    op = sys.argv[2] if len(sys.argv) > 2 else "or"
+    arg2 = sys.argv[2] if len(sys.argv) > 2 else None
+    arg3 = sys.argv[3] if len(sys.argv) > 3 else None
+    op = "or"
+    feature_query = None
+    if arg2 is not None:
+        if arg2 in {"or", "and"}: op = arg2
+        else:                     feature_query = arg2
+    if arg3 is not None:
+        if arg3 in {"or", "and"}: op = arg3
+        elif feature_query is None: feature_query = arg3
+
+    def _parse_feature_query(spec, default_operator="or"):
+        s = str(spec).strip()
+        m = re.fullmatch(r"(tok|or|and)\((.*)\)", s)
+        if m:
+            op_name = m.group(1)
+            atoms = [a.strip() for a in m.group(2).split(",") if a.strip()]
+            if op_name == "tok":
+                if len(atoms) != 1: raise ValueError("tok(...) expects exactly one atom")
+                return ("tok", frozenset({atoms[0]}))
+            if not atoms: raise ValueError(f"{op_name}(...) expects at least one atom")
+            return (op_name, frozenset(atoms))
+        # Comma list without explicit operator -> use default operator.
+        if "," in s:
+            atoms = [a.strip() for a in s.split(",") if a.strip()]
+            if not atoms: raise ValueError("empty feature specification")
+            return (default_operator, frozenset(atoms))
+        # Bare token -> unary token feature.
+        return ("tok", frozenset({s}))
+
+    def _feature_vector_from_key(key, tok_sets):
+        op_name, atoms_f = key
+        atoms_set = set(atoms_f)
+        if op_name == "tok":
+            atom = next(iter(atoms_set))
+            return np.asarray([atom in msg_tokens for msg_tokens in tok_sets], dtype=np.uint8)
+        if op_name == "or":
+            return np.asarray([len(msg_tokens & atoms_set) > 0 for msg_tokens in tok_sets], dtype=np.uint8)
+        if op_name == "and":
+            return np.asarray([atoms_set.issubset(msg_tokens) for msg_tokens in tok_sets], dtype=np.uint8)
+        raise ValueError(f"unknown operator: {op_name}")
+
+    def _feature_label(key):
+        op_name, atoms_f = key
+        atoms_s = sorted(atoms_f)
+        if op_name == "tok" and len(atoms_s) == 1: return f"tok({atoms_s[0]})"
+        return f"{op_name}({','.join(atoms_s)})"
+
     experiment_input = sys.argv[1] if len(sys.argv) > 1 else input("Analyse: ").strip()
-    input_path = pathlib.Path(__file__).resolve().parents[3] / "runs" / "toyset" / experiment_input
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    runs_root = repo_root / "runs"
+    raw_path = pathlib.Path(experiment_input)
+
+    candidates = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    else:
+        # If user gives a subpath (e.g. "interesting_data/file.csv"), treat it as explicit.
+        if len(raw_path.parts) > 1:
+            candidates.extend([pathlib.Path.cwd() / raw_path, runs_root / raw_path])
+        else:
+            # Bare filename -> default to runs/toyset/<file>.
+            candidates.extend([runs_root / "toyset" / raw_path, pathlib.Path.cwd() / raw_path, runs_root / raw_path])
+
+    input_path = next((p for p in candidates if p.is_file()), None)
+    if input_path is None:
+        tried = "\n".join(f"- {p}" for p in candidates)
+        raise FileNotFoundError(f"Input file not found. Tried:\n{tried}")
+
     language = pd.read_csv(input_path)
     # display
     parsed = language["pred_str"].map(_parse_predicate)
@@ -612,39 +680,50 @@ if __name__ == "__main__":
     score_fn = lambda X: _negation_strength(X, N, V)
     # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
     # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
-    features = _grow_features(voc, M, score_fn, operator=op, top_k=None,
-        max_size=len(voc), max_active_round=None, max_candidates=None)
+    features = None
+    if feature_query is None:
+        features = _grow_features(voc, M, score_fn, operator=op, top_k=None,
+            max_size=len(voc), max_active_round=None, max_candidates=None)
     # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
-    unary_features = {
-        a: features[("tok", frozenset({a}))].astype(np.uint8) 
-        for _, atoms in features.keys() if len(atoms) == 1 
-        for a in atoms
-        }
+    unary_features = {voc[j]: M[:, j].astype(np.uint8) for j in range(len(voc))}
 
-    rows = []
-    for key, X in features.items():
-        op, atoms = key
+    def _row_for_feature(key, X):
+        _, atoms = key
         T = _build_T(key, unary_features)
         R = _build_R(key, tok_sets)
         n_val = _negation_strength(X, N, V)
-        l_x_leak = _leak_unary(X, V, N)
-        l_t_leak = _leak_composite(T, V, X)
-        r_val = _signal_conservation(R, V, X)
-        rows.append({
-            "feature": f"{op}({','.join(sorted(atoms))})",
+        h_val = _homogeneity(X, V, N)
+        t_val = _value_entanglement(T, V, X)
+        r_val = _value_conservation(R, V, X)
+        return {
+            "feature": _feature_label(key),
             "n": n_val,
             "n_global": _negation_strength_global(X, N),
-            "l_X": 1.0 - l_x_leak,
-            "l_T": 1.0 - l_t_leak,
-            "r": r_val,
-            "o": 1.0 - _orthogonality(X, R),
-            "r_global": _signal_conservation_global(R, V),
+            "h": h_val,
+            "t": t_val,
+            "c": r_val,
+            "o": _orthogonality(X, R),
+            "r_global": _value_conservation_global(R, V),
             "F1_nr": _safe_f1_2(n_val, r_val),
-            "F1_nT": _safe_f1_2(n_val, 1.0 - l_t_leak),
-            "F1_nTr": _safe_f1_3(n_val, 1.0 - l_t_leak, r_val),
+            "F1_nT": _safe_f1_2(n_val, 1.0 - t_val),
             "atoms": len(atoms),
             "support": float(np.mean(np.bincount(V_codes, weights=np.asarray(X, dtype=np.uint8), minlength=len(np.bincount(V_codes))) > 0)),
-        })
+        }
+
+    rows = []
+    if feature_query is None:
+        for key, X in features.items():
+            rows.append(_row_for_feature(key, np.asarray(X, dtype=np.uint8)))
+    else:
+        key = _parse_feature_query(feature_query, default_operator=op)
+        missing = [a for a in key[1] if a not in unary_features]
+        if missing:
+            print(f"[WARN] atoms not in vocabulary: {sorted(missing)} (treated as absent)")
+            for a in missing:
+                unary_features[a] = np.zeros(M.shape[0], dtype=np.uint8)
+        X = _feature_vector_from_key(key, tok_sets)
+        rows.append(_row_for_feature(key, X))
+
     # report: pd.DataFrame shape (n_features, [feature, n, l_X, l_T, r, #atoms, support]), one row per feature
-    report = pd.DataFrame(rows).sort_values(["n", "r", "l_T", "l_X", "support"], ascending=[False, False, False, False, False], na_position="last")
+    report = pd.DataFrame(rows).sort_values(["n", "c", "t", "h", "support"], ascending=[False, False, True, False, False], na_position="last")
     print(report.head(20).to_string(index=False, float_format=lambda x: f"{x:.3f}"))
