@@ -180,8 +180,11 @@ if __name__ == "__main__":
             neg_plot_df_top1 = None
             if args.negation:
                 has_any_language = any((d.get("languages") or []) for d in prepared_datapoints)
+                has_any_negation = any(not d.get("config", {}).get("no_negation", False) for d in prepared_datapoints)
                 if not has_any_language:
                     print(f"[INFO] Negation export skipped for experiment={experiment_tag}, mode={plot_mode_suffix} (no language dumps).")
+                elif not has_any_negation:
+                    print(f"[INFO] Negation export skipped for experiment={experiment_tag}, mode={plot_mode_suffix} (all selected runs have no_negation=True).")
                 else:
                     neg_plot_df, neg_plot_df_top1 = negation.export_analysis(
                         prepared_datapoints,
