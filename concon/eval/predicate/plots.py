@@ -1,10 +1,13 @@
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pathlib
 import math
 import re
+from scipy.stats import pearsonr
 import negation
 
 # ------ complexity - memory interactions ------
@@ -60,11 +63,11 @@ class ComplexityMemory:
             complexity = dp["config"].get("num_predicates")
             properties = dp["config"].get("properties")
             hidden     = dp["config"].get("hidden_size")
+            voc_penalty = dp["config"].get("voc_penalty", dp["config"].get("voc_pen"))
+            reaper_interval = dp["config"].get("beth_reaper_step", dp["config"].get("reaper_step"))
             # Find max accuracy/perf and the first epoch where those maxima are achieved.
             max_acc = eval_df["eval/accuracy"].max()
             best_epoch_acc = eval_df.loc[eval_df["eval/accuracy"] >= (max_acc - 0.001), "epoch"].min() + 1 # epochs are 0-index
-            max_perf = eval_df["eval/perf"].max() if "eval/perf" in eval_df.columns else None
-            best_epoch_perf = eval_df.loc[eval_df["eval/perf"] >= (max_perf - 0.001), "epoch"].min() + 1
 
             results.append({
                     'complexity': int(complexity),
@@ -72,8 +75,9 @@ class ComplexityMemory:
                     'hidden_size': hidden,
                     'negation': "-neg" if dp["config"].get("no_negation", False) else "+neg",
                     'conjunction': "-conj" if dp["config"].get("no_conjunction", False) else "+conj",
+                    'voc_penalty': voc_penalty,
+                    'reaper_interval': reaper_interval,
                     'epochs_to_max_acc': best_epoch_acc,
-                    'epochs_to_max_perf': best_epoch_perf,
                 })
 
         if missing:
@@ -110,31 +114,16 @@ class ComplexityMemory:
     def _plot_epochs_generic(self, plot_df, *, hue=None, filename="", label_mode="full", out_dir="plots"):
         fig = plt.figure(figsize=(10, 6))
         if hue is None:
-            for y_col, label in [("epochs_to_max_acc", "max accuracy"), ("epochs_to_max_perf", "max performance")]:
-                if y_col == "epochs_to_max_perf" and not plot_df["epochs_to_max_perf"].notna().any():
-                    continue
-                stats = (
-                    plot_df.groupby("complexity")[y_col]
-                    .agg(mean="mean", lo="min", hi="max")
-                    .reset_index()
-                )
-                plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15)
-                plt.plot(stats["complexity"], stats["mean"], marker="o", label=label)
-        else:
-            # Combine accuracy/perf into a single long form so legend is not duplicated.
-            long_df = plot_df.copy()
-            long_df = long_df.melt(
-                id_vars=[c for c in long_df.columns if c not in ["epochs_to_max_acc", "epochs_to_max_perf"]],
-                value_vars=["epochs_to_max_acc", "epochs_to_max_perf"],
-                var_name="metric",
-                value_name="epochs_to_max",
+            stats = (
+                plot_df.groupby("complexity")["epochs_to_max_acc"]
+                .agg(mean="mean", lo="min", hi="max")
+                .reset_index()
             )
-            long_df["metric"] = long_df["metric"].map({
-                "epochs_to_max_acc": "max accuracy",
-                "epochs_to_max_perf": "max performance",
-            })
-            # Drop perf rows if perf is missing.
-            long_df = long_df[long_df["epochs_to_max"].notna()]
+            plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15)
+            plt.plot(stats["complexity"], stats["mean"], marker="o", label="max accuracy")
+        else:
+            long_df = plot_df.copy()
+            long_df = long_df[long_df["epochs_to_max_acc"].notna()]
             hue_vals = list(long_df[hue].dropna().unique())
             if hue == "hidden_size":
                 hue_vals = sorted(hue_vals)
@@ -145,20 +134,16 @@ class ComplexityMemory:
             else:
                 palette = sns.color_palette("viridis", n_colors=max(1, len(hue_vals)))
                 hue_color = {h: palette[i] for i, h in enumerate(hue_vals)}
-            metric_style = {
-                "max accuracy": ("-", "o"),
-                "max performance": ("--", "s"),
-            }
-            for (hval, mval), grp in long_df.groupby([hue, "metric"]):
+            for hval, grp in long_df.groupby(hue):
                 stats = (
-                    grp.groupby("complexity")["epochs_to_max"]
+                    grp.groupby("complexity")["epochs_to_max_acc"]
                     .agg(mean="mean", lo="min", hi="max")
                     .reset_index()
                 )
-                label = f"{hval} | {mval}"
+                label = f"{hval}"
                 color = hue_color.get(hval)
-                linestyle, marker = metric_style.get(mval, ("-", "o"))
-                plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color=color)
+                linestyle, marker = "-", "o"
+                plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color=color if color is not None else None)
                 plt.plot(
                     stats["complexity"],
                     stats["mean"],
@@ -241,6 +226,58 @@ class ComplexityMemory:
             out_dir=out_dir,
         )
 
+    def plot_epochs_to_max_by_voc_penalty(self, plot_df, out_dir="plots"):
+        if "voc_penalty" not in plot_df.columns:
+            print("[INFO] Convergence-by-voc_penalty plot skipped (missing voc_penalty).")
+            return
+
+        plot_df = plot_df.copy()
+        plot_df["voc_penalty"] = pd.to_numeric(plot_df["voc_penalty"], errors="coerce")
+        plot_df = plot_df[plot_df["voc_penalty"].notna()]
+        if plot_df.empty:
+            print("[INFO] Convergence-by-voc_penalty plot skipped (no valid voc_penalty values).")
+            return
+
+        fig = plt.figure(figsize=(10, 6))
+        stats = (
+            plot_df.groupby("voc_penalty")["epochs_to_max_acc"]
+            .agg(mean="mean", lo="min", hi="max")
+            .reset_index()
+            .sort_values("voc_penalty")
+        )
+        plt.fill_between(stats["voc_penalty"], stats["lo"], stats["hi"], alpha=0.15)
+        plt.plot(stats["voc_penalty"], stats["mean"], marker="o", label="max accuracy")
+
+        xticks = sorted(plot_df["voc_penalty"].dropna().unique())
+        pos_ticks = [x for x in xticks if x > 0]
+        if len(pos_ticks) > 0:
+            if any(x <= 0 for x in xticks):
+                plt.xscale("symlog", linthresh=min(pos_ticks) / 2.0, base=10)
+            else:
+                plt.xscale("log", base=10)
+        if xticks:
+            if len(xticks) > 10:
+                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
+                shown_ticks = [xticks[i] for i in idx]
+            else:
+                shown_ticks = xticks
+            labels = [("0" if abs(float(x)) < 1e-15 else f"{float(x):.12f}".rstrip("0").rstrip(".")) for x in shown_ticks]
+            rot = 0 if len(xticks) <= 8 else 45
+            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
+
+        plt.title("epochs until convergence by voc_penalty", fontweight="bold")
+        plt.xlabel("voc_penalty")
+        plt.ylabel("epochs to max")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"epoch_to_max_metrics_by_voc_penalty_{self.name}.png"
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+
     def plot_epochs_to_max_by_hidden(self, plot_df, out_dir="plots"):
         self._plot_epochs_generic(
             plot_df,
@@ -279,6 +316,85 @@ class ComplexityMemory:
             out_dir=out_dir,
         )
 
+    def plot_epochs_to_max_by_reaper_interval(self, plot_df, out_dir="plots"):
+        if "reaper_interval" not in plot_df.columns:
+            print("[INFO] Convergence-by-reaper plot skipped (missing reaper_interval).")
+            return
+        sub = plot_df.copy()
+        sub["reaper_interval"] = pd.to_numeric(sub["reaper_interval"], errors="coerce")
+        sub = sub[sub["reaper_interval"].notna()]
+        if sub.empty:
+            print("[INFO] Convergence-by-reaper plot skipped (no valid reaper_interval values).")
+            return
+        self._plot_epochs_generic(
+            sub,
+            hue="reaper_interval",
+            filename=f"epoch_to_max_metrics_by_reaper_interval_{self.name}.png",
+            label_mode="full",
+            out_dir=out_dir,
+        )
+
+    def plot_epochs_to_max_by_reaper_interval_per_complexity(self, plot_df, out_dir="plots"):
+        required = {"reaper_interval", "complexity", "epochs_to_max_acc"}
+        if not required.issubset(plot_df.columns):
+            print("[INFO] Convergence-by-reaper-per-complexity skipped (missing columns).")
+            return
+
+        sub = plot_df.copy()
+        sub["reaper_interval"] = pd.to_numeric(sub["reaper_interval"], errors="coerce")
+        sub["complexity"] = pd.to_numeric(sub["complexity"], errors="coerce")
+        sub = sub[sub["reaper_interval"].notna() & sub["complexity"].notna()]
+        if sub.empty:
+            print("[INFO] Convergence-by-reaper-per-complexity skipped (no valid values).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        complexities = sorted(sub["complexity"].unique())
+        for c in complexities:
+            g = sub[sub["complexity"] == c]
+            if g.empty:
+                continue
+
+            fig = plt.figure(figsize=(10, 6))
+            gg = g[g["epochs_to_max_acc"].notna()]
+            if gg.empty:
+                plt.close(fig)
+                continue
+            stats = (
+                gg.groupby("reaper_interval")["epochs_to_max_acc"]
+                .agg(mean="mean", lo="min", hi="max")
+                .reset_index()
+                .sort_values("reaper_interval")
+            )
+            plt.fill_between(stats["reaper_interval"], stats["lo"], stats["hi"], alpha=0.15)
+            plt.plot(stats["reaper_interval"], stats["mean"], marker="o", label="max accuracy")
+
+            ticks = sorted(g["reaper_interval"].dropna().unique())
+            if ticks:
+                plt.xscale("log")
+                labels = [str(int(x)) if float(x).is_integer() else f"{x:g}" for x in ticks]
+                plt.xticks(ticks, labels)
+
+            props = (
+                g["properties"].dropna().astype(str).unique()[0]
+                if ("properties" in g.columns and g["properties"].dropna().size > 0)
+                else str(int(c))
+            )
+            plt.title(f"epochs until convergence by reaper interval | properties={props}", fontweight="bold")
+            plt.xlabel("reaper interval")
+            plt.ylabel("epochs to max")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+
+            fig.tight_layout()
+            fig.savefig(
+                out_dir / f"epoch_to_max_metrics_by_reaper_interval_props_{props}_{self.name}.png",
+                dpi=150,
+            )
+            plt.close(fig)
+
     def plot_time_to_max_accuracy(self, out_dir="plots"):
         plot_df = self._build_epochs_df()
         if plot_df is None:
@@ -288,8 +404,168 @@ class ComplexityMemory:
         self.plot_epochs_to_max_by_negation(plot_df, out_dir=out_dir)
         self.plot_epochs_to_max_by_conjunction(plot_df, out_dir=out_dir)
         self.plot_epochs_to_max_by_negation_and_conjunction(plot_df, out_dir=out_dir)
-        summary = plot_df.groupby('complexity')[['epochs_to_max_acc', 'epochs_to_max_perf']].agg(['mean', 'std', 'count'])
+        summary = plot_df.groupby('complexity')[['epochs_to_max_acc']].agg(['mean', 'std', 'count'])
         print(summary)
+
+    def _build_eval_accuracy_df(self):
+        rows = []
+        for dp in self.datapoints:
+            eval_df = dp.get("evaluation")
+            if eval_df is None or eval_df.empty:
+                continue
+            if "epoch" not in eval_df.columns or "eval/accuracy" not in eval_df.columns:
+                continue
+            cfg = dp.get("config", {})
+            reaper_interval = cfg.get("beth_reaper_step")
+            if reaper_interval is None:
+                reaper_interval = cfg.get("reaper_step")
+            voc_penalty = cfg.get("voc_penalty", cfg.get("voc_pen"))
+            run_name = str(dp.get("run_name", ""))
+            for _, row in eval_df.iterrows():
+                rows.append({
+                    "run_name": run_name,
+                    "epoch": row.get("epoch"),
+                    "eval_accuracy": row.get("eval/accuracy"),
+                    "complexity": cfg.get("num_predicates"),
+                    "properties": str(cfg.get("properties")),
+                    "reaper_interval": reaper_interval,
+                    "voc_penalty": voc_penalty,
+                })
+        if not rows:
+            return None
+        df = pd.DataFrame(rows)
+        df["epoch"] = pd.to_numeric(df["epoch"], errors="coerce")
+        df["eval_accuracy"] = pd.to_numeric(df["eval_accuracy"], errors="coerce")
+        df = df.dropna(subset=["epoch", "eval_accuracy"])
+        if df.empty:
+            return None
+        return df
+
+    def plot_eval_accuracy_over_epochs(self, *, group_col=None, out_dir="plots"):
+        df = self._build_eval_accuracy_df()
+        if df is None or df.empty:
+            print("[INFO] eval/accuracy curve skipped (no evaluation data).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        fig = plt.figure(figsize=(10, 6))
+        suffix = "overall"
+        title = "eval/accuracy over epochs"
+
+        if group_col is None:
+            stats = (
+                df.groupby("epoch")["eval_accuracy"]
+                .agg(median="median", q25=lambda x: np.nanquantile(x, 0.25), q75=lambda x: np.nanquantile(x, 0.75))
+                .reset_index()
+                .sort_values("epoch")
+            )
+            plt.fill_between(stats["epoch"], stats["q25"], stats["q75"], alpha=0.18, color="#1f77b4")
+            plt.plot(stats["epoch"], stats["median"], color="#1f77b4", linewidth=2.2, label="median")
+        else:
+            if group_col not in df.columns:
+                print(f"[INFO] eval/accuracy curve skipped (missing grouping column: {group_col}).")
+                plt.close(fig)
+                return
+            sub = df[df[group_col].notna()].copy()
+            if sub.empty:
+                print(f"[INFO] eval/accuracy curve skipped (no values for {group_col}).")
+                plt.close(fig)
+                return
+
+            gvals = sorted(pd.to_numeric(sub[group_col], errors="coerce").dropna().unique())
+            if len(gvals) == 0:
+                print(f"[INFO] eval/accuracy curve skipped (non-numeric {group_col}).")
+                plt.close(fig)
+                return
+
+            palette = sns.color_palette("viridis", n_colors=max(1, len(gvals)))
+            for i, g in enumerate(gvals):
+                grp = sub[pd.to_numeric(sub[group_col], errors="coerce") == g]
+                stats = (
+                    grp.groupby("epoch")["eval_accuracy"]
+                    .agg(median="median", q25=lambda x: np.nanquantile(x, 0.25), q75=lambda x: np.nanquantile(x, 0.75))
+                    .reset_index()
+                    .sort_values("epoch")
+                )
+                c = palette[i]
+                plt.fill_between(stats["epoch"], stats["q25"], stats["q75"], alpha=0.12, color=c)
+                label = f"{g:g}" if group_col == "voc_penalty" else str(int(g) if float(g).is_integer() else g)
+                plt.plot(stats["epoch"], stats["median"], color=c, linewidth=2.0, label=label)
+
+            suffix = f"by_{group_col}"
+            title = f"eval/accuracy over epochs by {group_col}"
+            plt.legend(title=group_col, ncol=2)
+
+        plt.title(title)
+        plt.xlabel("epoch")
+        plt.ylabel("eval/accuracy")
+        plt.grid(True, alpha=0.3)
+        plt.ylim(0.0, 1.0)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"eval_accuracy_over_epochs_{suffix}_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+    def plot_eval_accuracy_over_epochs_by_reaper_and_complexity(self, *, out_dir="plots"):
+        df = self._build_eval_accuracy_df()
+        if df is None or df.empty:
+            print("[INFO] eval/accuracy by reaper+complexity skipped (no evaluation data).")
+            return
+        if "reaper_interval" not in df.columns or "complexity" not in df.columns:
+            print("[INFO] eval/accuracy by reaper+complexity skipped (missing columns).")
+            return
+
+        df = df.copy()
+        df["reaper_interval"] = pd.to_numeric(df["reaper_interval"], errors="coerce")
+        df["complexity"] = pd.to_numeric(df["complexity"], errors="coerce")
+        df = df.dropna(subset=["reaper_interval", "complexity"])
+        df = df[df["reaper_interval"] > 0]
+        if df.empty:
+            print("[INFO] eval/accuracy by reaper+complexity skipped (no valid values).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        complexities = sorted(df["complexity"].unique())
+        for c in complexities:
+            sub = df[df["complexity"] == c]
+            if sub.empty:
+                continue
+
+            reapers = sorted(sub["reaper_interval"].unique())
+            palette = sns.color_palette("viridis", n_colors=max(1, len(reapers)))
+
+            fig = plt.figure(figsize=(10, 6))
+            for i, r in enumerate(reapers):
+                grp = sub[sub["reaper_interval"] == r]
+                stats = (
+                    grp.groupby("epoch")["eval_accuracy"]
+                    .agg(median="median", q25=lambda x: np.nanquantile(x, 0.25), q75=lambda x: np.nanquantile(x, 0.75))
+                    .reset_index()
+                    .sort_values("epoch")
+                )
+                ccol = palette[i]
+                plt.fill_between(stats["epoch"], stats["q25"], stats["q75"], alpha=0.10, color=ccol)
+                rlab = str(int(r)) if float(r).is_integer() else f"{r:g}"
+                plt.plot(stats["epoch"], stats["median"], color=ccol, linewidth=2.0, label=rlab)
+
+            props = (
+                sub["properties"].dropna().astype(str).unique()[0]
+                if ("properties" in sub.columns and sub["properties"].dropna().size > 0)
+                else str(int(c))
+            )
+            plt.title(f"eval/accuracy over epochs by reaper interval | properties={props}")
+            plt.xlabel("epoch")
+            plt.ylabel("eval/accuracy")
+            plt.grid(True, alpha=0.3)
+            plt.ylim(0.0, 1.0)
+            plt.legend(title="reaper_interval", ncol=2)
+
+            fig.tight_layout()
+            fig.savefig(out_dir / f"eval_accuracy_over_epochs_by_reaper_interval_props_{props}_{self.name}.png", dpi=150)
+            plt.close(fig)
 
     def plot_negation_scores(self, neg_df=None, *, mode="greedy", out_dir="plots", label_mode="complexity"):
         if not hasattr(negation, "normalize_negation_df"):
@@ -491,12 +767,15 @@ class ComplexityMemory:
                 "no_negation": cfg.get("no_negation", False),
                 "no_conjunction": cfg.get("no_conjunction", False),
                 "reaper_interval": reaper_interval,
+                "voc_penalty": cfg.get("voc_penalty", cfg.get("voc_pen")),
             })
         return pd.DataFrame(rows).drop_duplicates(subset=["run_name"])
 
     def _build_topsim_df(self):
         rows = []
         topsim_col_candidates = [
+            "eval/topsim_intensional_norm_levenshtein",
+            "topsim_intensional_norm_levenshtein",
             "eval/topsim_intensional_levenshtein",
             "topsim_intensional_levenshtein",
         ]
@@ -526,22 +805,31 @@ class ComplexityMemory:
     def _prepare_negation_top_df(self, neg_df):
         if neg_df is None or len(neg_df) == 0:
             return None
+        df = neg_df.copy()
+        # Backward/forward compatibility for metric naming:
+        # old: l_X, l_T, r ; new: h, t, c
+        if "h" in df.columns and "l_X" not in df.columns:
+            df["l_X"] = df["h"]
+        if "t" in df.columns and "l_T" not in df.columns:
+            df["l_T"] = df["t"]
+        if "c" in df.columns and "r" not in df.columns:
+            df["r"] = df["c"]
+
         req = {"run_name", "n", "l_X", "l_T", "r", "atoms", "support"}
         if not req.issubset(set(neg_df.columns)):
-            print(f"[WARN] Negation dataframe missing columns: {sorted(req - set(neg_df.columns))}")
+            print(f"[WARN] Negation dataframe missing columns: {sorted(req - set(df.columns))}")
             return None
 
-        df = neg_df.copy()
         df["run_name"] = df["run_name"].astype(str)
-        meta = self._build_run_meta_df()[["run_name", "complexity", "hidden_size", "no_negation", "no_conjunction", "properties", "reaper_interval"]]
-        needed_meta = [c for c in ["complexity", "hidden_size", "no_negation", "no_conjunction", "reaper_interval"] if c not in df.columns]
+        meta = self._build_run_meta_df()[["run_name", "complexity", "hidden_size", "no_negation", "no_conjunction", "properties", "reaper_interval", "voc_penalty"]]
+        needed_meta = [c for c in ["complexity", "hidden_size", "no_negation", "no_conjunction", "reaper_interval", "voc_penalty"] if c not in df.columns]
         if needed_meta:
             df = df.merge(meta[["run_name"] + needed_meta], on="run_name", how="left")
         if "properties" not in df.columns:
             df = df.merge(meta[["run_name", "properties"]], on="run_name", how="left")
         if "no_negation" in df.columns:
             df = df[df["no_negation"] == False]
-        for c in ["complexity", "hidden_size", "reaper_interval", "n", "l_X", "l_T", "r", "atoms", "support"]:
+        for c in ["complexity", "hidden_size", "reaper_interval", "voc_penalty", "n", "l_X", "l_T", "r", "atoms", "support"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         if "properties" in df.columns:
@@ -550,6 +838,147 @@ class ComplexityMemory:
         df["leak_x"] = df["l_X"]
         df["leak_composite_t"] = np.where(df["atoms"] > 1, df["l_T"], np.nan)
         return df.dropna(subset=["complexity", "n"])
+
+    def plot_negation_metrics_by_voc_penalty(self, neg_df, *, out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "voc_penalty" not in df.columns:
+            print("[INFO] voc_penalty plot skipped (missing voc_penalty metadata).")
+            return
+        df = df[df["voc_penalty"].notna()]
+        if df.empty:
+            print("[INFO] voc_penalty plot skipped (no valid voc_penalty values).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        metric_defs = [
+            ("n", "n", "#1f77b4"),
+            ("l_X", "l_X", "#ff7f0e"),
+            ("leak_composite_t", "l_T (composite)", "#2ca02c"),
+            ("r", "r", "#d62728"),
+        ]
+
+        def _format_penalty_tick(x):
+            if not np.isfinite(x):
+                return ""
+            if abs(float(x)) < 1e-15:
+                return "0"
+            s = f"{float(x):.12f}".rstrip("0").rstrip(".")
+            return s if s else "0"
+
+        fig = plt.figure(figsize=(10, 6))
+        plotted = 0
+        for col, label, color in metric_defs:
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
+            stats = sub.groupby("voc_penalty")[col].agg(mean="mean", median="median").reset_index().sort_values("voc_penalty")
+            plt.plot(stats["voc_penalty"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+            plt.plot(stats["voc_penalty"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+            plotted += 1
+        if plotted == 0:
+            plt.close(fig)
+            return
+
+        xticks = sorted(pd.to_numeric(df["voc_penalty"], errors="coerce").dropna().unique())
+        pos_ticks = [x for x in xticks if x > 0]
+        if len(pos_ticks) > 0:
+            # Log-like spacing for positive penalties; keeps 0 visible if present.
+            if any(x <= 0 for x in xticks):
+                linthresh = min(pos_ticks) / 2.0
+                plt.xscale("symlog", linthresh=linthresh, base=10)
+            else:
+                plt.xscale("log", base=10)
+        if xticks:
+            if len(xticks) > 10:
+                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
+                shown_ticks = [xticks[i] for i in idx]
+            else:
+                shown_ticks = xticks
+            labels = [_format_penalty_tick(x) for x in shown_ticks]
+            rot = 0 if len(xticks) <= 8 else 45
+            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
+        plt.title("negation by voc_penalty")
+        plt.xlabel("voc_penalty")
+        plt.ylabel("score")
+        plt.grid(True, alpha=0.3)
+        plt.legend(ncol=2)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"negation_by_voc_penalty_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+    def plot_f_scores_by_voc_penalty(self, neg_df, *, out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "voc_penalty" not in df.columns:
+            print("[INFO] voc_penalty F-score plot skipped (missing voc_penalty metadata).")
+            return
+        df = df[df["voc_penalty"].notna()]
+        if df.empty:
+            print("[INFO] voc_penalty F-score plot skipped (no valid voc_penalty values).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        metric_defs = [
+            ("F1_nr", "F1_nr", "#9467bd"),
+            ("F1_nT", "F1_nT", "#8c564b"),
+        ]
+
+        def _format_penalty_tick(x):
+            if not np.isfinite(x):
+                return ""
+            if abs(float(x)) < 1e-15:
+                return "0"
+            s = f"{float(x):.12f}".rstrip("0").rstrip(".")
+            return s if s else "0"
+
+        fig = plt.figure(figsize=(10, 6))
+        plotted = 0
+        for col, label, color in metric_defs:
+            if col not in df.columns:
+                continue
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
+            stats = sub.groupby("voc_penalty")[col].agg(mean="mean", median="median").reset_index().sort_values("voc_penalty")
+            plt.plot(stats["voc_penalty"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+            plt.plot(stats["voc_penalty"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+            plotted += 1
+        if plotted == 0:
+            plt.close(fig)
+            return
+
+        xticks = sorted(pd.to_numeric(df["voc_penalty"], errors="coerce").dropna().unique())
+        pos_ticks = [x for x in xticks if x > 0]
+        if len(pos_ticks) > 0:
+            if any(x <= 0 for x in xticks):
+                linthresh = min(pos_ticks) / 2.0
+                plt.xscale("symlog", linthresh=linthresh, base=10)
+            else:
+                plt.xscale("log", base=10)
+        if xticks:
+            if len(xticks) > 10:
+                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
+                shown_ticks = [xticks[i] for i in idx]
+            else:
+                shown_ticks = xticks
+            labels = [_format_penalty_tick(x) for x in shown_ticks]
+            rot = 0 if len(xticks) <= 8 else 45
+            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
+        plt.title("negation f-scores by voc_penalty")
+        plt.xlabel("voc_penalty")
+        plt.ylabel("score")
+        plt.grid(True, alpha=0.3)
+        plt.legend(ncol=2)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"negation_f_scores_by_voc_penalty_{self.name}.png", dpi=150)
+        plt.close(fig)
 
     def plot_negation_metrics_by_reaper_interval(self, neg_df, *, profile_tag="", out_dir="plots", metrics=None):
         df = self._prepare_negation_top_df(neg_df)
@@ -644,6 +1073,71 @@ class ComplexityMemory:
             label, suffix = spec
             _plot_interval_metric(metric, label, suffix)
 
+    def plot_reaper_step_vs_f_scores(self, neg_df, *, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "reaper_interval" not in df.columns:
+            return
+
+        df = df.copy()
+        df = df[df["reaper_interval"].notna()]
+        df = df[df["reaper_interval"] > 0]
+        if df.empty:
+            return
+
+        if "F1_nT" not in df.columns:
+            n = pd.to_numeric(df.get("n"), errors="coerce")
+            l_t = pd.to_numeric(df.get("l_T"), errors="coerce")
+            den = n + l_t
+            df["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
+        if "F1_nr" not in df.columns:
+            n = pd.to_numeric(df.get("n"), errors="coerce")
+            r = pd.to_numeric(df.get("r"), errors="coerce")
+            den = n + r
+            df["F1_nr"] = np.where((den > 0) & n.notna() & r.notna(), 2.0 * n * r / den, np.nan)
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = str(profile_tag) if profile_tag else "default"
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
+        x_raw = pd.to_numeric(df["reaper_interval"], errors="coerce").to_numpy(dtype=float)
+        x = np.log2(np.maximum(x_raw, 1.0))
+        z = np.log2(np.maximum(pd.to_numeric(df["complexity"], errors="coerce").to_numpy(dtype=float), 1.0))
+        metric_defs = [("F1_nT", "F1_nT"), ("F1_nr", "F1_nr")]
+
+        for ax, (col, label) in zip(axes, metric_defs):
+            y = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+            mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(x_raw)
+            if mask.sum() < 2:
+                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(label)
+                continue
+
+            sc = ax.scatter(x_raw[mask], y[mask], c=z[mask], cmap="viridis", alpha=0.85, edgecolors="none")
+            ax.set_xscale("log", base=2)
+
+            if np.ptp(x[mask]) > 1e-12:
+                a, b = np.polyfit(x[mask], y[mask], deg=1)
+                xg_raw = np.logspace(np.log2(x_raw[mask].min()), np.log2(x_raw[mask].max()), 120, base=2.0)
+                xg = np.log2(xg_raw)
+                ax.plot(xg_raw, a * xg + b, color="#111111", linewidth=2.0)
+
+            r_val, p_val = self._pearson_r_p(x[mask], y[mask])
+            r_txt = f"r={r_val:.3f}" if np.isfinite(r_val) else "r=nan"
+            ax.set_title(f"{label} vs reaper_step ({r_txt}, {self._format_p_value(p_val)})")
+            ax.set_xlabel("reaper_step")
+            ax.set_ylabel(label)
+            ax.grid(True, alpha=0.3)
+            cbar = fig.colorbar(sc, ax=ax)
+            cbar.set_label("log2(complexity)")
+
+        fig.suptitle(f"reaper step correlation with F-scores ({tag})")
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.savefig(out_dir / f"reaper_step_vs_f_scores_{tag}_{self.name}.png", dpi=150)
+        plt.close(fig)
+
     def _complexity_ticks(self, df):
         xticks = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
         labels = []
@@ -665,6 +1159,26 @@ class ComplexityMemory:
             ("leak_x", "l_X (all)", "leak_x", "#ff7f0e"),
             ("leak_composite_t", "l_T (composite)", "leak_composite_t", "#1f77b4"),
         ]
+
+    def _pearson_r_p(self, x, y):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        mask = np.isfinite(x) & np.isfinite(y)
+        if mask.sum() < 2:
+            return np.nan, np.nan
+        x_m = x[mask]
+        y_m = y[mask]
+        if np.ptp(x_m) <= 1e-12 or np.ptp(y_m) <= 1e-12:
+            return np.nan, np.nan
+        r, p = pearsonr(x_m, y_m)
+        return float(r), float(p)
+
+    def _format_p_value(self, p):
+        if not np.isfinite(p):
+            return "p=nan"
+        if p < 1e-3:
+            return f"p={p:.1e}"
+        return f"p={p:.3f}"
 
     def _negation_timeline_df(self, neg_df):
         df = self._prepare_negation_top_df(neg_df)
@@ -800,100 +1314,160 @@ class ComplexityMemory:
 
         out_dir = pathlib.Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-
-        # n-only plot
-        sub_n = df[df["n"].notna()]
-        if not sub_n.empty:
-            fig = plt.figure(figsize=(10, 6))
-            stats = sub_n.groupby("complexity")["n"].agg(mean="mean", median="median", lo="min", hi="max").reset_index()
-            plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color="#1f77b4")
-            plt.plot(stats["complexity"], stats["mean"], marker="o", color="#1f77b4", label="n mean")
-            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color="#1f77b4", label="n median")
-            xticks, labels = self._complexity_ticks(sub_n)
-            plt.xscale("log", base=2)
-            plt.xticks(xticks, labels, rotation=45, ha="right")
-            plt.title("n by complexity")
-            plt.xlabel("complexity")
-            plt.ylabel("score")
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            fig.tight_layout()
-            fig.savefig(out_dir / f"negation_n_by_complexity_{self.name}.png", dpi=150)
-            plt.close(fig)
+        reaper_vals = sorted(pd.to_numeric(df.get("reaper_interval"), errors="coerce").dropna().unique()) if "reaper_interval" in df.columns else []
+        use_reaper_split = len(reaper_vals) > 1
 
         # combined 4-metric view across complexities
-        fig = plt.figure(figsize=(10, 6))
-        plotted = 0
         metric_defs = [
             ("n", "n", "#1f77b4"),
             ("l_X", "l_X", "#ff7f0e"),
             ("leak_composite_t", "l_T (composite)", "#2ca02c"),
             ("r", "r", "#d62728"),
         ]
-        for col, label, color in metric_defs:
-            sub = df[df[col].notna()]
-            if sub.empty:
-                continue
-            stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
-            plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
-            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
-            plotted += 1
-        if plotted > 0:
-            xticks, labels = self._complexity_ticks(df)
-            plt.xscale("log", base=2)
-            plt.xticks(xticks, labels, rotation=45, ha="right")
-            plt.title("negation by complexity")
-            plt.xlabel("complexity")
-            plt.ylabel("score")
-            plt.grid(True, alpha=0.3)
-            plt.legend(ncol=2)
-            fig.tight_layout()
+        if use_reaper_split:
+            complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+            if not complexities:
+                return
+            pal = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+            comp_color = {c: pal[i] for i, c in enumerate(complexities)}
+            comp_label = {}
+            for c in complexities:
+                props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+                props = sorted(props, key=self._properties_sort_key)
+                comp_label[c] = props[0] if len(props) else str(int(c))
+            interval_ticks = sorted(pd.to_numeric(df["reaper_interval"], errors="coerce").dropna().unique())
+
+            fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
+            axes = axes.flatten()
+            for ax, (col, label, _) in zip(axes, metric_defs):
+                sub = df[df[col].notna() & df["reaper_interval"].notna()]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                for c in complexities:
+                    g = sub[sub["complexity"] == c]
+                    if g.empty:
+                        continue
+                    stats = g.groupby("reaper_interval")[col].agg(mean="mean").reset_index().sort_values("reaper_interval")
+                    ax.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=comp_color[c], label=comp_label[c])
+                ax.set_xscale("log", base=2)
+                ax.set_xticks(interval_ticks)
+                ax.set_xticklabels([str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
+                ax.set_title(label)
+                ax.set_ylabel("score")
+                ax.grid(True, alpha=0.3)
+            axes[-2].set_xlabel("reaper interval")
+            axes[-1].set_xlabel("reaper interval")
+            handles, hlabels = axes[0].get_legend_handles_labels()
+            if handles:
+                fig.legend(handles, hlabels, title="properties", loc="upper center", ncol=min(6, len(hlabels)))
+                fig.tight_layout(rect=[0, 0, 1, 0.93])
+            else:
+                fig.tight_layout()
+            fig.suptitle("negation by reaper interval", y=0.995)
             fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
-        plt.close(fig)
-
-        for col, label, suffix, color in self._leak_metric_specs():
-            sub = df[df[col].notna()]
-            if sub.empty:
-                continue
-
-            fig = plt.figure(figsize=(10, 6))
-            stats = sub.groupby("complexity")[col].agg(mean="mean", median="median", lo="min", hi="max").reset_index()
-            plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.15, color=color)
-            plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, label=f"{label} mean")
-            plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, label=f"{label} median")
-            xticks, labels = self._complexity_ticks(sub)
-            plt.xscale("log", base=2)
-            plt.xticks(xticks, labels, rotation=45, ha="right")
-            plt.title(f"{label} by complexity")
-            plt.xlabel("complexity")
-            plt.ylabel("score")
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            fig.tight_layout()
-            fig.savefig(out_dir / f"negation_{suffix}_by_complexity_{self.name}.png", dpi=150)
             plt.close(fig)
-
-            if sub["hidden_size"].notna().any():
-                hidden_vals = sorted(sub["hidden_size"].dropna().unique())
-                fallback = sns.color_palette("viridis", n_colors=max(1, len(hidden_vals)))
-                hcols = {h: self.hidden_colors.get(h, fallback[i]) for i, h in enumerate(hidden_vals)}
-                fig = plt.figure(figsize=(10, 6))
-                for h, grp in sub.groupby("hidden_size"):
-                    stats = grp.groupby("complexity")[col].agg(mean="mean", lo="min", hi="max").reset_index()
-                    c = hcols.get(h)
-                    plt.fill_between(stats["complexity"], stats["lo"], stats["hi"], alpha=0.12, color=c)
-                    plt.plot(stats["complexity"], stats["mean"], marker="o", color=c, label=f"h{h}")
-                xticks, labels = self._complexity_ticks(sub)
+        else:
+            fig = plt.figure(figsize=(10, 6))
+            plotted = 0
+            for col, label, color in metric_defs:
+                sub = df[df[col].notna()]
+                if sub.empty:
+                    continue
+                stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
+                plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+                plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+                plotted += 1
+            if plotted > 0:
+                xticks, labels = self._complexity_ticks(df)
                 plt.xscale("log", base=2)
                 plt.xticks(xticks, labels, rotation=45, ha="right")
-                plt.title(f"{label} by complexity and hidden size")
+                plt.title("negation by complexity")
                 plt.xlabel("complexity")
                 plt.ylabel("score")
                 plt.grid(True, alpha=0.3)
-                plt.legend()
+                plt.legend(ncol=2)
                 fig.tight_layout()
-                fig.savefig(out_dir / f"negation_{suffix}_by_complexity_by_hidden_{self.name}.png", dpi=150)
-                plt.close(fig)
+                fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+        # F-score view across complexities
+        fscore_defs = [
+            ("F1_nr", "F1_nr", "#9467bd"),
+            ("F1_nT", "F1_nT", "#8c564b"),
+        ]
+        if use_reaper_split:
+            complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+            if not complexities:
+                return
+            pal = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+            comp_color = {c: pal[i] for i, c in enumerate(complexities)}
+            comp_label = {}
+            for c in complexities:
+                props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+                props = sorted(props, key=self._properties_sort_key)
+                comp_label[c] = props[0] if len(props) else str(int(c))
+            interval_ticks = sorted(pd.to_numeric(df["reaper_interval"], errors="coerce").dropna().unique())
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharex=True)
+            any_plot = False
+            for ax, (col, label, _) in zip(axes, fscore_defs):
+                if col not in df.columns:
+                    ax.set_visible(False)
+                    continue
+                sub = df[df[col].notna() & df["reaper_interval"].notna()]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                for c in complexities:
+                    g = sub[sub["complexity"] == c]
+                    if g.empty:
+                        continue
+                    stats = g.groupby("reaper_interval")[col].agg(mean="mean").reset_index().sort_values("reaper_interval")
+                    ax.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=comp_color[c], label=comp_label[c])
+                    any_plot = True
+                ax.set_xscale("log", base=2)
+                ax.set_xticks(interval_ticks)
+                ax.set_xticklabels([str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
+                ax.set_title(label)
+                ax.set_xlabel("reaper interval")
+                ax.set_ylabel("score")
+                ax.grid(True, alpha=0.3)
+            if any_plot:
+                handles, hlabels = axes[0].get_legend_handles_labels()
+                if handles:
+                    fig.legend(handles, hlabels, title="properties", loc="upper center", ncol=min(6, len(hlabels)))
+                    fig.tight_layout(rect=[0, 0, 1, 0.90])
+                else:
+                    fig.tight_layout()
+                fig.suptitle("negation f-scores by reaper interval", y=0.995)
+                fig.savefig(out_dir / f"negation_f_scores_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+        else:
+            fig = plt.figure(figsize=(10, 6))
+            plotted = 0
+            for col, label, color in fscore_defs:
+                if col not in df.columns:
+                    continue
+                sub = df[df[col].notna()]
+                if sub.empty:
+                    continue
+                stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
+                plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+                plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+                plotted += 1
+            if plotted > 0:
+                xticks, labels = self._complexity_ticks(df)
+                plt.xscale("log", base=2)
+                plt.xticks(xticks, labels, rotation=45, ha="right")
+                plt.title("negation f-scores by complexity")
+                plt.xlabel("complexity")
+                plt.ylabel("score")
+                plt.grid(True, alpha=0.3)
+                plt.legend(ncol=2)
+                fig.tight_layout()
+                fig.savefig(out_dir / f"negation_f_scores_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
 
     def plot_negation_metric_slopes(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
@@ -958,7 +1532,9 @@ class ComplexityMemory:
                 a, b = np.polyfit(x[mask], y[mask], deg=1)
                 xg = np.linspace(x[mask].min(), x[mask].max(), 100)
                 plt.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
-            plt.title(f"topsim vs {label} ({tag})")
+            r, p = self._pearson_r_p(x[mask], y[mask])
+            r_txt = f"r={r:.3f}" if np.isfinite(r) else "r=nan"
+            plt.title(f"topsim vs {label} ({tag}, {r_txt}, {self._format_p_value(p)})")
             plt.xlabel("topsim intensional levenshtein")
             plt.ylabel(label)
             plt.grid(True, alpha=0.3)
@@ -967,6 +1543,70 @@ class ComplexityMemory:
             fig.tight_layout()
             fig.savefig(out_dir / f"topsim_vs_negation_{suffix}_{tag}_{self.name}.png", dpi=150)
             plt.close(fig)
+
+    def plot_topsim_vs_n_f1(self, neg_df, *, control_col=None, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        topsim_df = self._build_topsim_df()
+        if df is None or df.empty or topsim_df is None:
+            return
+        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
+        if merged.empty:
+            return
+
+        merged = merged.copy()
+        if "F1_nT" not in merged.columns:
+            n = pd.to_numeric(merged.get("n"), errors="coerce")
+            l_t = pd.to_numeric(merged.get("l_T"), errors="coerce")
+            den = n + l_t
+            merged["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = str(profile_tag) if profile_tag else "default"
+        metrics = [("n", "n"), ("F1_nT", "F1_nT")]
+        x = pd.to_numeric(merged["topsim_intensional_levenshtein"], errors="coerce").to_numpy(dtype=float)
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
+        for ax, (col, label) in zip(axes, metrics):
+            y = pd.to_numeric(merged[col], errors="coerce").to_numpy(dtype=float)
+            mask = np.isfinite(x) & np.isfinite(y)
+            if mask.sum() < 2:
+                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(label)
+                continue
+
+            if control_col is not None and control_col in merged.columns and merged[control_col].notna().any():
+                c = pd.to_numeric(merged[control_col], errors="coerce").to_numpy(dtype=float)
+                c_mask = mask & np.isfinite(c)
+                if c_mask.sum() >= 2:
+                    sc = ax.scatter(x[c_mask], y[c_mask], c=c[c_mask], cmap="viridis", alpha=0.85, edgecolors="none")
+                    cbar = fig.colorbar(sc, ax=ax)
+                    cbar.set_label(control_col)
+                else:
+                    ax.scatter(x[mask], y[mask], alpha=0.85, edgecolors="none")
+            else:
+                ax.scatter(x[mask], y[mask], alpha=0.85, edgecolors="none")
+
+            if np.ptp(x[mask]) > 1e-12:
+                a, b = np.polyfit(x[mask], y[mask], deg=1)
+                xg = np.linspace(x[mask].min(), x[mask].max(), 100)
+                ax.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
+
+            corr, p = self._pearson_r_p(x[mask], y[mask])
+            corr_txt = f"r={corr:.3f}" if np.isfinite(corr) else "r=nan"
+            ax.set_title(f"{label} ({corr_txt}, {self._format_p_value(p)})")
+            ax.grid(True, alpha=0.3)
+            ax.set_xlabel("topsim intensional levenshtein")
+            ax.set_ylabel(label)
+
+        suptitle = "topsim correlation with n and F1_nT"
+        if control_col:
+            suptitle += f" by {control_col}"
+        fig.suptitle(f"{suptitle} ({tag})")
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        suffix = f"_by_{control_col}" if control_col else ""
+        fig.savefig(out_dir / f"topsim_vs_n_f1{suffix}_{tag}_{self.name}.png", dpi=150)
+        plt.close(fig)
 
     def plot_topsim_interaction_n(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)
