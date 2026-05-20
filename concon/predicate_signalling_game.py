@@ -2,9 +2,11 @@
 
 from datetime import datetime
 import uuid
+import random
 
 import torch
 import json
+import numpy as np
 
 from .games import AlexBeth
 from .utils.predicate_data import get_data_loader
@@ -23,6 +25,14 @@ def do(args):
 
     for run in range(args.runs):
         print(f'Run {run}', flush=True)
+        if args.seed is not None:
+            run_seed = int(args.seed) + int(run)
+            random.seed(run_seed)
+            np.random.seed(run_seed)
+            torch.manual_seed(run_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(run_seed)
+            print(f"[seed] run={run} seed={run_seed}", flush=True)
 
         run_name = build_run_name(args, run)
         run_summary_dir = summary_dir / run_name
@@ -220,6 +230,7 @@ def get_args(remaining_args=None):
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
     group.add_argument('--runs', help='number of runs', default=1, type=int)
+    group.add_argument('--seed', help='base random seed; each run uses seed+run_idx', default=None, type=int)
     group.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
