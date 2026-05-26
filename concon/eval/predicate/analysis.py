@@ -16,7 +16,7 @@ if __name__ == "__main__":
     runs_dir = repo_root / "runs"
     print(f"Available experiments: {os.listdir(runs_dir)}")
     parser = argparse.ArgumentParser()
-    parser.add_argument("experiment", nargs="?", help="experiment name under runs/")
+    parser.add_argument("experiment", nargs="*", help="experiment name(s) under runs/ (pass multiple to merge)")
     parser.add_argument("--negation", action="store_true", help="run negation analysis")
     parser.add_argument("--negation-top-rows", type=int, default=10, help="number of top rows per run")
     parser.add_argument(
@@ -36,7 +36,8 @@ if __name__ == "__main__":
         parser.error("--latest-only and --best-accuracy are mutually exclusive.")
     if args.min_eval_accuracy is not None and not (0.0 <= args.min_eval_accuracy <= 1.0):
         parser.error("--min-eval-accuracy must be in [0, 1].")
-    experiment_path = args.experiment or input("Experiment name: ")
+    experiment_names = args.experiment if args.experiment else [input("Experiment name: ")]
+    experiment_path = "+".join(experiment_names)
 
     # ----- DEBUG / TESTING ONLY -----
 
@@ -46,24 +47,42 @@ if __name__ == "__main__":
     vocab_count = 0
     cache_dir = pathlib.Path(__file__).resolve().parent / "outputs"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"datapoints_{experiment_path}.pkl"
+
+    load_latest_only = args.latest_only
+    # Language dumps are only needed for negation analysis, or for the voc_reaper intergenerational
+    # stability plot. Other plot families (e.g. complexity_memory) have large language caches that
+    # would OOM if loaded unnecessarily when --plots is passed.
+    _plots_need_langs = args.plots and any(
+        ("reap" in n.lower() or "reset" in n.lower()) and "voc" in n.lower()
+        for n in (args.experiment or [])
+    )
+    load_languages = args.negation or _plots_need_langs
+    cache_suffix = ("_latest" if load_latest_only else "") + ("" if load_languages else "_nolang")
 
     def _load_cached_datapoints(cache_file, experiment_name):
         if cache_file.is_file():
-            print(f"Loading cached datapoints from {cache_file} ...")
+            size_gb = cache_file.stat().st_size / 1e9
+            print(f"Loading cached datapoints from {cache_file} ({size_gb:.1f} GB) ...", flush=True)
             try:
                 with open(cache_file, "rb") as f:
-                    return pickle.load(f)
+                    data = pickle.load(f)
+                print(f"  done ({len(data)} datapoints).", flush=True)
+                return data
             except Exception as e:
                 print(f"[WARN] Failed to load cache ({e}). Re-loading datapoints.")
-        print("Loading datapoints...")
-        loaded = load.get_datapoints(experiment_name)
+        print(f"Loading datapoints (latest_only={load_latest_only}, load_languages={load_languages})...", flush=True)
+        loaded = load.get_datapoints(experiment_name, latest_only=load_latest_only, load_languages=load_languages)
         with open(cache_file, "wb") as f:
             pickle.dump(loaded, f)
         print(f"Saved datapoint cache to {cache_file}")
         return loaded
 
-    datapoints_list = _load_cached_datapoints(cache_path, experiment_path)
+    datapoints_list = []
+    for i, exp_name in enumerate(experiment_names, 1):
+        print(f"[{i}/{len(experiment_names)}] {exp_name}", flush=True)
+        cache_path = cache_dir / f"datapoints_{exp_name}{cache_suffix}.pkl"
+        datapoints_list.extend(_load_cached_datapoints(cache_path, exp_name))
+    print(f"Merged {len(experiment_names)} experiment(s) into {len(datapoints_list)} total datapoints.", flush=True)
     for d in datapoints_list:
         total += 1
         if d['evaluation'] is not None:
@@ -110,6 +129,8 @@ if __name__ == "__main__":
 
     def _experiment_plot_family(name):
         lname = str(name).lower()
+        if ("reap" in lname or "reset" in lname) and "voc" in lname:
+            return "voc_reaper"
         if "voc_pen" in lname:
             return "voc_pen"
         if "beth_reaper" in lname:
@@ -212,6 +233,8 @@ if __name__ == "__main__":
                         print(f"[INFO] Skipping fast negation plots for {experiment_tag}{mode_suffix} (slow variant is available).")
 
                 out_dir = pathlib.Path(__file__).resolve().parent / "plots"
+                out_dir_may = repo_root / "plots_may"
+                out_dir_june = repo_root / "plots_june"
                 if is_primary_mode and not same_runs_as_unfiltered:
                     epochs_df = cm_static._build_epochs_df()
                     if epochs_df is not None:
@@ -225,7 +248,15 @@ if __name__ == "__main__":
                     else:
                         print("[INFO] Skipping convergence plot (insufficient evaluation data).")
 
-                    if plot_family == "beth_reaper":
+                    if plot_family == "voc_reaper":
+                        print(f"[INFO] plots_june output directory: {out_dir_june}")
+                        cm_static.plot_pressure_heatmaps(out_dir=out_dir_june)
+                        cm_static.plot_topsim_interaction_reaper_voc(out_dir=out_dir_june)
+                        # Intergenerational stability needs all language dumps per run, not just the
+                        # latest/best one that prepared_datapoints keeps.
+                        cm_all_langs = plots.ComplexityMemory(filtered_datapoints, name=static_plot_name)
+                        cm_all_langs.plot_intergenerational_stability(out_dir=out_dir_june)
+                    elif plot_family == "beth_reaper":
                         cm_static.plot_eval_accuracy_over_epochs(group_col="reaper_interval", out_dir=out_dir)
                         cm_static.plot_eval_accuracy_over_epochs_by_reaper_and_complexity(out_dir=out_dir)
                     elif plot_family == "voc_pen":
@@ -235,14 +266,8 @@ if __name__ == "__main__":
                     unique_props = {str(c.get("properties")) for c in cfgs if c.get("properties") is not None}
                     unique_hidden = {c.get("hidden_size") for c in cfgs if c.get("hidden_size") is not None}
                     if plot_family == "complexity_memory":
-                        if len(unique_props) > 1:
-                            cm_static.plot_message_compression(group_by=("properties",), out_dir=out_dir)
-                        else:
-                            print("[INFO] Skipping message_compression by properties (no variation).")
-                        if len(unique_hidden) > 1:
-                            cm_static.plot_message_compression(group_by=("hidden_size",), out_dir=out_dir)
-                        else:
-                            print("[INFO] Skipping message_compression by hidden_size (no variation).")
+                        print(f"[INFO] plots_may output directory: {out_dir_may}")
+                        cm_static.plot_may_complexity_suite(out_dir=out_dir_may)
                     else:
                         print(f"[INFO] Skipping message-efficiency plots for family={plot_family}.")
                 elif is_primary_mode and same_runs_as_unfiltered:
@@ -251,6 +276,9 @@ if __name__ == "__main__":
                     print("[INFO] Skipping eval/convergence plots for non-primary mode (identical across mode variants).")
 
                 if not skip_fast_negation_plots:
+                    if plot_family == "complexity_memory":
+                        print("[INFO] Skipping negation-feature plots for family=complexity_memory (plots_may policy).")
+                        continue
                     if neg_plot_df is None:
                         top_rows_csv = cache_dir / f"negation_top_rows_{experiment_tag}_{args.feat_operator}_{args.negation_profile}{mode_suffix}.csv"
                         top1_csv = cache_dir / f"negation_top_1_{experiment_tag}_{args.feat_operator}_{args.negation_profile}{mode_suffix}.csv"
@@ -284,7 +312,13 @@ if __name__ == "__main__":
                             else:
                                 print("[INFO] Skipping 'negation by complexity' for family=voc_pen.")
 
-                            if plot_family == "complexity_memory":
+                            if plot_family == "voc_reaper":
+                                cm_neg_src.plot_pressure_heatmaps_negation(source_df, out_dir=out_dir_june)
+                                cm_neg_src.compute_optimal_table(
+                                    source_df,
+                                    out_dir=out_dir_june,
+                                )
+                            elif plot_family == "complexity_memory":
                                 cm_neg_src.plot_negation_metrics_over_epochs(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
                                 cm_neg_src.plot_negation_metrics_by_reaper_interval(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
                                 cm_neg_src.plot_topsim_vs_negation(source_df, profile_tag=args.feat_operator, out_dir=out_dir)

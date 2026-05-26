@@ -3,29 +3,33 @@ import json
 import pandas as pd
 from tqdm import tqdm
 
-def get_datapoints(directory_name: str = None):
+def get_datapoints(directory_name: str = None, latest_only: bool = False, load_languages: bool = True):
     '''
     List-returning wrapper around iter_datapoints.
     Input:
     - directory_name (string): folder found in 'concon/runs'
+    - latest_only (bool): if True, load only the highest-epoch language dump per run
+    - load_languages (bool): if False, skip loading any language/msgs files entirely
     Output:
     - datapoints (list[dict]) of runs with keys:
-        - config (dict), 
-        - evaluation (DataFrame), 
+        - config (dict),
+        - evaluation (DataFrame),
         - predicates (DataFrame),
         - languages (list[dict[epoch_number: int, DataFrame]])
     '''
-    return list(iter_datapoints(directory_name))
+    return list(iter_datapoints(directory_name, latest_only=latest_only, load_languages=load_languages))
 
 
-def iter_datapoints(directory_name: str = None):
+def iter_datapoints(directory_name: str = None, latest_only: bool = False, load_languages: bool = True):
     '''
     Input:
     - directory_name (string): folder found in 'concon/runs'
+    - latest_only (bool): if True, load only the highest-epoch language dump per run
+    - load_languages (bool): if False, skip loading any language/msgs files entirely
     Output:
     - yields datapoints (dict) with keys:
-        - config (dict), 
-        - evaluation (DataFrame), 
+        - config (dict),
+        - evaluation (DataFrame),
         - predicates (DataFrame),
         - languages (list[dict[epoch_number: int, DataFrame]])
     '''
@@ -41,19 +45,20 @@ def iter_datapoints(directory_name: str = None):
                 directory = subdirectories[0]
             else:
                 print(f"Found weird directory in {super_directory}/{directory}.\n{subdirectories}.")
-        # Depending on the run, we have several message dumps: store all
         messages_paths = []
         eval_path = None
         pred_path = None
 
-        # Pick up different CSVs: signals, evaluation, per-predicate metrics.
         for filename in os.listdir(directory):
-            if filename.startswith('msgs'):
+            if load_languages and filename.startswith('msgs') and not filename.endswith('.bak'):
                 messages_paths.append((os.path.join(directory, filename), filename))
             if filename.startswith('eval'):
                 eval_path = os.path.join(directory, filename)
-            if filename.startswith('predicate'):
+            if load_languages and filename.startswith('predicate'):
                 pred_path = os.path.join(directory, filename)
+
+        if latest_only and messages_paths:
+            messages_paths = [max(messages_paths, key=lambda x: int(x[1].split('.')[1].split('e')[1]))]
 
         datapoint = {}
         with open(os.path.join(directory, 'hparams.json')) as f:
