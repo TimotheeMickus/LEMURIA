@@ -1050,6 +1050,609 @@ class ComplexityMemory:
         with open(path, "w") as fh:
             fh.write("\n".join(lines))
 
+    def _write_latex_heatmap(self, path, value_matrix, row_labels, col_labels, *,
+                              vmin, vmax, colormap="viridis", fmt="{:.2f}",
+                              caption="", label="fig:heatmap",
+                              baseline_rc=None, preamble=None):
+        """Write a pgfplots matrix-plot heatmap with annotated cells (.tex).
+
+        value_matrix : 2D numpy array (n_rows × n_cols); row 0 → y=1 (bottom).
+        row_labels   : tick labels for y-axis (one per row).
+        col_labels   : tick labels for x-axis (one per col).
+        baseline_rc  : (row_idx, col_idx) → red outline rectangle on that cell.
+        preamble     : extra lines inserted between \\centering and \\begin{tikzpicture}.
+        """
+        n_rows, n_cols = value_matrix.shape
+        midpoint = (vmin + vmax) / 2.0
+        pw = round(max(0.09 * n_cols, 0.28), 2)
+        ph = round(max(0.07 * n_rows, 0.18), 2)
+
+        def _fmtv(v):
+            if not np.isfinite(float(v)):
+                return ""
+            return fmt.format(float(v))
+
+        lines = [r"\begin{figure}[htbp]", r"\centering"]
+        if preamble:
+            lines += list(preamble)
+        lines += [
+            r"\begin{tikzpicture}",
+            r"\begin{axis}[",
+            r"    scale only axis,",
+            f"    width={pw:.2f}\\linewidth,",
+            f"    height={ph:.2f}\\linewidth,",
+            f"    xmin=0.5, xmax={n_cols + 0.5},",
+            f"    ymin=0.5, ymax={n_rows + 0.5},",
+            f"    xtick={{{','.join(str(i + 1) for i in range(n_cols))}}},",
+            f"    xticklabels={{{','.join(str(l) for l in col_labels)}}},",
+            r"    x tick label style={rotate=45,anchor=east,font=\scriptsize},",
+            f"    ytick={{{','.join(str(i + 1) for i in range(n_rows))}}},",
+            f"    yticklabels={{{','.join(str(l) for l in row_labels)}}},",
+            r"    y tick label style={font=\scriptsize},",
+            r"    tick style={draw=none},",
+            r"    axis line style={draw=none},",
+            r"    enlargelimits=false,",
+            f"    colormap/{colormap},",
+            r"    colorbar,",
+            r"    colorbar style={yticklabel style={font=\scriptsize}},",
+            f"    point meta min={vmin:.4g},",
+            f"    point meta max={vmax:.4g},",
+            f"    mesh/cols={n_cols},",
+            r"]",
+            r"",
+            r"\addplot[matrix plot*, point meta=explicit, draw=none] coordinates {",
+        ]
+        for ri in range(n_rows):
+            row_parts = []
+            for ci in range(n_cols):
+                v = float(value_matrix[ri, ci])
+                cell_val = vmin if not np.isfinite(v) else v
+                row_parts.append(f"({ci + 1},{ri + 1}) [{cell_val:.4g}]")
+            lines.append("    " + " ".join(row_parts))
+        lines += ["};", ""]
+        for ri in range(n_rows):
+            for ci in range(n_cols):
+                v = float(value_matrix[ri, ci])
+                if not np.isfinite(v):
+                    continue
+                txt_color = "white" if v < midpoint else "black"
+                lines.append(
+                    f"\\node[font=\\scriptsize,text={txt_color}]"
+                    f" at (axis cs:{ci + 1},{ri + 1}) {{{_fmtv(v)}}};"
+                )
+        lines.append("")
+        if baseline_rc is not None:
+            bri, bci = baseline_rc
+            lines.append(
+                f"\\draw[red,ultra thick]"
+                f" (axis cs:{bci + 1 - 0.5},{bri + 1 - 0.5})"
+                f" rectangle (axis cs:{bci + 1 + 0.5},{bri + 1 + 0.5});"
+            )
+            lines.append("")
+        lines += [
+            r"\end{axis}",
+            r"\end{tikzpicture}",
+            f"\\caption{{{caption}}}",
+            f"\\label{{{label}}}",
+            r"\end{figure}",
+            "",
+        ]
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines))
+
+    def _write_latex_groupplot(self, path, panels, nrows, ncols, *,
+                                group_style_opts=None, outer_opts=None,
+                                caption="", label="fig:groupplot", preamble=None):
+        """Write a pgfplots groupplot figure (.tex).
+
+        panels : list of dicts (row-major, len = nrows*ncols):
+          "axis_opts" : list of pgfplots option strings for \\nextgroupplot
+          "series"    : list of series dicts (same schema as _write_pgfplots_tex)
+        group_style_opts : options inside group style={...} (size auto-added).
+        outer_opts       : options at the \\begin{groupplot}[...] level.
+        preamble         : lines between \\centering and \\begin{tikzpicture}.
+        """
+        def _fmt(v):
+            v = float(v)
+            return str(int(v)) if v == int(v) else f"{v:.6g}"
+
+        gso = list(group_style_opts or [])
+        oo = list(outer_opts or [])
+
+        lines = [r"\begin{figure}[htbp]", r"\centering"]
+        if preamble:
+            lines += list(preamble)
+        lines += [
+            r"\begin{tikzpicture}",
+            r"\begin{groupplot}[",
+            r"    group style={",
+            f"        group size={ncols} by {nrows},",
+        ]
+        for opt in gso:
+            lines.append(f"        {opt},")
+        lines.append(r"    },")
+        for opt in oo:
+            lines.append(f"    {opt},")
+        lines += [r"]", r""]
+
+        for panel in panels:
+            axis_opts = panel.get("axis_opts", [])
+            series_list = panel.get("series", [])
+            lines.append(r"\nextgroupplot[")
+            for opt in axis_opts:
+                lines.append(f"    {opt},")
+            lines.append(r"]")
+            for s in series_list:
+                opts = s.get("opts", "+[mark=none,thick]")
+                legend = s.get("legend")
+                if s.get("type") == "hline":
+                    lines.append(f"\\addplot{opts} {{{_fmt(s['y'])}}};")
+                elif s.get("type") == "fill_between":
+                    upper = [(x, y) for x, y in s.get("upper", [])
+                             if np.isfinite(float(x)) and np.isfinite(float(y))]
+                    lower = [(x, y) for x, y in s.get("lower", [])
+                             if np.isfinite(float(x)) and np.isfinite(float(y))]
+                    poly = upper + list(reversed(lower))
+                    if poly:
+                        lines.append(f"\\addplot{opts} coordinates {{")
+                        for x, y in poly:
+                            lines.append(f"    ({_fmt(x)},{_fmt(y)})")
+                        lines.append("} -- cycle;")
+                else:
+                    coords = [(x, y) for x, y in s.get("coords", [])
+                              if np.isfinite(float(x)) and np.isfinite(float(y))]
+                    if coords:
+                        lines.append(f"\\addplot{opts} coordinates {{")
+                        for x, y in coords:
+                            lines.append(f"    ({_fmt(x)},{_fmt(y)})")
+                        lines.append("};")
+                if legend is not None:
+                    lines.append(f"\\addlegendentry{{{legend}}}")
+            lines.append("")
+
+        lines += [
+            r"\end{groupplot}",
+            r"\end{tikzpicture}",
+            f"\\caption{{{caption}}}",
+            f"\\label{{{label}}}",
+            r"\end{figure}",
+            "",
+        ]
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines))
+
+    def plot_may_accuracy_summary(self, *, out_dir="plots_may"):
+        """Accuracy statistics vs complexity, saved alongside the topsim figure.
+        Uses only eval data — no language files loaded."""
+        df = self._build_complexity_memory_run_df()
+        if df is None or df.empty:
+            print("[INFO] Accuracy summary skipped (no run data).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        adf = df.dropna(subset=["max_acc", "complexity"]).copy()
+        summary = (
+            adf.groupby(["condition", "hidden_size", "complexity"])
+            .agg(acc_min=("max_acc", "min"), acc_max=("max_acc", "max"),
+                 acc_median=("max_acc", "median"), n=("max_acc", "count"))
+            .reset_index()
+        )
+        adf.to_csv(out_dir / f"may_accuracy_raw_{self.name}.csv", index=False)
+        summary.to_csv(out_dir / f"may_accuracy_summary_{self.name}.csv", index=False)
+        print(f"[INFO] Accuracy summary saved → may_accuracy_summary_{self.name}.csv "
+              f"({len(summary)} rows)")
+
+        cond_order  = ["n+neg", "n-neg", "n-n"]
+        cond_labels = {"n+neg": "unary + negation", "n-neg": "unary, no negation", "n-n": "conjunction"}
+        cond_colors = {"n+neg": "#1f77b4", "n-neg": "#e07a2d", "n-n": "#2ca02c"}
+        hidden_vals = sorted(adf["hidden_size"].dropna().unique())
+
+        def _nn_to_n_sq(c):
+            n = round(-1.0 + math.sqrt(1.0 + float(c)))
+            return n * n
+
+        fig, axes = plt.subplots(len(hidden_vals), len(cond_order),
+                                 figsize=(4.5 * len(cond_order), 3.0 * len(hidden_vals)),
+                                 squeeze=False)
+        for ri, h in enumerate(hidden_vals):
+            for ci, cond in enumerate(cond_order):
+                ax = axes[ri][ci]
+                sub = adf[(adf["hidden_size"] == h) & (adf["condition"] == cond)]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                xs = sub["complexity"].apply(lambda c: _nn_to_n_sq(c) if cond == "n-n" else c)
+                ax.scatter(xs, sub["max_acc"], s=10, alpha=0.55,
+                           color=cond_colors[cond])
+                # min/max band per complexity level
+                band = sub.copy()
+                band["_x"] = xs
+                grp = band.groupby("_x")["max_acc"]
+                xg = sorted(band["_x"].unique())
+                ax.fill_between(xg, [grp.min()[x] for x in xg],
+                                [grp.max()[x] for x in xg],
+                                alpha=0.15, color=cond_colors[cond])
+                ax.set_xscale("log", base=2)
+                ax.set_ylim(0, 1.05)
+                ax.axhline(1.0, color="gray", linewidth=0.6, linestyle="--", alpha=0.5)
+                ax.grid(True, alpha=0.3)
+                if ri == 0:
+                    ax.set_title(cond_labels[cond], fontsize=9, fontweight="bold")
+                if ci == 0:
+                    ax.set_ylabel(f"hidden={int(h)}\nmax accuracy", fontsize=8)
+                if ri == len(hidden_vals) - 1:
+                    ax.set_xlabel("predicate space size", fontsize=8)
+
+        fig.suptitle("Max accuracy vs predicate space size", fontsize=11, fontweight="bold")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"may_accuracy_{self.name}.png", dpi=150)
+        plt.close(fig)
+        print(f"[INFO] Saved may_accuracy_{self.name}.png")
+
+    def export_may_homonymy(self, *, out_dir="plots_may"):
+        """Homonymy statistics vs complexity, streaming language files one run at a time.
+
+        Homonymy: a message type is homonymous when it is the modal message for more than
+        one predicate.  homonymy_rate = fraction of predicates whose modal message is shared
+        with at least one other predicate (0 = none, 1 = all share).
+        unique_msg_ratio = unique modal messages / predicates (1 = no sharing).
+
+        Reads language CSV files directly from dp["run_path"] so language data is never
+        held in memory for more than one run at a time.
+        """
+        import os as _os
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        rows = []
+        n_skipped = 0
+        for dp in self.datapoints:
+            cfg = dp.get("config", {})
+            run_path = dp.get("run_path")
+            complexity = cfg.get("num_predicates")
+            cond = self._condition_label(cfg)
+            hidden = cfg.get("hidden_size")
+
+            # Prefer already-loaded languages; fall back to disk scan (avoids OOM when
+            # load_languages=False, which is the default for --plots on this family).
+            lang_df = None
+            best_epoch = -1
+            langs = dp.get("languages") or []
+            if langs:
+                best = max(langs, key=lambda x: x.get("epoch_number", -1))
+                lang_df = best["language"].copy()
+                best_epoch = best.get("epoch_number", -1)
+            elif run_path and _os.path.isdir(run_path):
+                best_file = None
+                for fname in _os.listdir(run_path):
+                    if fname.startswith("msgs") and fname.endswith(".csv") and ".bak" not in fname:
+                        try:
+                            ep = int(fname.split(".")[1].split("e")[1])
+                        except (IndexError, ValueError):
+                            continue
+                        if ep > best_epoch:
+                            best_epoch = ep
+                            best_file = _os.path.join(run_path, fname)
+                if best_file:
+                    try:
+                        lang_df = pd.read_csv(best_file)
+                    except Exception:
+                        pass
+
+            if lang_df is None or "msg" not in lang_df.columns or "pred_str" not in lang_df.columns:
+                n_skipped += 1
+                continue
+
+            def _norm(m):
+                return " ".join(t for t in str(m).split() if t != "0")
+
+            lang_df["_msg"] = lang_df["msg"].apply(_norm)
+            modal = (lang_df.groupby("pred_str")["_msg"]
+                     .agg(lambda x: x.mode().iloc[0] if len(x) > 0 else "")
+                     .reset_index().rename(columns={"_msg": "modal_msg"}))
+            del lang_df
+
+            n_preds = len(modal)
+            if n_preds == 0:
+                n_skipped += 1
+                continue
+
+            msg_counts = modal["modal_msg"].value_counts()
+            shared = msg_counts[modal["modal_msg"]].values > 1
+            rows.append({
+                "run_name": str(dp.get("run_name", "")),
+                "condition": cond,
+                "complexity": complexity,
+                "hidden_size": hidden,
+                "epoch": best_epoch,
+                "n_predicates": n_preds,
+                "n_unique_messages": len(msg_counts),
+                "unique_msg_ratio": len(msg_counts) / n_preds,
+                "homonymy_rate": int(shared.sum()) / n_preds,
+            })
+            del modal
+
+        if not rows:
+            print(f"[INFO] Homonymy export skipped (no language files; {n_skipped} runs skipped).")
+            return
+
+        hom_df = pd.DataFrame(rows)
+        for c in ["complexity", "hidden_size", "n_predicates", "n_unique_messages",
+                  "unique_msg_ratio", "homonymy_rate"]:
+            hom_df[c] = pd.to_numeric(hom_df[c], errors="coerce")
+
+        hom_df.to_csv(out_dir / f"may_homonymy_raw_{self.name}.csv", index=False)
+
+        summary = (
+            hom_df.dropna(subset=["complexity", "homonymy_rate"])
+            .groupby(["condition", "hidden_size", "complexity"])
+            .agg(hom_median=("homonymy_rate", "median"),
+                 hom_min=("homonymy_rate", "min"),
+                 hom_max=("homonymy_rate", "max"),
+                 umr_median=("unique_msg_ratio", "median"),
+                 n=("homonymy_rate", "count"))
+            .reset_index()
+        )
+        summary.to_csv(out_dir / f"may_homonymy_summary_{self.name}.csv", index=False)
+        print(f"[INFO] Homonymy summary saved → may_homonymy_summary_{self.name}.csv "
+              f"({len(rows)} runs, {n_skipped} skipped)")
+
+        # Plot: homonymy rate vs complexity, same 3×3 layout as topsim figure
+        cond_order  = ["n+neg", "n-neg", "n-n"]
+        cond_labels = {"n+neg": "unary + negation", "n-neg": "unary, no negation", "n-n": "conjunction"}
+        cond_colors = {"n+neg": "#1f77b4", "n-neg": "#e07a2d", "n-n": "#2ca02c"}
+        hidden_vals = sorted(hom_df["hidden_size"].dropna().unique())
+
+        def _nn_to_n_sq(c):
+            n = round(-1.0 + math.sqrt(1.0 + float(c)))
+            return n * n
+
+        fig, axes = plt.subplots(len(hidden_vals), len(cond_order),
+                                 figsize=(4.5 * len(cond_order), 3.0 * len(hidden_vals)),
+                                 squeeze=False)
+        for ri, h in enumerate(hidden_vals):
+            for ci, cond in enumerate(cond_order):
+                ax = axes[ri][ci]
+                sub = hom_df[(hom_df["hidden_size"] == h) & (hom_df["condition"] == cond)]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                xs = sub["complexity"].apply(lambda c: _nn_to_n_sq(c) if cond == "n-n" else c)
+                ax.scatter(xs, sub["homonymy_rate"], s=10, alpha=0.55,
+                           color=cond_colors[cond])
+                # log-linear trend
+                xlog = np.log2(xs.to_numpy(dtype=float) + 1e-9)
+                yv = sub["homonymy_rate"].to_numpy(dtype=float)
+                mask = np.isfinite(xlog) & np.isfinite(yv)
+                if mask.sum() >= 3 and np.ptp(xlog[mask]) > 1e-9:
+                    a, b = np.polyfit(xlog[mask], yv[mask], 1)
+                    xg = np.logspace(np.log2(float(xs[mask].min())),
+                                     np.log2(float(xs[mask].max())), 80, base=2.0)
+                    ax.plot(xg, a * np.log2(xg) + b, "--",
+                            color=cond_colors[cond], linewidth=1.3, alpha=0.6)
+                    rho, pv = self._spearman_r_p(xs.to_numpy(dtype=float)[mask],
+                                                 yv[mask])
+                    ax.set_title(
+                        (cond_labels[cond] + "\n" if ri == 0 else "") +
+                        f"ρ={rho:.2f}, {self._format_p_value(pv)}",
+                        fontsize=8)
+                else:
+                    if ri == 0:
+                        ax.set_title(cond_labels[cond], fontsize=9, fontweight="bold")
+                ax.set_xscale("log", base=2)
+                ax.set_ylim(-0.05, 1.05)
+                ax.grid(True, alpha=0.3)
+                if ci == 0:
+                    ax.set_ylabel(f"hidden={int(h)}\nhomonymy rate", fontsize=8)
+                if ri == len(hidden_vals) - 1:
+                    ax.set_xlabel("predicate space size", fontsize=8)
+
+        fig.suptitle(
+            "Homonymy rate vs predicate space size\n"
+            "(fraction of predicates whose modal message is shared with ≥1 other predicate)",
+            fontsize=10, fontweight="bold")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"may_homonymy_{self.name}.png", dpi=150)
+        plt.close(fig)
+        print(f"[INFO] Saved may_homonymy_{self.name}.png")
+
+    def export_may_homonymy_topsim_analysis(self, *, out_dir="plots_may"):
+        """Addresses the reviewer's decomposition: in n-neg, topsim is driven by homonymy
+        rather than compositional structure.
+
+        Two empirical tests:
+        1. Spearman rho(homonymy_rate, topsim) within each condition — expected strongly
+           negative for n-neg, showing homonymy is the main driver.
+        2. n+neg vs n-neg topsim at matched homonymy levels — the gap between trend lines
+           is topsim attributable to compositional structure (negation adds real structure).
+
+        Loads homonymy from may_homonymy_raw_*.csv if already saved by export_may_homonymy;
+        otherwise streams language files from disk one run at a time.
+        """
+        import os as _os
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        run_df = self._build_complexity_memory_run_df()
+        if run_df is None or run_df.empty:
+            print("[INFO] Homonymy-topsim analysis skipped (no run data).")
+            return
+
+        hom_csv = out_dir / f"may_homonymy_raw_{self.name}.csv"
+        if hom_csv.is_file():
+            hom_df = pd.read_csv(hom_csv)
+            print(f"[INFO] Loaded homonymy from {hom_csv}")
+        else:
+            print("[INFO] Streaming homonymy from language files ...")
+            hom_rows = []
+            for dp in self.datapoints:
+                run_path = dp.get("run_path")
+                run_name = str(dp.get("run_name", ""))
+                lang_df = None
+                best_epoch = -1
+                langs = dp.get("languages") or []
+                if langs:
+                    best = max(langs, key=lambda x: x.get("epoch_number", -1))
+                    lang_df = best["language"].copy()
+                    best_epoch = best.get("epoch_number", -1)
+                elif run_path and _os.path.isdir(run_path):
+                    best_file = None
+                    for fname in _os.listdir(run_path):
+                        if fname.startswith("msgs") and fname.endswith(".csv") and ".bak" not in fname:
+                            try:
+                                ep = int(fname.split(".")[1].split("e")[1])
+                            except (IndexError, ValueError):
+                                continue
+                            if ep > best_epoch:
+                                best_epoch = ep
+                                best_file = _os.path.join(run_path, fname)
+                    if best_file:
+                        try:
+                            lang_df = pd.read_csv(best_file)
+                        except Exception:
+                            pass
+                if lang_df is None or "msg" not in lang_df.columns or "pred_str" not in lang_df.columns:
+                    continue
+                lang_df["_msg"] = lang_df["msg"].apply(
+                    lambda m: " ".join(t for t in str(m).split() if t != "0"))
+                modal = (lang_df.groupby("pred_str")["_msg"]
+                         .agg(lambda x: x.mode().iloc[0] if len(x) > 0 else "")
+                         .reset_index())
+                del lang_df
+                n_preds = len(modal)
+                if n_preds == 0:
+                    continue
+                mc = modal["_msg"].value_counts()
+                hom_rows.append({"run_name": run_name,
+                                 "homonymy_rate": (mc[modal["_msg"]].values > 1).sum() / n_preds,
+                                 "unique_msg_ratio": len(mc) / n_preds})
+                del modal
+            if not hom_rows:
+                print("[INFO] Homonymy-topsim analysis skipped (no language files).")
+                return
+            hom_df = pd.DataFrame(hom_rows)
+
+        hom_df["run_name"] = hom_df["run_name"].astype(str)
+        run_df["run_name"] = run_df["run_name"].astype(str)
+        merged = run_df.merge(hom_df[["run_name", "homonymy_rate"]], on="run_name", how="inner")
+        merged = merged.dropna(subset=["topsim", "homonymy_rate"])
+        if merged.empty:
+            print("[INFO] Homonymy-topsim analysis skipped (no matched runs after merge).")
+            return
+
+        merged.to_csv(out_dir / f"may_homonymy_topsim_merged_{self.name}.csv", index=False)
+
+        # --- Correlation table ---
+        cond_order = ["n+neg", "n-neg", "n-n"]
+        hidden_vals = sorted(merged["hidden_size"].dropna().unique())
+        corr_rows = []
+        for cond in cond_order:
+            for h in hidden_vals:
+                sub = merged[(merged["condition"] == cond) & (merged["hidden_size"] == h)]
+                if len(sub) < 4:
+                    continue
+                r, p = self._spearman_r_p(sub["homonymy_rate"].to_numpy(dtype=float),
+                                          sub["topsim"].to_numpy(dtype=float))
+                corr_rows.append({"condition": cond, "hidden_size": int(h),
+                                  "n": len(sub),
+                                  "rho": round(float(r), 3) if np.isfinite(r) else np.nan,
+                                  "p": p})
+        corr_df = pd.DataFrame(corr_rows)
+        corr_df.to_csv(out_dir / f"may_homonymy_topsim_corr_{self.name}.csv", index=False)
+        print("[INFO] ρ(homonymy, topsim) per condition × hidden:")
+        print(corr_df.to_string(index=False))
+
+        # --- Plot: topsim vs homonymy_rate, n+neg and n-neg on same axes per hidden ---
+        cond_colors = {"n+neg": "#1f77b4", "n-neg": "#e07a2d", "n-n": "#2ca02c"}
+        cond_labels = {"n+neg": "unary + negation", "n-neg": "unary, no negation",
+                       "n-n": "conjunction"}
+        focus = ["n+neg", "n-neg"]
+
+        fig, axes = plt.subplots(1, len(hidden_vals),
+                                 figsize=(5.0 * len(hidden_vals), 4.5), squeeze=False)
+        for ci, h in enumerate(hidden_vals):
+            ax = axes[0][ci]
+            ann_y = 0.95
+            for cond in focus:
+                sub = merged[(merged["condition"] == cond) & (merged["hidden_size"] == h)]
+                if sub.empty:
+                    continue
+                ax.scatter(sub["homonymy_rate"], sub["topsim"],
+                           s=12, alpha=0.55,
+                           color=cond_colors[cond],
+                           label=cond_labels[cond],
+                           zorder=3)
+                x = sub["homonymy_rate"].to_numpy(dtype=float)
+                y = sub["topsim"].to_numpy(dtype=float)
+                mask = np.isfinite(x) & np.isfinite(y)
+                if mask.sum() >= 4:
+                    a, b = np.polyfit(x[mask], y[mask], 1)
+                    xg = np.linspace(float(x[mask].min()), float(x[mask].max()), 80)
+                    ax.plot(xg, a * xg + b, "-", color=cond_colors[cond],
+                            linewidth=1.8, zorder=4)
+                    r, p = self._spearman_r_p(x[mask], y[mask])
+                    ax.annotate(
+                        f"{cond_labels[cond]}: ρ={r:.2f}, {self._format_p_value(p)}",
+                        xy=(0.04, ann_y), xycoords="axes fraction",
+                        fontsize=7, color=cond_colors[cond])
+                    ann_y -= 0.08
+            ax.set_xlabel("homonymy rate", fontsize=9)
+            if ci == 0:
+                ax.set_ylabel("topsim", fontsize=9)
+            ax.set_title(f"hidden = {int(h)}", fontsize=9, fontweight="bold")
+            ax.set_xlim(-0.05, 1.05)
+            ax.set_ylim(-0.05, None)
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=7, loc="upper right")
+
+        fig.suptitle(
+            "Topsim vs homonymy rate — n+neg and n-neg conditions\n"
+            "Gap between trend lines = topsim attributable to compositional structure (negation)",
+            fontsize=9, fontweight="bold")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"may_homonymy_topsim_{self.name}.png", dpi=150)
+        plt.close(fig)
+        print(f"[INFO] Saved may_homonymy_topsim_{self.name}.png")
+
+    def export_may_best_epoch_table(self, *, out_dir="plots_may"):
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        df = self._build_complexity_memory_run_df()
+        if df is None or df.empty:
+            print("[INFO] export_may_best_epoch_table: no run data, skipping.")
+            return
+
+        edf = df.dropna(subset=["epochs_to_max_acc", "condition", "hidden_size", "complexity"]).copy()
+        if edf.empty:
+            print("[INFO] export_may_best_epoch_table: no rows with epochs_to_max_acc, skipping.")
+            return
+
+        summary = (
+            edf.groupby(["condition", "hidden_size", "complexity"])["epochs_to_max_acc"]
+            .agg(
+                n="count",
+                median="median",
+                mean="mean",
+                std="std",
+                min="min",
+                max="max",
+            )
+            .reset_index()
+        )
+        summary = summary.sort_values(["condition", "hidden_size", "complexity"]).reset_index(drop=True)
+        for col in ["median", "mean", "std", "min", "max"]:
+            summary[col] = summary[col].round(1)
+
+        csv_path = out_dir / f"may_best_epoch_summary_{self.name}.csv"
+        summary.to_csv(csv_path, index=False)
+        print(f"[INFO] Saved {csv_path}")
+        print(summary.to_string(index=False))
+
     def plot_may_complexity_suite(self, *, out_dir="plots_may"):
         _steps = [
             "build run df",
@@ -3027,8 +3630,159 @@ class ComplexityMemory:
         plt.close(fig)
         print(f"[INFO] Saved pressure_heatmap_negation_{self.name}.png")
 
+    def plot_negation_interaction_reaper_voc(self, neg_df, *, out_dir="plots"):
+        """Strong (F1_nT) and weak (F1_nr) negation vs reset interval.
+
+        Layout: rows = voc_penalty, cols = p (complexity).
+        Each panel: x = reaper_interval (linear, active values), two lines —
+        F1_nT solid blue, F1_nr dashed orange — with ±IQR shading.
+        No-reset baseline (reaper=120) shown as short horizontal reference marks
+        at the right edge of each panel.
+        """
+        df_neg = self._prepare_negation_top_df(neg_df)
+        if df_neg is None or df_neg.empty:
+            print("[INFO] Negation interaction plot skipped (no negation data).")
+            return
+        required = {"reaper_interval", "voc_penalty", "complexity"}
+        if not required.issubset(df_neg.columns):
+            print("[INFO] Negation interaction plot skipped (missing grouping columns).")
+            return
+        df_neg = df_neg.dropna(subset=["reaper_interval", "voc_penalty", "complexity"]).copy()
+
+        if "F1_nT" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            t = pd.to_numeric(df_neg.get("l_T", df_neg.get("t")), errors="coerce")
+            non_t = 1.0 - t
+            den = n + non_t
+            df_neg["F1_nT"] = np.where(
+                (den > 0) & n.notna() & t.notna(), 2.0 * n * non_t / den, np.nan)
+        if "F1_nr" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            r = pd.to_numeric(df_neg.get("r", df_neg.get("c")), errors="coerce")
+            den = n + r
+            df_neg["F1_nr"] = np.where(
+                (den > 0) & n.notna() & r.notna(), 2.0 * n * r / den, np.nan)
+
+        metrics = [
+            ("F1_nT", r"$F_{1,nT}$ strong", "#1f77b4", "-"),
+            ("F1_nr", r"$F_{1,nr}$ weak",   "#ff7f0e", "--"),
+        ]
+        metrics = [(col, lbl, col_c, ls) for col, lbl, col_c, ls in metrics
+                   if col in df_neg.columns and df_neg[col].notna().any()]
+        if not metrics:
+            print("[INFO] Negation interaction plot skipped (no F1 data).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use properties (p=16/32/64) as columns when available, else fall back to complexity
+        if "properties" in df_neg.columns and df_neg["properties"].notna().any():
+            df_neg["_p_label"] = df_neg["properties"].astype(str)
+        else:
+            df_neg["_p_label"] = df_neg["complexity"].astype(str)
+        p_vals = sorted(df_neg["_p_label"].dropna().unique(), key=self._properties_sort_key)
+
+        voc_vals = sorted(df_neg["voc_penalty"].dropna().unique())
+        active_reapers_all = sorted(
+            [r for r in df_neg["reaper_interval"].dropna().unique() if r < 120])
+
+        nrows = len(voc_vals)
+        ncols = len(p_vals)
+        fig, axes = plt.subplots(nrows, ncols,
+                                 figsize=(5.0 * ncols, 3.5 * nrows),
+                                 squeeze=False, sharey=True)
+
+        for ri, v in enumerate(voc_vals):
+            v_arr = df_neg["voc_penalty"].to_numpy(dtype=float)
+            vdf = df_neg[np.isclose(v_arr, float(v), atol=1e-12)]
+            for ci, p in enumerate(p_vals):
+                ax = axes[ri][ci]
+                sub = vdf[vdf["_p_label"] == p]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                active_reapers = sorted([r for r in sub["reaper_interval"].unique() if r < 120])
+
+                for col, lbl, col_c, ls in metrics:
+                    msub = sub.dropna(subset=[col])
+                    active = msub[msub["reaper_interval"] < 120]
+                    if not active.empty:
+                        stats = (
+                            active.groupby("reaper_interval")[col]
+                            .agg(median="median",
+                                 q25=lambda x: np.nanquantile(x, 0.25),
+                                 q75=lambda x: np.nanquantile(x, 0.75))
+                            .reset_index().sort_values("reaper_interval")
+                        )
+                        ax.fill_between(stats["reaper_interval"],
+                                        stats["q25"], stats["q75"],
+                                        alpha=0.12, color=col_c)
+                        ax.plot(stats["reaper_interval"], stats["median"],
+                                linestyle=ls, marker="o", linewidth=2.0,
+                                color=col_c, markersize=4, label=lbl)
+                    # Baseline reference mark at right edge
+                    no_reset = msub[msub["reaper_interval"] >= 120]
+                    if not no_reset.empty:
+                        bval = float(no_reset[col].median())
+                        xmax = max(active_reapers) if active_reapers else 1
+                        ax.plot([xmax * 1.05, xmax * 1.25], [bval, bval],
+                                linestyle=":", color=col_c, linewidth=1.4, alpha=0.7)
+
+                if active_reapers:
+                    ax.set_xticks(active_reapers)
+                    ax.set_xticklabels([str(int(r)) for r in active_reapers],
+                                       rotation=45, ha="right", fontsize=7)
+                ax.set_ylim(-0.02, 1.02)
+                ax.grid(True, alpha=0.3)
+
+                # Column header: p value (top row only)
+                if ri == 0:
+                    ax.set_title(f"p = {p}", fontsize=10, fontweight="bold")
+                # Row label: voc_penalty (left col only)
+                if ci == 0:
+                    ax.set_ylabel(f"voc = {self._fmt_voc_label(v)}\nF1", fontsize=8)
+                if ri == nrows - 1:
+                    ax.set_xlabel("reset interval (epochs)", fontsize=8)
+
+        # Shared legend (top-right)
+        from matplotlib.lines import Line2D
+        legend_handles = [Line2D([0], [0], color=col_c, linestyle=ls,
+                                 linewidth=2.0, marker="o", markersize=4, label=lbl)
+                          for _, lbl, col_c, ls in metrics]
+        legend_handles.append(Line2D([0], [0], color="gray", linestyle=":",
+                                     linewidth=1.4, label="no-reset baseline"))
+        fig.legend(handles=legend_handles, loc="upper center",
+                   bbox_to_anchor=(0.5, 1.02), ncol=len(legend_handles), fontsize=8)
+        fig.suptitle(
+            "Strong and weak negation vs reset interval\n"
+            "rows: voc_penalty — cols: p — dotted right edge: no-reset baseline",
+            fontsize=10, fontweight="bold", y=1.06,
+        )
+        fig.tight_layout()
+        fig.savefig(out_dir / f"negation_interaction_reaper_voc_{self.name}.png",
+                    dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[INFO] Saved negation_interaction_reaper_voc_{self.name}.png")
+
+    @staticmethod
+    def _token_levenshtein(a_tokens, b_tokens):
+        """Token-level edit distance between two token lists."""
+        m, n = len(a_tokens), len(b_tokens)
+        if m == 0: return n
+        if n == 0: return m
+        dp = list(range(n + 1))
+        for i in range(1, m + 1):
+            prev, dp[0] = dp[0], i
+            for j in range(1, n + 1):
+                prev, dp[j] = dp[j], (prev if a_tokens[i-1] == b_tokens[j-1]
+                                       else 1 + min(prev, dp[j], dp[j-1]))
+        return dp[n]
+
     def _message_agreement(self, lang_a, lang_b):
-        """Fraction of predicates with identical messages between two language dumps."""
+        """Mean normalised Levenshtein similarity of modal messages across predicates.
+        Similarity = 1 - edit_distance / max(len_a, len_b), averaged over predicates.
+        Tokens are the discrete signal units; pad token '0' is stripped first."""
         for df in (lang_a, lang_b):
             if df is None or not isinstance(df, pd.DataFrame) or df.empty:
                 return np.nan
@@ -3040,24 +3794,53 @@ class ComplexityMemory:
                     .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else "")
                     .reset_index())
 
-        def _norm(s):
-            return " ".join(t for t in str(s).split() if t != "0")
+        def _tok(s):
+            return [t for t in str(s).split() if t != "0"]
 
         a_agg = _modal(lang_a)
         b_agg = _modal(lang_b)
         merged = a_agg.merge(b_agg, on="pred_str", suffixes=("_a", "_b"))
         if merged.empty:
             return np.nan
-        merged["msg_a"] = merged["msg_a"].apply(_norm)
-        merged["msg_b"] = merged["msg_b"].apply(_norm)
-        return float((merged["msg_a"] == merged["msg_b"]).mean())
+
+        sims = []
+        for _, row in merged.iterrows():
+            ta, tb = _tok(row["msg_a"]), _tok(row["msg_b"])
+            denom = max(len(ta), len(tb))
+            if denom == 0:
+                sims.append(1.0)
+            else:
+                sims.append(1.0 - self._token_levenshtein(ta, tb) / denom)
+        return float(np.mean(sims))
+
+    @staticmethod
+    def _kernel_smooth(x, y, n_points=60, bw=0.25):
+        """Gaussian kernel smoother. bw is bandwidth as fraction of x range."""
+        x = np.asarray(x, float)
+        y = np.asarray(y, float)
+        mask = np.isfinite(x) & np.isfinite(y)
+        x, y = x[mask], y[mask]
+        if len(x) < 3:
+            return x, y
+        xg = np.linspace(x.min(), x.max(), n_points)
+        xrange = x.max() - x.min()
+        if xrange < 1e-9:
+            return x, y
+        sigma = bw * xrange
+        yg = np.array([
+            np.average(y, weights=np.exp(-0.5 * ((x - xi) / sigma) ** 2))
+            for xi in xg
+        ])
+        return xg, yg
 
     def plot_intergenerational_stability(self, *, out_dir="plots"):
-        """Plot 5: language agreement across generation boundaries vs. generation index.
+        """Language stability across generation boundaries.
 
-        Tests the iterated-learning prediction: if reaper pressure shapes the code to
-        be more relearnable, agreement between consecutive-generation language dumps
-        should increase over training.
+        Produces two figures:
+        - _selected: a small subset of interpretable reset intervals, all overlaid
+          per panel with scatter + smooth trend line.
+        - _full: every reset interval in its own row, scatter in background,
+          smooth trend in foreground; one col per p.
         """
         rows = []
         for dp in self.datapoints:
@@ -3104,69 +3887,115 @@ class ComplexityMemory:
             print("[INFO] Intergenerational stability plot skipped (no valid rows after coercion).")
             return
 
+        df["boundary_epoch"] = (df["gen_from"] + 1) * df["reaper_interval"]
+
         out_dir = pathlib.Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         df.to_csv(out_dir / f"intergenerational_stability_{self.name}.csv", index=False)
 
         complexities = sorted(df["complexity"].unique())
-        voc_vals = sorted(df["voc_penalty"].unique())
-        reaper_vals = sorted(df["reaper_interval"].unique())
-        palette = sns.color_palette("plasma", n_colors=max(1, len(voc_vals)))
-        voc_colors = {v: palette[i] for i, v in enumerate(voc_vals)}
+        all_reapers = sorted(df["reaper_interval"].unique())
 
-        n_reap = len(reaper_vals)
+        def _props_str(csub, c):
+            props = (csub["properties"].dropna().astype(str).unique()
+                     if "properties" in csub.columns else [])
+            return (sorted(props, key=self._properties_sort_key)[0]
+                    if len(props) else str(int(c)))
+
+        def _draw_reaper_panel(ax, rsub, color, label=None, scatter=True):
+            """Scatter (background) + kernel-smoothed trend (foreground)."""
+            if rsub.empty:
+                return
+            x_all = rsub["boundary_epoch"].to_numpy(dtype=float)
+            y_all = rsub["agreement"].to_numpy(dtype=float)
+            if scatter:
+                ax.scatter(x_all, y_all, s=6, alpha=0.08, color=color, zorder=1)
+            # Median per epoch as input to smoother (reduces heteroscedastic noise)
+            med = (rsub.groupby("boundary_epoch")["agreement"]
+                   .median().reset_index().sort_values("boundary_epoch"))
+            xm = med["boundary_epoch"].to_numpy(dtype=float)
+            ym = med["agreement"].to_numpy(dtype=float)
+            xg, yg = self._kernel_smooth(xm, ym, bw=0.30)
+            ax.plot(xg, yg, linewidth=2.2, color=color, zorder=3,
+                    label=label if label else None)
+
+        # ----------------------------------------------------------------
+        # Figure 1 — selected intervals overlaid, cols=complexity
+        # ----------------------------------------------------------------
+        selected = [r for r in all_reapers
+                    if int(r) in {2, 4, 6, 10, 12, 20, 30}]
+        if not selected:
+            selected = all_reapers[:7]  # fallback if grid doesn't match
+        palette_sel = sns.color_palette("tab10", n_colors=len(selected))
+        reaper_colors_sel = {r: palette_sel[i] for i, r in enumerate(selected)}
+
         n_comp = len(complexities)
-        fig, axes = plt.subplots(n_reap, n_comp, figsize=(4.5 * n_comp, 3.5 * n_reap),
-                                  squeeze=False, sharex="col", sharey=True)
-        for ri, r in enumerate(reaper_vals):
+        fig1, axes1 = plt.subplots(1, n_comp, figsize=(5.5 * n_comp, 4.5),
+                                   squeeze=False, sharey=True)
+        for ci, c in enumerate(complexities):
+            ax = axes1[0][ci]
+            csub = df[df["complexity"] == c]
+            for r in selected:
+                rsub = csub[csub["reaper_interval"] == r]
+                if rsub.empty:
+                    continue
+                _draw_reaper_panel(ax, rsub, reaper_colors_sel[r],
+                                   label=f"reset={int(r)}", scatter=True)
+            ax.set_title(f"p = {_props_str(csub, c)}", fontsize=10, fontweight="bold")
+            ax.set_xlabel("epoch", fontsize=9)
+            if ci == 0:
+                ax.set_ylabel("norm. Levenshtein similarity", fontsize=8)
+            ax.set_ylim(0, 1)
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=7, loc="lower right")
+
+        fig1.suptitle(
+            "Language stability across generation boundaries — selected reset intervals\n"
+            "scatter = individual pairs, curve = kernel-smoothed median",
+            fontsize=10, fontweight="bold")
+        fig1.tight_layout()
+        fig1.savefig(out_dir / f"intergenerational_stability_selected_{self.name}.png",
+                     dpi=150)
+        plt.close(fig1)
+        print(f"[INFO] Saved intergenerational_stability_selected_{self.name}.png")
+
+        # ----------------------------------------------------------------
+        # Figure 2 — all intervals, each in its own row; cols=complexity
+        # ----------------------------------------------------------------
+        palette_full = sns.color_palette("viridis", n_colors=max(1, len(all_reapers)))
+        reaper_colors_full = {r: palette_full[i] for i, r in enumerate(all_reapers)}
+
+        n_reap = len(all_reapers)
+        fig2, axes2 = plt.subplots(n_reap, n_comp,
+                                   figsize=(4.5 * n_comp, 2.8 * n_reap),
+                                   squeeze=False, sharey=True)
+        for ri, r in enumerate(all_reapers):
             for ci, c in enumerate(complexities):
-                ax = axes[ri][ci]
-                sub = df[(df["reaper_interval"] == r) & (df["complexity"] == c)]
-                if sub.empty:
+                ax = axes2[ri][ci]
+                rsub = df[(df["reaper_interval"] == r) & (df["complexity"] == c)]
+                if rsub.empty:
                     ax.set_visible(False)
                     continue
-                for v in voc_vals:
-                    v_arr = sub["voc_penalty"].to_numpy(dtype=float)
-                    vsub = sub[np.isclose(v_arr, float(v), atol=1e-12)]
-                    if vsub.empty:
-                        continue
-                    stats = (
-                        vsub.groupby("gen_from")["agreement"]
-                        .agg(median="median",
-                             q25=lambda x: np.nanquantile(x, 0.25),
-                             q75=lambda x: np.nanquantile(x, 0.75))
-                        .reset_index().sort_values("gen_from")
-                    )
-                    color = voc_colors[v]
-                    ax.fill_between(stats["gen_from"], stats["q25"], stats["q75"],
-                                    alpha=0.12, color=color)
-                    ax.plot(stats["gen_from"], stats["median"], marker="o", linewidth=1.8,
-                            color=color, markersize=4, label=self._fmt_voc_label(v))
+                _draw_reaper_panel(ax, rsub, reaper_colors_full[r], scatter=True)
                 ax.set_ylim(0, 1)
                 ax.grid(True, alpha=0.3)
                 if ri == 0:
-                    props = (sub["properties"].dropna().astype(str).unique()
-                             if "properties" in sub.columns else [])
-                    props_str = (sorted(props, key=self._properties_sort_key)[0]
-                                 if len(props) else str(int(c)))
-                    ax.set_title(f"p = {props_str}", fontsize=9, fontweight="bold")
+                    ax.set_title(f"p = {_props_str(rsub, c)}", fontsize=9,
+                                 fontweight="bold")
                 if ci == 0:
-                    ax.set_ylabel(f"reset={int(r)}\nagreement", fontsize=8)
+                    ax.set_ylabel(f"reset={int(r)}\nsimilarity", fontsize=7)
                 if ri == n_reap - 1:
-                    ax.set_xlabel("generation index", fontsize=8)
+                    ax.set_xlabel("epoch", fontsize=8)
 
-        handles, labels = axes[0][0].get_legend_handles_labels()
-        if handles:
-            fig.legend(handles, labels, title="voc_penalty", loc="upper right", fontsize=7)
-        fig.suptitle(
-            "Language agreement across generation boundaries\n"
-            "(iterated learning predicts: agreement increases over generations)",
-            fontsize=11, fontweight="bold",
-        )
-        fig.tight_layout()
-        fig.savefig(out_dir / f"intergenerational_stability_{self.name}.png", dpi=150)
-        plt.close(fig)
-        print(f"[INFO] Saved intergenerational_stability_{self.name}.png")
+        fig2.suptitle(
+            "Language stability — all reset intervals (each row = one reset interval)\n"
+            "scatter = individual pairs, curve = kernel-smoothed median",
+            fontsize=10, fontweight="bold")
+        fig2.tight_layout()
+        fig2.savefig(out_dir / f"intergenerational_stability_full_{self.name}.png",
+                     dpi=150)
+        plt.close(fig2)
+        print(f"[INFO] Saved intergenerational_stability_full_{self.name}.png")
 
     def compute_optimal_table(self, neg_df=None, *, accuracy_threshold=0.9, out_dir="outputs"):
         """Summary table: optimal (reaper, voc) per p maximising topsim s.t. accuracy >= threshold × baseline."""
@@ -3258,6 +4087,617 @@ class ComplexityMemory:
         print(tbl.to_string(index=False))
         print(f"[INFO] Saved → {out_path}")
         return tbl
+
+    def export_epoch_analyzed_table(self, source_df, *, out_dir="plots"):
+        """Save a table of which epoch was analyzed per (properties, reaper_interval, voc_penalty)."""
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if source_df is None or source_df.empty or "epoch_analyzed" not in source_df.columns:
+            print("[INFO] export_epoch_analyzed_table: no epoch_analyzed column, skipping.")
+            return
+
+        df = source_df.copy()
+        df["run_name"] = df["run_name"].astype(str)
+
+        meta = self._build_run_meta_df()[["run_name", "reaper_interval", "voc_penalty", "properties"]]
+        for col in ["reaper_interval", "voc_penalty", "properties"]:
+            if col not in df.columns:
+                df = df.merge(meta[["run_name", col]], on="run_name", how="left")
+
+        df["epoch_analyzed"] = pd.to_numeric(df["epoch_analyzed"], errors="coerce")
+        group_cols = [c for c in ["properties", "reaper_interval", "voc_penalty"] if c in df.columns]
+        if not group_cols:
+            print("[INFO] export_epoch_analyzed_table: no grouping columns available, skipping.")
+            return
+
+        summary = (
+            df.dropna(subset=["epoch_analyzed"])
+            .groupby(group_cols)["epoch_analyzed"]
+            .agg(n="count", median="median", mean="mean", std="std", min="min", max="max")
+            .reset_index()
+        )
+        for col in ["median", "mean", "std", "min", "max"]:
+            summary[col] = summary[col].round(1)
+        summary = summary.sort_values(group_cols).reset_index(drop=True)
+
+        csv_path = out_dir / f"epoch_analyzed_summary_{self.name}.csv"
+        summary.to_csv(csv_path, index=False)
+        print(f"[INFO] Saved {csv_path}")
+        print(summary.to_string(index=False))
+
+    # ------------------------------------------------------------------
+    # LaTeX export methods for june (voc_reaper) plots
+    # All save to out_dir / "latex" /
+    # ------------------------------------------------------------------
+
+    def export_latex_pressure_heatmaps(self, *, out_dir="plots"):
+        """LaTeX version of plot_pressure_heatmaps: one .tex per (metric, p)."""
+        df = self._build_final_metrics_df()
+        if df is None or df.empty:
+            return
+        if not {"reaper_interval", "voc_penalty", "complexity"}.issubset(df.columns):
+            return
+        sub = df.dropna(subset=["reaper_interval", "voc_penalty", "complexity"])
+        if sub.empty:
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        reaper_vals = sorted(sub["reaper_interval"].unique())
+        voc_vals    = sorted(sub["voc_penalty"].unique())
+        complexities = sorted(sub["complexity"].unique())
+
+        brc = None
+        try:
+            ri_b = [i for i, r in enumerate(reaper_vals) if float(r) >= 120]
+            ci_b = [i for i, v in enumerate(voc_vals) if abs(float(v)) < 1e-12]
+            if ri_b and ci_b:
+                brc = (ri_b[0], ci_b[0])
+        except Exception:
+            pass
+
+        row_labels = [self._fmt_reaper_label(r) for r in reaper_vals]
+        col_labels = [self._fmt_voc_label(v) for v in voc_vals]
+
+        metric_specs = []
+        if "final_accuracy" in sub.columns and sub["final_accuracy"].notna().any():
+            metric_specs.append(("final_accuracy", "accuracy", "Blues", "accuracy", "{:.2f}"))
+        if "final_topsim" in sub.columns and sub["final_topsim"].notna().any():
+            metric_specs.append(("final_topsim", "topsim", "viridis", "topsim", "{:.2f}"))
+
+        for metric_col, file_tag, colormap, metric_label, fmt in metric_specs:
+            valid = sub.dropna(subset=[metric_col])
+            if valid.empty:
+                continue
+            vmin = float(np.nanpercentile(valid[metric_col], 5))
+            vmax = float(np.nanpercentile(valid[metric_col], 95))
+            for c in complexities:
+                csub = valid[valid["complexity"] == c]
+                if csub.empty:
+                    continue
+                heat_agg = (csub.groupby(["reaper_interval", "voc_penalty"])[metric_col]
+                            .median().reset_index())
+                pivot = heat_agg.pivot(index="reaper_interval", columns="voc_penalty",
+                                       values=metric_col)
+                mat = pivot.reindex(index=reaper_vals, columns=voc_vals).values
+                props = csub["properties"].dropna().astype(str).unique()
+                p_str = (sorted(props, key=self._properties_sort_key)[0]
+                         if len(props) else str(int(c)))
+                fname = f"pressure_heatmap_{file_tag}_p{p_str}_{self.name}.tex"
+                self._write_latex_heatmap(
+                    latex_dir / fname, mat, row_labels, col_labels,
+                    vmin=vmin, vmax=vmax, colormap=colormap, fmt=fmt,
+                    caption=(f"Median {metric_label} by reset interval "
+                             r"$\times$ vocabulary pressure. "
+                             f"$p = {p_str}$."),
+                    label=f"fig:pressure_heatmap_{file_tag}_p{p_str}",
+                    baseline_rc=brc,
+                )
+                print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_pressure_heatmaps_negation(self, neg_df, *, out_dir="plots"):
+        """LaTeX version of plot_pressure_heatmaps_negation: one .tex per (metric, p)."""
+        df_neg = self._prepare_negation_top_df(neg_df)
+        if df_neg is None or df_neg.empty:
+            return
+        required = {"reaper_interval", "voc_penalty", "complexity"}
+        if not required.issubset(df_neg.columns):
+            return
+        df_neg = df_neg.dropna(subset=list(required)).copy()
+        if df_neg.empty:
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        if "F1_nT" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            t = pd.to_numeric(df_neg.get("l_T", df_neg.get("t")), errors="coerce")
+            non_t = 1.0 - t
+            den = n + non_t
+            df_neg["F1_nT"] = np.where(
+                (den > 0) & n.notna() & t.notna(), 2.0 * n * non_t / den, np.nan)
+        if "F1_nr" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            r_col = pd.to_numeric(df_neg.get("r", df_neg.get("c")), errors="coerce")
+            den = n + r_col
+            df_neg["F1_nr"] = np.where(
+                (den > 0) & n.notna() & r_col.notna(), 2.0 * n * r_col / den, np.nan)
+
+        if "properties" in df_neg.columns and df_neg["properties"].notna().any():
+            df_neg["_p_label"] = df_neg["properties"].astype(str)
+        else:
+            df_neg["_p_label"] = df_neg["complexity"].astype(str)
+
+        p_vals    = sorted(df_neg["_p_label"].dropna().unique(), key=self._properties_sort_key)
+        reaper_vals = sorted(df_neg["reaper_interval"].dropna().unique())
+        voc_vals    = sorted(df_neg["voc_penalty"].dropna().unique())
+
+        f1_all = pd.concat([df_neg["F1_nT"].dropna(), df_neg["F1_nr"].dropna()])
+        vmin = float(np.nanpercentile(f1_all, 5)) if len(f1_all) else 0.0
+        vmax = float(np.nanpercentile(f1_all, 95)) if len(f1_all) else 1.0
+
+        row_labels = [self._fmt_reaper_label(r) for r in reaper_vals]
+        col_labels = [self._fmt_voc_label(v) for v in voc_vals]
+
+        brc = None
+        try:
+            ri_b = [i for i, r in enumerate(reaper_vals) if float(r) >= 120]
+            ci_b = [i for i, v in enumerate(voc_vals) if abs(float(v)) < 1e-12]
+            if ri_b and ci_b:
+                brc = (ri_b[0], ci_b[0])
+        except Exception:
+            pass
+
+        for metric_col, file_tag in [("F1_nT", "F1nT"), ("F1_nr", "F1nr")]:
+            for p in p_vals:
+                psub = df_neg[df_neg["_p_label"] == p].dropna(subset=[metric_col])
+                if psub.empty:
+                    continue
+                heat_agg = (psub.groupby(["reaper_interval", "voc_penalty"])[metric_col]
+                            .median().reset_index())
+                pivot = heat_agg.pivot(index="reaper_interval", columns="voc_penalty",
+                                       values=metric_col)
+                mat = pivot.reindex(index=reaper_vals, columns=voc_vals).values
+                fname = f"pressure_heatmap_{file_tag}_p{p}_{self.name}.tex"
+                self._write_latex_heatmap(
+                    latex_dir / fname, mat, row_labels, col_labels,
+                    vmin=vmin, vmax=vmax, colormap="magma", fmt="{:.2f}",
+                    caption=(f"Median {metric_col} by reset interval "
+                             r"$\times$ vocabulary pressure. "
+                             f"$p = {p}$."),
+                    label=f"fig:pressure_heatmap_{file_tag}_p{p}",
+                    baseline_rc=brc,
+                )
+                print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_negation_interaction(self, neg_df, *, out_dir="plots"):
+        """LaTeX version of plot_negation_interaction_reaper_voc: groupplot."""
+        df_neg = self._prepare_negation_top_df(neg_df)
+        if df_neg is None or df_neg.empty:
+            return
+        required = {"reaper_interval", "voc_penalty", "complexity"}
+        if not required.issubset(df_neg.columns):
+            return
+        df_neg = df_neg.dropna(subset=list(required)).copy()
+        if df_neg.empty:
+            return
+
+        if "F1_nT" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            t = pd.to_numeric(df_neg.get("l_T", df_neg.get("t")), errors="coerce")
+            non_t = 1.0 - t
+            den = n + non_t
+            df_neg["F1_nT"] = np.where(
+                (den > 0) & n.notna() & t.notna(), 2.0 * n * non_t / den, np.nan)
+        if "F1_nr" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            r_col = pd.to_numeric(df_neg.get("r", df_neg.get("c")), errors="coerce")
+            den = n + r_col
+            df_neg["F1_nr"] = np.where(
+                (den > 0) & n.notna() & r_col.notna(), 2.0 * n * r_col / den, np.nan)
+
+        if "properties" in df_neg.columns and df_neg["properties"].notna().any():
+            df_neg["_p_label"] = df_neg["properties"].astype(str)
+        else:
+            df_neg["_p_label"] = df_neg["complexity"].astype(str)
+
+        p_vals   = sorted(df_neg["_p_label"].dropna().unique(), key=self._properties_sort_key)
+        voc_vals = sorted(df_neg["voc_penalty"].dropna().unique())
+
+        metrics = [
+            ("F1_nT", r"$F_{1,nT}$ strong", "colFnT", False),
+            ("F1_nr", r"$F_{1,nr}$ weak",   "colFnr", True),
+        ]
+        metrics = [(col, lbl, col_c, dashed)
+                   for col, lbl, col_c, dashed in metrics
+                   if col in df_neg.columns and df_neg[col].notna().any()]
+        if not metrics:
+            return
+
+        nrows, ncols = len(voc_vals), len(p_vals)
+        panels = []
+
+        for v in voc_vals:
+            v_arr = df_neg["voc_penalty"].to_numpy(dtype=float)
+            vdf = df_neg[np.isclose(v_arr, float(v), atol=1e-12)]
+            for p in p_vals:
+                sub = vdf[vdf["_p_label"] == p]
+                active_reapers = sorted(
+                    [r for r in sub["reaper_interval"].unique() if r < 120]
+                ) if not sub.empty else []
+
+                axis_opts = []
+                if v == voc_vals[0]:
+                    axis_opts.append(f"title={{$p = {p}$}}")
+                if p == p_vals[0]:
+                    axis_opts.append(
+                        "ylabel={{voc = {}\\\\F1}}".format(self._fmt_voc_label(v)))
+                if v == voc_vals[-1]:
+                    axis_opts.append(r"xlabel={reset interval (epochs)}")
+                if active_reapers:
+                    ticks = ",".join(str(int(r)) for r in active_reapers)
+                    axis_opts.append(f"xtick={{{ticks}}}")
+                    axis_opts.append(f"xticklabels={{{ticks}}}")
+
+                series = []
+                for col, lbl, col_c, dashed in metrics:
+                    msub = sub.dropna(subset=[col]) if not sub.empty else sub
+                    active = msub[msub["reaper_interval"] < 120] if not msub.empty else msub
+                    if not active.empty:
+                        stats = (
+                            active.groupby("reaper_interval")[col]
+                            .agg(median="median",
+                                 q25=lambda x: np.nanquantile(x, 0.25),
+                                 q75=lambda x: np.nanquantile(x, 0.75))
+                            .reset_index().sort_values("reaper_interval")
+                        )
+                        upper = list(zip(stats["reaper_interval"].tolist(),
+                                         stats["q75"].tolist()))
+                        lower = list(zip(stats["reaper_interval"].tolist(),
+                                         stats["q25"].tolist()))
+                        med_coords = list(zip(stats["reaper_interval"].tolist(),
+                                              stats["median"].tolist()))
+                        series.append({
+                            "type": "fill_between",
+                            "upper": upper, "lower": lower,
+                            "opts": f"+[fill={col_c},fill opacity=0.12,draw=none,forget plot]",
+                        })
+                        mark_opts = f"color={col_c},thick,mark=*,mark size=1.5pt"
+                        if dashed:
+                            mark_opts += ",dashed"
+                        series.append({
+                            "type": "coords", "coords": med_coords,
+                            "opts": f"+[{mark_opts}]", "legend": lbl,
+                        })
+                    no_reset = (msub[msub["reaper_interval"] >= 120]
+                                if not msub.empty else msub)
+                    if not no_reset.empty and active_reapers:
+                        bval = float(no_reset[col].median())
+                        xmax = max(active_reapers)
+                        series.append({
+                            "type": "coords",
+                            "coords": [(xmax * 1.05, bval), (xmax * 1.20, bval)],
+                            "opts": f"+[color={col_c},dotted,thick,forget plot]",
+                        })
+                panels.append({"axis_opts": axis_opts, "series": series})
+
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        fname = f"negation_interaction_reaper_voc_{self.name}.tex"
+        self._write_latex_groupplot(
+            latex_dir / fname,
+            panels, nrows, ncols,
+            group_style_opts=[
+                r"xlabels at=edge bottom",
+                r"ylabels at=edge left",
+                r"horizontal sep=0.5cm",
+                r"vertical sep=1.3cm",
+            ],
+            outer_opts=[
+                r"width=0.38\textwidth",
+                r"height=0.25\textwidth",
+                r"ymin=-0.02, ymax=1.02",
+                r"grid=both",
+                r"x tick label style={rotate=45,anchor=east,font=\scriptsize}",
+                r"tick label style={font=\scriptsize}",
+                r"title style={font=\small}",
+                r"label style={font=\small}",
+            ],
+            caption=(
+                r"Strong ($F_{1,nT}$, solid) and weak ($F_{1,nr}$, dashed) negation "
+                r"vs.\ reset interval. Shading: IQR. "
+                r"Dotted marks at right edge: no-reset baseline. "
+                r"Rows: voc\_penalty. Columns: $p$."
+            ),
+            label="fig:negation_interaction_reaper_voc",
+            preamble=[
+                r"\definecolor{colFnT}{RGB}{31,119,180}",
+                r"\definecolor{colFnr}{RGB}{255,127,14}",
+            ],
+        )
+        print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_optimal_table(self, neg_df=None, *, out_dir="plots"):
+        """LaTeX booktabs version of compute_optimal_table."""
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        csv_path = out_dir / f"optimal_pressure_config_{self.name}.csv"
+        if csv_path.is_file():
+            tbl = pd.read_csv(csv_path)
+        else:
+            tbl = self.compute_optimal_table(neg_df, out_dir=out_dir)
+        if tbl is None or tbl.empty:
+            print("[INFO] LaTeX optimal table skipped (no data).")
+            return
+
+        col_map = {
+            "p": "$p$", "reaper_step": "reset step", "reaper_interval": "reset step",
+            "voc_penalty": "voc pen.", "accuracy": "accuracy", "topsim": "topsim",
+            "baseline_accuracy": "baseline acc.", "F1_nT": r"$F_{1,nT}$",
+            "F1_nr": r"$F_{1,nr}$",
+        }
+        headers = [col_map.get(c, c) for c in tbl.columns]
+        fname = f"optimal_pressure_config_{self.name}.tex"
+        self._write_latex_table(
+            latex_dir / fname, tbl, col_headers=headers,
+            caption=(
+                r"Optimal pressure configuration per meaning-space size~$p$: "
+                r"the (reset step, voc\_penalty) cell maximising topsim subject "
+                r"to accuracy $\geq 0.9\times$ baseline."
+            ),
+            label="tab:optimal_pressure_config",
+        )
+        print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_intergenerational_stability(self, *, out_dir="plots"):
+        """LaTeX groupplot version of plot_intergenerational_stability (selected + full)."""
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        csv_path = out_dir / f"intergenerational_stability_{self.name}.csv"
+        if csv_path.is_file():
+            df = pd.read_csv(csv_path)
+            for c in ["complexity", "reaper_interval", "gen_from", "agreement"]:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+        else:
+            rows = []
+            for dp in self.datapoints:
+                cfg = dp.get("config", {})
+                langs = dp.get("languages") or []
+                reaper = cfg.get("beth_reaper_step") or cfg.get("reaper_step")
+                complexity = cfg.get("num_predicates")
+                if reaper is None or float(reaper) >= 120 or len(langs) < 2:
+                    continue
+                K = int(float(reaper))
+                sorted_langs = sorted(langs, key=lambda x: int(x.get("epoch_number", 0)))
+                for ld in sorted_langs:
+                    ld["_gen"] = int(ld.get("epoch_number", 0)) // K
+                for idx in range(len(sorted_langs) - 1):
+                    d_curr, d_next = sorted_langs[idx], sorted_langs[idx + 1]
+                    if d_next["_gen"] <= d_curr["_gen"]:
+                        continue
+                    agr = self._message_agreement(d_curr["language"], d_next["language"])
+                    if np.isfinite(agr):
+                        rows.append({
+                            "complexity": complexity,
+                            "properties": str(cfg.get("properties")),
+                            "reaper_interval": reaper,
+                            "gen_from": d_curr["_gen"],
+                            "agreement": agr,
+                        })
+            if not rows:
+                print("[INFO] LaTeX intergenerational stability skipped (no data).")
+                return
+            df = pd.DataFrame(rows)
+            for c in ["complexity", "reaper_interval", "gen_from", "agreement"]:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        df = df.dropna(subset=["complexity", "reaper_interval", "gen_from", "agreement"])
+        if df.empty:
+            return
+        if "boundary_epoch" not in df.columns:
+            df["boundary_epoch"] = (df["gen_from"] + 1) * df["reaper_interval"]
+
+        complexities = sorted(df["complexity"].unique())
+        all_reapers  = sorted(df["reaper_interval"].unique())
+
+        def _props_str(csub, c):
+            props = (csub["properties"].dropna().astype(str).unique()
+                     if "properties" in csub.columns else [])
+            return (sorted(props, key=self._properties_sort_key)[0]
+                    if len(props) else str(int(c)))
+
+        def _smooth_series(rsub):
+            med = (rsub.groupby("boundary_epoch")["agreement"]
+                   .median().reset_index().sort_values("boundary_epoch"))
+            xm = med["boundary_epoch"].to_numpy(dtype=float)
+            ym = med["agreement"].to_numpy(dtype=float)
+            if len(xm) < 3:
+                return list(zip(xm.tolist(), ym.tolist()))
+            xg, yg = self._kernel_smooth(xm, ym, bw=0.30)
+            return [(float(x), float(y)) for x, y in zip(xg, yg)
+                    if np.isfinite(x) and np.isfinite(y)]
+
+        _tab10 = [
+            (31,119,180),(255,127,14),(44,160,44),(214,39,40),(148,103,189),
+            (140,86,75),(227,119,194),(127,127,127),(188,189,34),(23,190,207),
+        ]
+
+        # ---- selected intervals ----
+        selected = [r for r in all_reapers if int(r) in {2, 4, 6, 10, 12, 20, 30}]
+        if not selected:
+            selected = all_reapers[:7]
+
+        preamble_sel = [
+            f"\\definecolor{{colRsel{i}}}{{RGB}}"
+            f"{{{_tab10[i % len(_tab10)][0]},"
+            f"{_tab10[i % len(_tab10)][1]},"
+            f"{_tab10[i % len(_tab10)][2]}}}"
+            for i in range(len(selected))
+        ]
+        panels_sel = []
+        for ci, c in enumerate(complexities):
+            csub = df[df["complexity"] == c]
+            axis_opts = [f"title={{$p = {_props_str(csub, c)}$}}"]
+            if ci == 0:
+                axis_opts.append(r"ylabel={norm.\ Lev.\ similarity}")
+            axis_opts.append(r"xlabel={epoch}")
+            series = []
+            for si, r in enumerate(selected):
+                rsub = csub[csub["reaper_interval"] == r]
+                coords = _smooth_series(rsub)
+                if coords:
+                    series.append({
+                        "type": "coords", "coords": coords,
+                        "opts": f"+[color=colRsel{si},thick]",
+                        "legend": f"reset={int(r)}",
+                    })
+            panels_sel.append({"axis_opts": axis_opts, "series": series})
+
+        fname_sel = f"intergenerational_stability_selected_{self.name}.tex"
+        self._write_latex_groupplot(
+            latex_dir / fname_sel,
+            panels_sel, 1, len(complexities),
+            group_style_opts=[r"horizontal sep=0.6cm"],
+            outer_opts=[
+                r"width=0.35\textwidth", r"height=0.25\textwidth",
+                r"ymin=0, ymax=1", r"grid=both",
+                r"tick label style={font=\scriptsize}",
+                r"label style={font=\small}",
+                r"title style={font=\small}",
+                r"legend style={font=\scriptsize,at={(0.98,0.02)},anchor=south east}",
+            ],
+            caption=(
+                r"Language stability across generation boundaries --- selected reset intervals. "
+                r"Curves: kernel-smoothed median normalised Levenshtein similarity "
+                r"between consecutive generations."
+            ),
+            label="fig:intergenerational_stability_selected",
+            preamble=preamble_sel,
+        )
+        print(f"[INFO] LaTeX: saved {fname_sel}")
+
+        # ---- full (all intervals) ----
+        _viridis5 = [(68,1,84),(59,82,139),(33,145,140),(94,201,98),(253,231,37)]
+        n_r = len(all_reapers)
+
+        def _viridis_rgb(i):
+            t = i / max(n_r - 1, 1)
+            c0, c1 = _viridis5[0], _viridis5[-1]
+            return (int(c0[0] + t*(c1[0]-c0[0])),
+                    int(c0[1] + t*(c1[1]-c0[1])),
+                    int(c0[2] + t*(c1[2]-c0[2])))
+
+        preamble_full = [
+            f"\\definecolor{{colRfull{i}}}{{RGB}}"
+            f"{{{_viridis_rgb(i)[0]},{_viridis_rgb(i)[1]},{_viridis_rgb(i)[2]}}}"
+            for i in range(n_r)
+        ]
+        panels_full = []
+        for ri, r in enumerate(all_reapers):
+            for ci, c in enumerate(complexities):
+                rsub = df[(df["reaper_interval"] == r) & (df["complexity"] == c)]
+                axis_opts = []
+                if ri == 0:
+                    csub_all = df[df["complexity"] == c]
+                    axis_opts.append(f"title={{$p = {_props_str(csub_all, c)}$}}")
+                if ci == 0:
+                    axis_opts.append(f"ylabel={{reset={int(r)}\\\\similarity}}")
+                if ri == n_r - 1:
+                    axis_opts.append(r"xlabel={epoch}")
+                coords = _smooth_series(rsub) if not rsub.empty else []
+                series = [{"type": "coords", "coords": coords,
+                            "opts": f"+[color=colRfull{ri},thick]"}] if coords else []
+                panels_full.append({"axis_opts": axis_opts, "series": series})
+
+        fname_full = f"intergenerational_stability_full_{self.name}.tex"
+        self._write_latex_groupplot(
+            latex_dir / fname_full,
+            panels_full, n_r, len(complexities),
+            group_style_opts=[
+                r"xlabels at=edge bottom", r"ylabels at=edge left",
+                r"horizontal sep=0.5cm", r"vertical sep=0.8cm",
+            ],
+            outer_opts=[
+                r"width=0.30\textwidth", r"height=0.18\textwidth",
+                r"ymin=0, ymax=1", r"grid=both",
+                r"tick label style={font=\tiny}",
+                r"label style={font=\scriptsize}",
+                r"title style={font=\scriptsize}",
+            ],
+            caption=(
+                r"Language stability --- all reset intervals. "
+                r"Each row: one reset interval; each column: meaning-space size~$p$. "
+                r"Curves: kernel-smoothed median similarity."
+            ),
+            label="fig:intergenerational_stability_full",
+            preamble=preamble_full,
+        )
+        print(f"[INFO] LaTeX: saved {fname_full}")
+
+    def export_latex_epoch_analyzed_table(self, source_df, *, out_dir="plots"):
+        """LaTeX booktabs version of export_epoch_analyzed_table."""
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        if source_df is None or source_df.empty or "epoch_analyzed" not in source_df.columns:
+            print("[INFO] LaTeX epoch table skipped (no epoch_analyzed column).")
+            return
+
+        df = source_df.copy()
+        df["run_name"] = df["run_name"].astype(str)
+        meta = self._build_run_meta_df()[["run_name", "reaper_interval", "voc_penalty",
+                                          "properties"]]
+        for col in ["reaper_interval", "voc_penalty", "properties"]:
+            if col not in df.columns:
+                df = df.merge(meta[["run_name", col]], on="run_name", how="left")
+
+        df["epoch_analyzed"] = pd.to_numeric(df["epoch_analyzed"], errors="coerce")
+        group_cols = [c for c in ["properties", "reaper_interval", "voc_penalty"]
+                      if c in df.columns]
+        if not group_cols:
+            return
+
+        summary = (
+            df.dropna(subset=["epoch_analyzed"])
+            .groupby(group_cols)["epoch_analyzed"]
+            .agg(n="count", median="median", mean="mean", std="std",
+                 min="min", max="max")
+            .reset_index()
+        )
+        for col in ["median", "mean", "std", "min", "max"]:
+            summary[col] = summary[col].round(1)
+        summary = summary.sort_values(group_cols).reset_index(drop=True)
+
+        col_map = {
+            "properties": "$p$", "reaper_interval": "reset step",
+            "voc_penalty": "voc pen.", "n": "$n$",
+            "median": "median", "mean": "mean", "std": "std",
+            "min": "min", "max": "max",
+        }
+        fname = f"epoch_analyzed_summary_{self.name}.tex"
+        self._write_latex_table(
+            latex_dir / fname, summary,
+            col_headers=[col_map.get(c, c) for c in summary.columns],
+            caption=(
+                r"Epoch analyzed per (meaning-space size~$p$, reset step, voc\_penalty). "
+                r"Statistics across runs."
+            ),
+            label="tab:epoch_analyzed_summary",
+        )
+        print(f"[INFO] LaTeX: saved {fname}")
 
     def plot_topsim_interaction_n(self, neg_df, *, profile_tag="", out_dir="plots"):
         df = self._prepare_negation_top_df(neg_df)

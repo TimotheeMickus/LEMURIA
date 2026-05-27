@@ -251,11 +251,13 @@ if __name__ == "__main__":
                     if plot_family == "voc_reaper":
                         print(f"[INFO] plots_june output directory: {out_dir_june}")
                         cm_static.plot_pressure_heatmaps(out_dir=out_dir_june)
+                        cm_static.export_latex_pressure_heatmaps(out_dir=out_dir_june)
                         cm_static.plot_topsim_interaction_reaper_voc(out_dir=out_dir_june)
                         # Intergenerational stability needs all language dumps per run, not just the
                         # latest/best one that prepared_datapoints keeps.
                         cm_all_langs = plots.ComplexityMemory(filtered_datapoints, name=static_plot_name)
                         cm_all_langs.plot_intergenerational_stability(out_dir=out_dir_june)
+                        cm_all_langs.export_latex_intergenerational_stability(out_dir=out_dir_june)
                     elif plot_family == "beth_reaper":
                         cm_static.plot_eval_accuracy_over_epochs(group_col="reaper_interval", out_dir=out_dir)
                         cm_static.plot_eval_accuracy_over_epochs_by_reaper_and_complexity(out_dir=out_dir)
@@ -268,6 +270,10 @@ if __name__ == "__main__":
                     if plot_family == "complexity_memory":
                         print(f"[INFO] plots_may output directory: {out_dir_may}")
                         cm_static.plot_may_complexity_suite(out_dir=out_dir_may)
+                        cm_static.plot_may_accuracy_summary(out_dir=out_dir_may)
+                        cm_static.export_may_homonymy(out_dir=out_dir_may)
+                        cm_static.export_may_homonymy_topsim_analysis(out_dir=out_dir_may)
+                        cm_static.export_may_best_epoch_table(out_dir=out_dir_may)
                     else:
                         print(f"[INFO] Skipping message-efficiency plots for family={plot_family}.")
                 elif is_primary_mode and same_runs_as_unfiltered:
@@ -314,10 +320,16 @@ if __name__ == "__main__":
 
                             if plot_family == "voc_reaper":
                                 cm_neg_src.plot_pressure_heatmaps_negation(source_df, out_dir=out_dir_june)
+                                cm_neg_src.export_latex_pressure_heatmaps_negation(source_df, out_dir=out_dir_june)
+                                cm_neg_src.plot_negation_interaction_reaper_voc(source_df, out_dir=out_dir_june)
+                                cm_neg_src.export_latex_negation_interaction(source_df, out_dir=out_dir_june)
                                 cm_neg_src.compute_optimal_table(
                                     source_df,
                                     out_dir=out_dir_june,
                                 )
+                                cm_neg_src.export_latex_optimal_table(source_df, out_dir=out_dir_june)
+                                cm_neg_src.export_epoch_analyzed_table(source_df, out_dir=out_dir_june)
+                                cm_neg_src.export_latex_epoch_analyzed_table(source_df, out_dir=out_dir_june)
                             elif plot_family == "complexity_memory":
                                 cm_neg_src.plot_negation_metrics_over_epochs(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
                                 cm_neg_src.plot_negation_metrics_by_reaper_interval(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
