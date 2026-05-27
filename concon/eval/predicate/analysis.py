@@ -221,9 +221,10 @@ if __name__ == "__main__":
 
             if args.plots:
                 static_plot_name = f"{experiment_tag}"
-                cm_static = plots.ComplexityMemory(prepared_datapoints, name=static_plot_name)
                 neg_plot_name = f"{experiment_tag}_{plot_mode_suffix}_{args.feat_operator}_{args.negation_profile}"
                 plot_family = _experiment_plot_family(experiment_path)
+                _plot_cls = {"complexity_memory": plots.MayPlots, "voc_reaper": plots.JunePlots}.get(plot_family, plots.ExperimentPlots)
+                cm_static = _plot_cls(prepared_datapoints, name=static_plot_name)
                 skip_fast_negation_plots = False
                 if args.negation_profile == "fast":
                     fast_rows_csv = cache_dir / f"negation_top_rows_{experiment_tag}_{args.feat_operator}_fast{mode_suffix}.csv"
@@ -252,10 +253,11 @@ if __name__ == "__main__":
                         print(f"[INFO] plots_june output directory: {out_dir_june}")
                         cm_static.plot_pressure_heatmaps(out_dir=out_dir_june)
                         cm_static.export_latex_pressure_heatmaps(out_dir=out_dir_june)
+                        cm_static.export_latex_pressure_table(out_dir=out_dir_june)
                         cm_static.plot_topsim_interaction_reaper_voc(out_dir=out_dir_june)
                         # Intergenerational stability needs all language dumps per run, not just the
                         # latest/best one that prepared_datapoints keeps.
-                        cm_all_langs = plots.ComplexityMemory(filtered_datapoints, name=static_plot_name)
+                        cm_all_langs = plots.JunePlots(filtered_datapoints, name=static_plot_name)
                         cm_all_langs.plot_intergenerational_stability(out_dir=out_dir_june)
                         cm_all_langs.export_latex_intergenerational_stability(out_dir=out_dir_june)
                     elif plot_family == "beth_reaper":
@@ -311,7 +313,7 @@ if __name__ == "__main__":
                         print(f"[INFO] No negation dataframe available for negation-specific plots.")
                     else:
                         for source_tag, source_df in neg_plot_sources:
-                            cm_neg_src = plots.ComplexityMemory(prepared_datapoints, name=f"{neg_plot_name}_{source_tag}")
+                            cm_neg_src = _plot_cls(prepared_datapoints, name=f"{neg_plot_name}_{source_tag}")
 
                             if plot_family != "voc_pen":
                                 cm_neg_src.plot_negation_metrics_by_complexity(source_df, out_dir=out_dir)
@@ -330,6 +332,7 @@ if __name__ == "__main__":
                                 cm_neg_src.export_latex_optimal_table(source_df, out_dir=out_dir_june)
                                 cm_neg_src.export_epoch_analyzed_table(source_df, out_dir=out_dir_june)
                                 cm_neg_src.export_latex_epoch_analyzed_table(source_df, out_dir=out_dir_june)
+                                cm_neg_src.plot_topsim_vs_negation_june(source_df, profile_tag=args.feat_operator, out_dir=out_dir_june)
                             elif plot_family == "complexity_memory":
                                 cm_neg_src.plot_negation_metrics_over_epochs(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
                                 cm_neg_src.plot_negation_metrics_by_reaper_interval(source_df, profile_tag=args.feat_operator, out_dir=out_dir)

@@ -12,17 +12,13 @@ import negation
 
 # ------ complexity - memory interactions ------
 
-class ComplexityMemory:
-    # Runs differ by hidden size (48, 96, 192).
-    # All have depth 1 - 2.
-    # There are varying "n" property kinds with negation and no_negation.
-    # There are varying "n-n" property kinds with conjunction.
-    # Each run is repeated 5 times.
-    # All other hyperparameters are equal.
+class ExperimentPlots:
+    """Holds evaluation datapoints and provides shared plotting infrastructure.
+    Subclassed by MayPlots and JunePlots for experiment-specific outputs.
+    """
     def __init__(self, datapoints, name=None):
         self.datapoints = datapoints
         self.name = name or "unnamed"
-        self.hidden_colors = self._hidden_palette()
 
     def _hidden_palette(self):
         hidden_sizes = sorted({
@@ -278,44 +274,6 @@ class ComplexityMemory:
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
 
-    def plot_epochs_to_max_by_hidden(self, plot_df, out_dir="plots"):
-        self._plot_epochs_generic(
-            plot_df,
-            hue="hidden_size",
-            filename=f"epoch_to_max_acc_by_hidden_{self.name}.png",
-            label_mode="full",
-            out_dir=out_dir,
-        )
-
-    def plot_epochs_to_max_by_negation(self, plot_df, out_dir="plots"):
-        self._plot_epochs_generic(
-            plot_df,
-            hue="negation",
-            filename=f"epoch_to_max_acc_by_negation_{self.name}.png",
-            label_mode="full",
-            out_dir=out_dir,
-        )
-
-    def plot_epochs_to_max_by_conjunction(self, plot_df, out_dir="plots"):
-        self._plot_epochs_generic(
-            plot_df,
-            hue="conjunction",
-            filename=f"epoch_to_max_acc_by_conjunction_{self.name}.png",
-            label_mode="full",
-            out_dir=out_dir,
-        )
-
-    def plot_epochs_to_max_by_negation_and_conjunction(self, plot_df, out_dir="plots"):
-        plot_df = plot_df.copy()
-        plot_df["neg_conj"] = plot_df["negation"] + "/" + plot_df["conjunction"]
-        self._plot_epochs_generic(
-            plot_df,
-            hue="neg_conj",
-            filename=f"epoch_to_max_acc_by_neg_conj_{self.name}.png",
-            label_mode="full",
-            out_dir=out_dir,
-        )
-
     def plot_epochs_to_max_by_reaper_interval(self, plot_df, out_dir="plots"):
         if "reaper_interval" not in plot_df.columns:
             print("[INFO] Convergence-by-reaper plot skipped (missing reaper_interval).")
@@ -394,18 +352,6 @@ class ComplexityMemory:
                 dpi=150,
             )
             plt.close(fig)
-
-    def plot_time_to_max_accuracy(self, out_dir="plots"):
-        plot_df = self._build_epochs_df()
-        if plot_df is None:
-            return
-        self.plot_epochs_to_max(plot_df, out_dir=out_dir)
-        self.plot_epochs_to_max_by_hidden(plot_df, out_dir=out_dir)
-        self.plot_epochs_to_max_by_negation(plot_df, out_dir=out_dir)
-        self.plot_epochs_to_max_by_conjunction(plot_df, out_dir=out_dir)
-        self.plot_epochs_to_max_by_negation_and_conjunction(plot_df, out_dir=out_dir)
-        summary = plot_df.groupby('complexity')[['epochs_to_max_acc']].agg(['mean', 'std', 'count'])
-        print(summary)
 
     def _build_eval_accuracy_df(self):
         rows = []
@@ -566,187 +512,6 @@ class ComplexityMemory:
             fig.tight_layout()
             fig.savefig(out_dir / f"eval_accuracy_over_epochs_by_reaper_interval_props_{props}_{self.name}.png", dpi=150)
             plt.close(fig)
-
-    def plot_negation_scores(self, neg_df=None, *, mode="greedy", out_dir="plots", label_mode="complexity"):
-        if not hasattr(negation, "normalize_negation_df"):
-            print("[WARN] plot_negation_scores uses legacy schema and is disabled for current negation outputs.")
-            return
-        if neg_df is None:
-            out_dir_path = pathlib.Path(__file__).resolve().parent / "outputs"
-            csv_path = out_dir_path / f"negation_analysis_{self.name}.csv"
-            if not csv_path.is_file():
-                print(f"[WARN] Negation analysis not found: {csv_path}")
-                return
-            neg_df = pd.read_csv(csv_path)
-
-        neg_df = negation.normalize_negation_df(neg_df, mode)
-        filename = f"negation_scores_{mode}_{self.name}.png"
-        self._plot_negation_scores_generic(
-            neg_df,
-            mode=mode,
-            filename=filename,
-            label_mode=label_mode,
-            out_dir=out_dir,
-        )
-
-    def summarize_negation_by_complexity(self, neg_df=None, *, mode="greedy", threshold=0.9, out_dir="outputs"):
-        if not hasattr(negation, "normalize_negation_df"):
-            print("[WARN] summarize_negation_by_complexity uses legacy schema and is disabled for current negation outputs.")
-            return None
-        if neg_df is None:
-            out_dir_path = pathlib.Path(__file__).resolve().parent / "outputs"
-            csv_path = out_dir_path / f"negation_analysis_{self.name}.csv"
-            if not csv_path.is_file():
-                print(f"[WARN] Negation analysis not found: {csv_path}")
-                return None
-            neg_df = pd.read_csv(csv_path)
-
-        neg_df = negation.normalize_negation_df(neg_df, mode)
-        prefix = f"{mode}_"
-        score_cols = [f"{prefix}score_mi", f"{prefix}score_xor", f"{prefix}score_purity"]
-        required = ["complexity", "properties"] + score_cols
-        missing = [c for c in required if c not in neg_df.columns]
-        if missing:
-            print(f"[WARN] Negation summary missing columns: {missing}")
-            return None
-
-        df = neg_df[["complexity", "properties"] + score_cols].copy()
-        df = df.rename(columns={
-            f"{prefix}score_mi": "score_mi",
-            f"{prefix}score_xor": "score_xor",
-            f"{prefix}score_purity": "score_purity",
-        })
-
-        scores = df[["score_mi", "score_xor", "score_purity"]].to_numpy(dtype=float)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            hmean = np.where(
-                np.all(scores > 0, axis=1),
-                3.0 / (1.0 / scores).sum(axis=1),
-                0.0,
-            )
-        df["score_hmean"] = hmean
-
-        df["meets_mi"] = (df["score_mi"] >= threshold).astype(int)
-        df["meets_xor"] = (df["score_xor"] >= threshold).astype(int)
-        df["meets_purity"] = (df["score_purity"] >= threshold).astype(int)
-        df["meets_all"] = df["meets_mi"] & df["meets_xor"] & df["meets_purity"]
-
-        summary = df.groupby("properties").agg(
-            n_runs=("score_mi", "size"),
-            avg_mi=("score_mi", "mean"),
-            avg_exclusivity=("score_xor", "mean"),
-            avg_purity=("score_purity", "mean"),
-            avg_hmean=("score_hmean", "mean"),
-            frac_mi_ge_thr=("meets_mi", "mean"),
-            frac_excl_ge_thr=("meets_xor", "mean"),
-            frac_purity_ge_thr=("meets_purity", "mean"),
-            frac_all_ge_thr=("meets_all", "mean"),
-        ).reset_index()
-
-        out_dir_path = pathlib.Path(__file__).resolve().parent / out_dir
-        out_dir_path.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir_path / f"negation_summary_{mode}_{self.name}.csv"
-        summary.to_csv(out_path, index=False)
-        print(f"Saved negation summary to: {out_path}")
-        return summary
-
-    def plot_message_compression(self, *, group_by=("negation",), out_dir="plots"):
-        """
-        Plot normalized message length over epochs.
-        Normalization: msg_length / log_A(M), where A=2N+1 and M=N (no neg) or 2N (with neg).
-        """
-        groups = {}
-        epochs = None
-
-        for i, dp in enumerate(self.datapoints):
-            eval_df = dp.get("evaluation")
-            if eval_df is None or "eval/msg_length" not in eval_df.columns:
-                continue
-            if epochs is None:
-                epochs = eval_df["epoch"].to_numpy()
-
-            cfg = dp.get("config", {})
-            N = int(cfg.get("num_predicates"))
-            has_neg = not cfg.get("no_negation", False)
-            A = int(cfg.get("base_alphabet_size"))
-            theoretical_min = math.log(N, A) if N > 1 else 1.0
-            normed = eval_df["eval/msg_length"].to_numpy(dtype=float) / theoretical_min
-
-            key = tuple(cfg.get(k) if k not in ("negation", "conjunction") else None for k in group_by)
-            if "negation" in group_by:
-                key = tuple(("+neg" if has_neg else "-neg") if k == "negation" else v for k, v in zip(group_by, key))
-            if "conjunction" in group_by:
-                has_conj = not cfg.get("no_conjunction", False)
-                key = tuple(("+conj" if has_conj else "-conj") if k == "conjunction" else v for k, v in zip(group_by, key))
-
-            groups.setdefault(key, []).append(normed)
-
-        if not groups or epochs is None:
-            print(f"[WARN] No message length data found for {self.name}.")
-            return
-
-        def _sort_key(key):
-            norm = []
-            for v in key:
-                if v is None:
-                    norm.append((1, ""))
-                else:
-                    try:
-                        norm.append((0, int(v)))
-                    except (TypeError, ValueError):
-                        if isinstance(v, str):
-                            norm.append((0, self._properties_sort_key(v)))
-                        else:
-                            norm.append((0, str(v)))
-            return tuple(norm)
-
-        ordered_keys = sorted(groups.keys(), key=_sort_key)
-        if tuple(group_by) == ("hidden_size",):
-            palette = sns.color_palette("viridis", n_colors=max(1, len(ordered_keys)))
-            color_map = {k: self.hidden_colors.get(k[0], palette[i]) for i, k in enumerate(ordered_keys)}
-        elif tuple(group_by) == ("negation",):
-            color_map = {("+neg",): "#1f77b4", ("-neg",): "#e07a2d"}
-            fallback_palette = sns.color_palette("viridis", n_colors=max(1, len(ordered_keys)))
-            for i, k in enumerate(ordered_keys):
-                if k not in color_map:
-                    color_map[k] = fallback_palette[i]
-        else:
-            palette = sns.color_palette("viridis", n_colors=max(1, len(ordered_keys)))
-            color_map = {k: palette[i] for i, k in enumerate(ordered_keys)}
-
-        fig = plt.figure(figsize=(10, 6))
-        for key in ordered_keys:
-            curves = groups[key]
-            curves = np.array(curves)
-            mean_y = curves.mean(axis=0)
-            median_y = np.median(curves, axis=0)
-            min_y = curves.min(axis=0)
-            max_y = curves.max(axis=0)
-
-            label = ", ".join(f"{k}={v}" for k, v in zip(group_by, key))
-            color = color_map.get(key)
-            plt.plot(epochs, mean_y, label=f"{label} (mean)", alpha=0.9, linewidth=2, color=color)
-            plt.plot(epochs, median_y, color=color, linestyle=":", alpha=0.7, label=f"{label} (median)")
-            plt.fill_between(epochs, min_y, max_y, color=color, alpha=0.15)
-
-            z = np.polyfit(epochs, mean_y, 1)
-            trend = np.poly1d(z)
-            plt.plot(epochs, trend(epochs), linestyle="--", color=color, alpha=0.5)
-
-        plt.axhline(y=1.0, color="red", linestyle="-", alpha=0.3, label="perfect compression (1.0)")
-        plt.xlabel("epochs")
-        plt.ylabel("inverse compression ratio (actual / theoretical minimum)")
-        plt.title("normalized message efficiency over time", fontweight="bold")
-        plt.grid(True, alpha=0.3)
-        plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        groupby_name = "_".join(group_by)
-        out_path = out_dir / f"message_compression_by_{groupby_name}_{self.name}.png"
-        fig.tight_layout()
-        fig.savefig(out_path, dpi=150)
-        plt.close(fig)
 
     def _extract_run_id(self, run_name):
         m = re.search(r"__run=(\d+)", str(run_name))
@@ -1063,7 +828,15 @@ class ComplexityMemory:
         preamble     : extra lines inserted between \\centering and \\begin{tikzpicture}.
         """
         n_rows, n_cols = value_matrix.shape
-        midpoint = (vmin + vmax) / 2.0
+        _cmap_fn = plt.get_cmap(colormap)
+        _cmap_range = max(vmax - vmin, 1e-12)
+
+        def _text_color(v):
+            norm_v = float(np.clip((v - vmin) / _cmap_range, 0.0, 1.0))
+            r, g, b, _ = _cmap_fn(norm_v)
+            luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            return "white" if luminance < 0.45 else "black"
+
         pw = round(max(0.09 * n_cols, 0.28), 2)
         ph = round(max(0.07 * n_rows, 0.18), 2)
 
@@ -1106,7 +879,15 @@ class ComplexityMemory:
             row_parts = []
             for ci in range(n_cols):
                 v = float(value_matrix[ri, ci])
-                cell_val = vmin if not np.isfinite(v) else v
+                if not np.isfinite(v):
+                    cell_val = vmin
+                else:
+                    # Round to the same precision as the annotation label so that cells
+                    # displaying the same text always map to identical colormap shades.
+                    try:
+                        cell_val = float(fmt.format(v))
+                    except Exception:
+                        cell_val = v
                 row_parts.append(f"({ci + 1},{ri + 1}) [{cell_val:.4g}]")
             lines.append("    " + " ".join(row_parts))
         lines += ["};", ""]
@@ -1115,7 +896,7 @@ class ComplexityMemory:
                 v = float(value_matrix[ri, ci])
                 if not np.isfinite(v):
                     continue
-                txt_color = "white" if v < midpoint else "black"
+                txt_color = _text_color(v)
                 lines.append(
                     f"\\node[font=\\scriptsize,text={txt_color}]"
                     f" at (axis cs:{ci + 1},{ri + 1}) {{{_fmtv(v)}}};"
@@ -1221,6 +1002,906 @@ class ComplexityMemory:
         with open(path, "w") as fh:
             fh.write("\n".join(lines))
 
+
+    def _prepare_negation_top_df(self, neg_df):
+        if neg_df is None or len(neg_df) == 0:
+            return None
+        df = neg_df.copy()
+        # Backward/forward compatibility for metric naming:
+        # old: l_X, l_T, r ; new: h, t, c
+        if "h" in df.columns and "l_X" not in df.columns:
+            df["l_X"] = df["h"]
+        if "t" in df.columns and "l_T" not in df.columns:
+            df["l_T"] = df["t"]
+        if "c" in df.columns and "r" not in df.columns:
+            df["r"] = df["c"]
+
+        req = {"run_name", "n", "l_X", "l_T", "r", "atoms", "support"}
+        if not req.issubset(set(df.columns)):
+            print(f"[WARN] Negation dataframe missing columns: {sorted(req - set(df.columns))}")
+            return None
+
+        df["run_name"] = df["run_name"].astype(str)
+        meta = self._build_run_meta_df()[["run_name", "complexity", "hidden_size", "no_negation", "no_conjunction", "properties", "reaper_interval", "voc_penalty"]]
+        needed_meta = [c for c in ["complexity", "hidden_size", "no_negation", "no_conjunction", "reaper_interval", "voc_penalty"] if c not in df.columns]
+        if needed_meta:
+            df = df.merge(meta[["run_name"] + needed_meta], on="run_name", how="left")
+        if "properties" not in df.columns:
+            df = df.merge(meta[["run_name", "properties"]], on="run_name", how="left")
+        if "no_negation" in df.columns:
+            df = df[df["no_negation"] == False]
+        for c in ["complexity", "hidden_size", "reaper_interval", "voc_penalty", "n", "l_X", "l_T", "r", "atoms", "support"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        if "properties" in df.columns:
+            df["properties"] = df["properties"].astype(str)
+        df["leak_unary_x"] = np.where(df["atoms"] <= 1, df["l_X"], np.nan)
+        df["leak_x"] = df["l_X"]
+        df["leak_composite_t"] = np.where(df["atoms"] > 1, df["l_T"], np.nan)
+        return df.dropna(subset=["complexity", "n"])
+
+    def plot_negation_metrics_by_voc_penalty(self, neg_df, *, out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "voc_penalty" not in df.columns:
+            print("[INFO] voc_penalty plot skipped (missing voc_penalty metadata).")
+            return
+        df = df[df["voc_penalty"].notna()]
+        if df.empty:
+            print("[INFO] voc_penalty plot skipped (no valid voc_penalty values).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        metric_defs = [
+            ("n", "n", "#1f77b4"),
+            ("l_X", "l_X", "#ff7f0e"),
+            ("leak_composite_t", "l_T (composite)", "#2ca02c"),
+            ("r", "r", "#d62728"),
+        ]
+
+        def _format_penalty_tick(x):
+            if not np.isfinite(x):
+                return ""
+            if abs(float(x)) < 1e-15:
+                return "0"
+            s = f"{float(x):.12f}".rstrip("0").rstrip(".")
+            return s if s else "0"
+
+        fig = plt.figure(figsize=(10, 6))
+        plotted = 0
+        for col, label, color in metric_defs:
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
+            stats = sub.groupby("voc_penalty")[col].agg(mean="mean", median="median").reset_index().sort_values("voc_penalty")
+            plt.plot(stats["voc_penalty"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+            plt.plot(stats["voc_penalty"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+            plotted += 1
+        if plotted == 0:
+            plt.close(fig)
+            return
+
+        xticks = sorted(pd.to_numeric(df["voc_penalty"], errors="coerce").dropna().unique())
+        pos_ticks = [x for x in xticks if x > 0]
+        if len(pos_ticks) > 0:
+            # Log-like spacing for positive penalties; keeps 0 visible if present.
+            if any(x <= 0 for x in xticks):
+                linthresh = min(pos_ticks) / 2.0
+                plt.xscale("symlog", linthresh=linthresh, base=10)
+            else:
+                plt.xscale("log", base=10)
+        if xticks:
+            if len(xticks) > 10:
+                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
+                shown_ticks = [xticks[i] for i in idx]
+            else:
+                shown_ticks = xticks
+            labels = [_format_penalty_tick(x) for x in shown_ticks]
+            rot = 0 if len(xticks) <= 8 else 45
+            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
+        plt.title("negation by voc_penalty")
+        plt.xlabel("voc_penalty")
+        plt.ylabel("score")
+        plt.grid(True, alpha=0.3)
+        plt.legend(ncol=2)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"negation_by_voc_penalty_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+    def plot_f_scores_by_voc_penalty(self, neg_df, *, out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "voc_penalty" not in df.columns:
+            print("[INFO] voc_penalty F-score plot skipped (missing voc_penalty metadata).")
+            return
+        df = df[df["voc_penalty"].notna()]
+        if df.empty:
+            print("[INFO] voc_penalty F-score plot skipped (no valid voc_penalty values).")
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        metric_defs = [
+            ("F1_nr", "F1_nr", "#9467bd"),
+            ("F1_nT", "F1_nT", "#8c564b"),
+        ]
+
+        def _format_penalty_tick(x):
+            if not np.isfinite(x):
+                return ""
+            if abs(float(x)) < 1e-15:
+                return "0"
+            s = f"{float(x):.12f}".rstrip("0").rstrip(".")
+            return s if s else "0"
+
+        fig = plt.figure(figsize=(10, 6))
+        plotted = 0
+        for col, label, color in metric_defs:
+            if col not in df.columns:
+                continue
+            sub = df[df[col].notna()]
+            if sub.empty:
+                continue
+            stats = sub.groupby("voc_penalty")[col].agg(mean="mean", median="median").reset_index().sort_values("voc_penalty")
+            plt.plot(stats["voc_penalty"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+            plt.plot(stats["voc_penalty"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+            plotted += 1
+        if plotted == 0:
+            plt.close(fig)
+            return
+
+        xticks = sorted(pd.to_numeric(df["voc_penalty"], errors="coerce").dropna().unique())
+        pos_ticks = [x for x in xticks if x > 0]
+        if len(pos_ticks) > 0:
+            if any(x <= 0 for x in xticks):
+                linthresh = min(pos_ticks) / 2.0
+                plt.xscale("symlog", linthresh=linthresh, base=10)
+            else:
+                plt.xscale("log", base=10)
+        if xticks:
+            if len(xticks) > 10:
+                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
+                shown_ticks = [xticks[i] for i in idx]
+            else:
+                shown_ticks = xticks
+            labels = [_format_penalty_tick(x) for x in shown_ticks]
+            rot = 0 if len(xticks) <= 8 else 45
+            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
+        plt.title("negation f-scores by voc_penalty")
+        plt.xlabel("voc_penalty")
+        plt.ylabel("score")
+        plt.grid(True, alpha=0.3)
+        plt.legend(ncol=2)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"negation_f_scores_by_voc_penalty_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+    def plot_negation_metrics_by_reaper_interval(self, neg_df, *, profile_tag="", out_dir="plots", metrics=None):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "reaper_interval" not in df.columns:
+            return
+
+        df = df.copy()
+        df = df[df["reaper_interval"].notna()]
+        df = df[df["reaper_interval"] > 0]
+        if df.empty:
+            print("[INFO] Reaper-interval plots skipped (no valid reaper interval in config).")
+            return
+
+        # F1 between negation score and non-leak composite score.
+        non_leak_t = 1.0 - df["leak_composite_t"]
+        denom = df["n"] + non_leak_t
+        df["f1_nT"] = np.where((denom > 0) & np.isfinite(non_leak_t), 2.0 * df["n"] * non_leak_t / denom, np.nan)
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = str(profile_tag) if profile_tag else "default"
+
+        complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+        if not complexities:
+            return
+        palette = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+        c_map = {c: palette[i] for i, c in enumerate(complexities)}
+        c_label = {}
+        for c in complexities:
+            props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+            props = sorted(props, key=self._properties_sort_key)
+            c_label[c] = props[0] if len(props) else str(int(c))
+
+        if metrics is None:
+            metrics = ["f1_nT", "n", "l_X", "leak_composite_t", "r"]
+
+        metric_spec = {
+            "f1_nT": ("F1_nT", "f1_nt"),
+            "n": ("n", "n"),
+            "l_X": ("l_X", "l_x"),
+            "leak_composite_t": ("l_T (composite)", "l_t_composite"),
+            "r": ("r", "r"),
+        }
+
+        def _clean_interval_ticks(values):
+            ticks = sorted(pd.to_numeric(values, errors="coerce").dropna().unique())
+            if len(ticks) <= 10:
+                return ticks
+            # Keep ticks legible when many intervals are present.
+            idx = np.unique(np.linspace(0, len(ticks) - 1, num=10).round().astype(int))
+            return [ticks[i] for i in idx]
+
+        def _plot_interval_metric(metric_col, metric_label, file_suffix):
+            sub = df[df[metric_col].notna()]
+            if sub.empty:
+                return
+            interval_ticks = _clean_interval_ticks(sub["reaper_interval"])
+            fig = plt.figure(figsize=(10, 6))
+            for c in complexities:
+                g = sub[sub["complexity"] == c]
+                if g.empty:
+                    continue
+                stats = (
+                    g.groupby("reaper_interval")[metric_col]
+                    .agg(mean="mean")
+                    .reset_index()
+                    .sort_values("reaper_interval")
+                )
+                col = c_map[c]
+                plt.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=col, label=f"{c_label[c]} mean")
+
+            plt.xscale("log")
+            if interval_ticks:
+                labels = [str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks]
+                rot = 0 if len(interval_ticks) <= 8 else 45
+                plt.xticks(interval_ticks, labels, rotation=rot, ha="right" if rot else "center")
+            plt.xlabel("reaper interval")
+            plt.ylabel(metric_label)
+            plt.title(f"{metric_label} by reaper interval ({tag})")
+            plt.grid(True, alpha=0.3)
+            plt.legend(ncol=2, title="properties")
+            fig.tight_layout()
+            fig.savefig(out_dir / f"negation_{file_suffix}_by_reaper_interval_{tag}_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+        for metric in metrics:
+            spec = metric_spec.get(metric)
+            if spec is None:
+                continue
+            label, suffix = spec
+            _plot_interval_metric(metric, label, suffix)
+
+    def plot_reaper_step_vs_f_scores(self, neg_df, *, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+        if "reaper_interval" not in df.columns:
+            return
+
+        df = df.copy()
+        df = df[df["reaper_interval"].notna()]
+        df = df[df["reaper_interval"] > 0]
+        if df.empty:
+            return
+
+        if "F1_nT" not in df.columns:
+            n = pd.to_numeric(df.get("n"), errors="coerce")
+            l_t = pd.to_numeric(df.get("l_T"), errors="coerce")
+            den = n + l_t
+            df["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
+        if "F1_nr" not in df.columns:
+            n = pd.to_numeric(df.get("n"), errors="coerce")
+            r = pd.to_numeric(df.get("r"), errors="coerce")
+            den = n + r
+            df["F1_nr"] = np.where((den > 0) & n.notna() & r.notna(), 2.0 * n * r / den, np.nan)
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = str(profile_tag) if profile_tag else "default"
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
+        x_raw = pd.to_numeric(df["reaper_interval"], errors="coerce").to_numpy(dtype=float)
+        x = np.log2(np.maximum(x_raw, 1.0))
+        z = np.log2(np.maximum(pd.to_numeric(df["complexity"], errors="coerce").to_numpy(dtype=float), 1.0))
+        metric_defs = [("F1_nT", "F1_nT"), ("F1_nr", "F1_nr")]
+
+        for ax, (col, label) in zip(axes, metric_defs):
+            y = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+            mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(x_raw)
+            if mask.sum() < 2:
+                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(label)
+                continue
+
+            sc = ax.scatter(x_raw[mask], y[mask], c=z[mask], cmap="viridis", alpha=0.85, edgecolors="none")
+            ax.set_xscale("log", base=2)
+
+            if np.ptp(x[mask]) > 1e-12:
+                a, b = np.polyfit(x[mask], y[mask], deg=1)
+                xg_raw = np.logspace(np.log2(x_raw[mask].min()), np.log2(x_raw[mask].max()), 120, base=2.0)
+                xg = np.log2(xg_raw)
+                ax.plot(xg_raw, a * xg + b, color="#111111", linewidth=2.0)
+
+            r_val, p_val = self._pearson_r_p(x[mask], y[mask])
+            r_txt = f"r={r_val:.3f}" if np.isfinite(r_val) else "r=nan"
+            ax.set_title(f"{label} vs reaper_step ({r_txt}, {self._format_p_value(p_val)})")
+            ax.set_xlabel("reaper_step")
+            ax.set_ylabel(label)
+            ax.grid(True, alpha=0.3)
+            cbar = fig.colorbar(sc, ax=ax)
+            cbar.set_label("log2(complexity)")
+
+        fig.suptitle(f"reaper step correlation with F-scores ({tag})")
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.savefig(out_dir / f"reaper_step_vs_f_scores_{tag}_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+    def _complexity_ticks(self, df):
+        xticks = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+        labels = []
+        for c in xticks:
+            if "properties" not in df.columns:
+                labels.append(str(int(c)))
+                continue
+            props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+            props = sorted(props, key=self._properties_sort_key)
+            if not props:
+                labels.append(str(int(c)))
+            else:
+                labels.append(f"{int(c)} ({'/'.join(props)})")
+        return xticks, labels
+
+    def _leak_metric_specs(self):
+        return [
+            ("leak_unary_x", "l_X (unary)", "leak_unary_x", "#2ca02c"),
+            ("leak_x", "l_X (all)", "leak_x", "#ff7f0e"),
+            ("leak_composite_t", "l_T (composite)", "leak_composite_t", "#1f77b4"),
+        ]
+
+    def _pearson_r_p(self, x, y):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        mask = np.isfinite(x) & np.isfinite(y)
+        if mask.sum() < 2:
+            return np.nan, np.nan
+        x_m = x[mask]
+        y_m = y[mask]
+        if np.ptp(x_m) <= 1e-12 or np.ptp(y_m) <= 1e-12:
+            return np.nan, np.nan
+        r, p = pearsonr(x_m, y_m)
+        return float(r), float(p)
+
+    def _spearman_r_p(self, x, y):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        mask = np.isfinite(x) & np.isfinite(y)
+        if mask.sum() < 3:
+            return np.nan, np.nan
+        r, p = spearmanr(x[mask], y[mask])
+        return float(r), float(p)
+
+    def _format_p_value(self, p):
+        if not np.isfinite(p):
+            return "p=nan"
+        if p < 1e-3:
+            return f"p={p:.1e}"
+        return f"p={p:.3f}"
+
+    def _negation_timeline_df(self, neg_df):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return None
+        if "epoch_analyzed" not in df.columns:
+            print("[WARN] Negation dataframe has no epoch_analyzed column; timeline plots skipped.")
+            return None
+
+        df = df.copy()
+        df["epoch_analyzed"] = pd.to_numeric(df["epoch_analyzed"], errors="coerce")
+        df = df.dropna(subset=["epoch_analyzed"])
+        if df.empty:
+            return None
+
+        order_cols = ["run_name", "epoch_analyzed", "n", "r", "l_T", "l_X"]
+        order_asc = [True, True, False, False, True, True]
+        ranked = df.sort_values(order_cols, ascending=order_asc, na_position="last")
+        key = ["run_name", "epoch_analyzed"]
+
+        best = ranked.groupby(key, as_index=False).first()
+        comp = ranked[ranked["atoms"] > 1]
+        if comp.empty:
+            best["l_T_composite"] = np.nan
+        else:
+            comp_best = comp.groupby(key, as_index=False).first()[key + ["l_T"]]
+            comp_best = comp_best.rename(columns={"l_T": "l_T_composite"})
+            best = best.merge(comp_best, on=key, how="left")
+
+        return best
+
+    def _plot_timeline_metric_set(self, timeline_df, metrics, title, filename, out_dir):
+        if timeline_df is None or timeline_df.empty:
+            return
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        complexities = sorted(pd.to_numeric(timeline_df["complexity"], errors="coerce").dropna().unique())
+        if not complexities:
+            return
+        prop_label = {}
+        for c in complexities:
+            props = (
+                timeline_df.loc[timeline_df["complexity"] == c, "properties"]
+                .dropna()
+                .astype(str)
+                .unique()
+            )
+            props = sorted(props, key=self._properties_sort_key)
+            if len(props) == 0:
+                prop_label[c] = str(int(c))
+            elif len(props) == 1:
+                prop_label[c] = props[0]
+            else:
+                prop_label[c] = "/".join(props)
+        palette = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+        c_map = {c: palette[i] for i, c in enumerate(complexities)}
+
+        fig, axes = plt.subplots(len(metrics), 1, figsize=(10, 4 * len(metrics)), sharex=True)
+        if len(metrics) == 1:
+            axes = [axes]
+
+        for ax, (col, label) in zip(axes, metrics):
+            sub_all = timeline_df[timeline_df[col].notna()]
+            for c in complexities:
+                sub = sub_all[sub_all["complexity"] == c]
+                if sub.empty:
+                    continue
+                stats = (
+                    sub.groupby("epoch_analyzed")[col]
+                    .agg(
+                        median="median",
+                        q25=lambda x: np.nanquantile(x, 0.25),
+                        q75=lambda x: np.nanquantile(x, 0.75),
+                    )
+                    .reset_index()
+                    .sort_values("epoch_analyzed")
+                )
+                colr = c_map[c]
+                ax.fill_between(stats["epoch_analyzed"], stats["q25"], stats["q75"], color=colr, alpha=0.15)
+                ax.plot(stats["epoch_analyzed"], stats["median"], color=colr, linewidth=2.0, label=prop_label[c])
+            ax.set_title(label)
+            ax.set_ylabel("score")
+            ax.grid(True, alpha=0.3)
+
+        axes[-1].set_xlabel("epoch")
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.suptitle(title, y=0.995)
+        if handles:
+            fig.legend(
+                handles,
+                labels,
+                loc="upper center",
+                bbox_to_anchor=(0.5, 0.955),
+                ncol=min(6, len(labels)),
+                frameon=False,
+                title="properties",
+            )
+            fig.tight_layout(rect=[0, 0, 1, 0.90])
+        else:
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(out_dir / filename, dpi=150)
+        plt.close(fig)
+
+    def plot_negation_metrics_over_epochs(self, neg_df, *, profile_tag="", out_dir="plots"):
+        timeline_df = self._negation_timeline_df(neg_df)
+        if timeline_df is None or timeline_df.empty:
+            return
+        if timeline_df["epoch_analyzed"].nunique() < 2:
+            print("[INFO] Negation timeline plots skipped (only one epoch available).")
+            return
+
+        tag = str(profile_tag) if profile_tag else "default"
+        self._plot_timeline_metric_set(
+            timeline_df,
+            metrics=[("n", "n"), ("l_X", "l_X"), ("l_T_composite", "l_T (composite)")],
+            title=f"negation metrics over epochs ({tag})",
+            filename=f"negation_timeline_n_lx_ltcomp_{tag}_{self.name}.png",
+            out_dir=out_dir,
+        )
+        self._plot_timeline_metric_set(
+            timeline_df,
+            metrics=[("n", "n"), ("r", "r")],
+            title=f"negation and remainder over epochs ({tag})",
+            filename=f"negation_timeline_n_r_{tag}_{self.name}.png",
+            out_dir=out_dir,
+        )
+
+    def plot_negation_metrics_by_complexity(self, neg_df, *, out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        if df is None or df.empty:
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        reaper_vals = sorted(pd.to_numeric(df.get("reaper_interval"), errors="coerce").dropna().unique()) if "reaper_interval" in df.columns else []
+        use_reaper_split = len(reaper_vals) > 1
+
+        # combined 4-metric view across complexities
+        metric_defs = [
+            ("n", "n", "#1f77b4"),
+            ("l_X", "l_X", "#ff7f0e"),
+            ("leak_composite_t", "l_T (composite)", "#2ca02c"),
+            ("r", "r", "#d62728"),
+        ]
+        if use_reaper_split:
+            complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+            if not complexities:
+                return
+            pal = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+            comp_color = {c: pal[i] for i, c in enumerate(complexities)}
+            comp_label = {}
+            for c in complexities:
+                props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+                props = sorted(props, key=self._properties_sort_key)
+                comp_label[c] = props[0] if len(props) else str(int(c))
+            interval_ticks = sorted(pd.to_numeric(df["reaper_interval"], errors="coerce").dropna().unique())
+
+            fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
+            axes = axes.flatten()
+            for ax, (col, label, _) in zip(axes, metric_defs):
+                sub = df[df[col].notna() & df["reaper_interval"].notna()]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                for c in complexities:
+                    g = sub[sub["complexity"] == c]
+                    if g.empty:
+                        continue
+                    stats = g.groupby("reaper_interval")[col].agg(mean="mean").reset_index().sort_values("reaper_interval")
+                    ax.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=comp_color[c], label=comp_label[c])
+                ax.set_xscale("log", base=2)
+                ax.set_xticks(interval_ticks)
+                ax.set_xticklabels([str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
+                ax.set_title(label)
+                ax.set_ylabel("score")
+                ax.grid(True, alpha=0.3)
+            axes[-2].set_xlabel("reaper interval")
+            axes[-1].set_xlabel("reaper interval")
+            handles, hlabels = axes[0].get_legend_handles_labels()
+            if handles:
+                fig.legend(handles, hlabels, title="properties", loc="upper center", ncol=min(6, len(hlabels)))
+                fig.tight_layout(rect=[0, 0, 1, 0.93])
+            else:
+                fig.tight_layout()
+            fig.suptitle("negation by reaper interval", y=0.995)
+            fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+        else:
+            fig = plt.figure(figsize=(10, 6))
+            plotted = 0
+            for col, label, color in metric_defs:
+                sub = df[df[col].notna()]
+                if sub.empty:
+                    continue
+                stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
+                plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+                plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+                plotted += 1
+            if plotted > 0:
+                xticks, labels = self._complexity_ticks(df)
+                plt.xscale("log", base=2)
+                plt.xticks(xticks, labels, rotation=45, ha="right")
+                plt.title("negation by complexity")
+                plt.xlabel("complexity")
+                plt.ylabel("score")
+                plt.grid(True, alpha=0.3)
+                plt.legend(ncol=2)
+                fig.tight_layout()
+                fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+        # F-score view across complexities
+        fscore_defs = [
+            ("F1_nr", "F1_nr", "#9467bd"),
+            ("F1_nT", "F1_nT", "#8c564b"),
+        ]
+        if use_reaper_split:
+            complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
+            if not complexities:
+                return
+            pal = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
+            comp_color = {c: pal[i] for i, c in enumerate(complexities)}
+            comp_label = {}
+            for c in complexities:
+                props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
+                props = sorted(props, key=self._properties_sort_key)
+                comp_label[c] = props[0] if len(props) else str(int(c))
+            interval_ticks = sorted(pd.to_numeric(df["reaper_interval"], errors="coerce").dropna().unique())
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharex=True)
+            any_plot = False
+            for ax, (col, label, _) in zip(axes, fscore_defs):
+                if col not in df.columns:
+                    ax.set_visible(False)
+                    continue
+                sub = df[df[col].notna() & df["reaper_interval"].notna()]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                for c in complexities:
+                    g = sub[sub["complexity"] == c]
+                    if g.empty:
+                        continue
+                    stats = g.groupby("reaper_interval")[col].agg(mean="mean").reset_index().sort_values("reaper_interval")
+                    ax.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=comp_color[c], label=comp_label[c])
+                    any_plot = True
+                ax.set_xscale("log", base=2)
+                ax.set_xticks(interval_ticks)
+                ax.set_xticklabels([str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
+                ax.set_title(label)
+                ax.set_xlabel("reaper interval")
+                ax.set_ylabel("score")
+                ax.grid(True, alpha=0.3)
+            if any_plot:
+                handles, hlabels = axes[0].get_legend_handles_labels()
+                if handles:
+                    fig.legend(handles, hlabels, title="properties", loc="upper center", ncol=min(6, len(hlabels)))
+                    fig.tight_layout(rect=[0, 0, 1, 0.90])
+                else:
+                    fig.tight_layout()
+                fig.suptitle("negation f-scores by reaper interval", y=0.995)
+                fig.savefig(out_dir / f"negation_f_scores_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+        else:
+            fig = plt.figure(figsize=(10, 6))
+            plotted = 0
+            for col, label, color in fscore_defs:
+                if col not in df.columns:
+                    continue
+                sub = df[df[col].notna()]
+                if sub.empty:
+                    continue
+                stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
+                plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
+                plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
+                plotted += 1
+            if plotted > 0:
+                xticks, labels = self._complexity_ticks(df)
+                plt.xscale("log", base=2)
+                plt.xticks(xticks, labels, rotation=45, ha="right")
+                plt.title("negation f-scores by complexity")
+                plt.xlabel("complexity")
+                plt.ylabel("score")
+                plt.grid(True, alpha=0.3)
+                plt.legend(ncol=2)
+                fig.tight_layout()
+                fig.savefig(out_dir / f"negation_f_scores_by_complexity_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+    def plot_topsim_vs_negation(self, neg_df, *, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        topsim_df = self._build_topsim_df()
+        if df is None or df.empty or topsim_df is None:
+            return
+        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
+        if merged.empty:
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cvals = np.log2(np.maximum(merged["complexity"].astype(float), 1.0))
+        tag = str(profile_tag) if profile_tag else "default"
+        for col, label, suffix, color in self._leak_metric_specs():
+            sub = merged[merged[col].notna()]
+            if sub.empty:
+                continue
+            x = sub["topsim_intensional_levenshtein"].to_numpy(dtype=float)
+            y = sub[col].to_numpy(dtype=float)
+            z = np.log2(np.maximum(sub["complexity"].to_numpy(dtype=float), 1.0))
+            fig = plt.figure(figsize=(8, 6))
+            sc = plt.scatter(x, y, c=z, cmap="viridis", alpha=0.85, edgecolors="none")
+            mask = np.isfinite(x) & np.isfinite(y)
+            if mask.sum() >= 2 and np.ptp(x[mask]) > 1e-12:
+                a, b = np.polyfit(x[mask], y[mask], deg=1)
+                xg = np.linspace(x[mask].min(), x[mask].max(), 100)
+                plt.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
+            r, p = self._pearson_r_p(x[mask], y[mask])
+            r_txt = f"r={r:.3f}" if np.isfinite(r) else "r=nan"
+            plt.title(f"topsim vs {label} ({tag}, {r_txt}, {self._format_p_value(p)})")
+            plt.xlabel("topsim intensional levenshtein")
+            plt.ylabel(label)
+            plt.grid(True, alpha=0.3)
+            cbar = plt.colorbar(sc)
+            cbar.set_label("log2(complexity)")
+            fig.tight_layout()
+            fig.savefig(out_dir / f"topsim_vs_negation_{suffix}_{tag}_{self.name}.png", dpi=150)
+            plt.close(fig)
+
+    def plot_topsim_vs_n_f1(self, neg_df, *, control_col=None, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        topsim_df = self._build_topsim_df()
+        if df is None or df.empty or topsim_df is None:
+            return
+        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
+        if merged.empty:
+            return
+
+        merged = merged.copy()
+        if "F1_nT" not in merged.columns:
+            n = pd.to_numeric(merged.get("n"), errors="coerce")
+            l_t = pd.to_numeric(merged.get("l_T"), errors="coerce")
+            den = n + l_t
+            merged["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = str(profile_tag) if profile_tag else "default"
+        metrics = [("n", "n"), ("F1_nT", "F1_nT")]
+        x = pd.to_numeric(merged["topsim_intensional_levenshtein"], errors="coerce").to_numpy(dtype=float)
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
+        for ax, (col, label) in zip(axes, metrics):
+            y = pd.to_numeric(merged[col], errors="coerce").to_numpy(dtype=float)
+            mask = np.isfinite(x) & np.isfinite(y)
+            if mask.sum() < 2:
+                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(label)
+                continue
+
+            if control_col is not None and control_col in merged.columns and merged[control_col].notna().any():
+                c = pd.to_numeric(merged[control_col], errors="coerce").to_numpy(dtype=float)
+                c_mask = mask & np.isfinite(c)
+                if c_mask.sum() >= 2:
+                    sc = ax.scatter(x[c_mask], y[c_mask], c=c[c_mask], cmap="viridis", alpha=0.85, edgecolors="none")
+                    cbar = fig.colorbar(sc, ax=ax)
+                    cbar.set_label(control_col)
+                else:
+                    ax.scatter(x[mask], y[mask], alpha=0.85, edgecolors="none")
+            else:
+                ax.scatter(x[mask], y[mask], alpha=0.85, edgecolors="none")
+
+            if np.ptp(x[mask]) > 1e-12:
+                a, b = np.polyfit(x[mask], y[mask], deg=1)
+                xg = np.linspace(x[mask].min(), x[mask].max(), 100)
+                ax.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
+
+            corr, p = self._pearson_r_p(x[mask], y[mask])
+            corr_txt = f"r={corr:.3f}" if np.isfinite(corr) else "r=nan"
+            ax.set_title(f"{label} ({corr_txt}, {self._format_p_value(p)})")
+            ax.grid(True, alpha=0.3)
+            ax.set_xlabel("topsim intensional levenshtein")
+            ax.set_ylabel(label)
+
+        suptitle = "topsim correlation with n and F1_nT"
+        if control_col:
+            suptitle += f" by {control_col}"
+        fig.suptitle(f"{suptitle} ({tag})")
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        suffix = f"_by_{control_col}" if control_col else ""
+        fig.savefig(out_dir / f"topsim_vs_n_f1{suffix}_{tag}_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+    @staticmethod
+    def _token_levenshtein(a_tokens, b_tokens):
+        """Token-level edit distance between two token lists."""
+        m, n = len(a_tokens), len(b_tokens)
+        if m == 0: return n
+        if n == 0: return m
+        dp = list(range(n + 1))
+        for i in range(1, m + 1):
+            prev, dp[0] = dp[0], i
+            for j in range(1, n + 1):
+                prev, dp[j] = dp[j], (prev if a_tokens[i-1] == b_tokens[j-1]
+                                       else 1 + min(prev, dp[j], dp[j-1]))
+        return dp[n]
+
+    def _message_agreement(self, lang_a, lang_b):
+        """Mean normalised Levenshtein similarity of modal messages across predicates.
+        Similarity = 1 - edit_distance / max(len_a, len_b), averaged over predicates.
+        Tokens are the discrete signal units; pad token '0' is stripped first."""
+        for df in (lang_a, lang_b):
+            if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+                return np.nan
+            if "pred_str" not in df.columns or "msg" not in df.columns:
+                return np.nan
+
+        def _modal(df):
+            return (df.groupby("pred_str")["msg"]
+                    .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else "")
+                    .reset_index())
+
+        def _tok(s):
+            return [t for t in str(s).split() if t != "0"]
+
+        a_agg = _modal(lang_a)
+        b_agg = _modal(lang_b)
+        merged = a_agg.merge(b_agg, on="pred_str", suffixes=("_a", "_b"))
+        if merged.empty:
+            return np.nan
+
+        sims = []
+        for _, row in merged.iterrows():
+            ta, tb = _tok(row["msg_a"]), _tok(row["msg_b"])
+            denom = max(len(ta), len(tb))
+            if denom == 0:
+                sims.append(1.0)
+            else:
+                sims.append(1.0 - self._token_levenshtein(ta, tb) / denom)
+        return float(np.mean(sims))
+
+    @staticmethod
+    def _kernel_smooth(x, y, n_points=60, bw=0.25):
+        """Gaussian kernel smoother. bw is bandwidth as fraction of x range."""
+        x = np.asarray(x, float)
+        y = np.asarray(y, float)
+        mask = np.isfinite(x) & np.isfinite(y)
+        x, y = x[mask], y[mask]
+        if len(x) < 3:
+            return x, y
+        xg = np.linspace(x.min(), x.max(), n_points)
+        xrange = x.max() - x.min()
+        if xrange < 1e-9:
+            return x, y
+        sigma = bw * xrange
+        yg = np.array([
+            np.average(y, weights=np.exp(-0.5 * ((x - xi) / sigma) ** 2))
+            for xi in xg
+        ])
+        return xg, yg
+
+    def plot_topsim_interaction_n(self, neg_df, *, profile_tag="", out_dir="plots"):
+        df = self._prepare_negation_top_df(neg_df)
+        topsim_df = self._build_topsim_df()
+        if df is None or df.empty or topsim_df is None:
+            return
+        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
+        if merged.empty:
+            return
+
+        x = merged["topsim_intensional_levenshtein"].to_numpy(dtype=float)
+        y = merged["n"].to_numpy(dtype=float)
+        z = np.log2(np.maximum(merged["complexity"].to_numpy(dtype=float), 1.0))
+        mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+        if mask.sum() < 4:
+            return
+        x, y, z = x[mask], y[mask], z[mask]
+        X = np.column_stack([np.ones_like(x), x, z, x * z])
+        b0, b1, b2, b3 = np.linalg.lstsq(X, y, rcond=None)[0]
+        xg = np.linspace(x.min(), x.max(), 100)
+        z_lo, z_hi = np.quantile(z, [0.25, 0.75])
+        y_lo = b0 + b1 * xg + b2 * z_lo + b3 * xg * z_lo
+        y_hi = b0 + b1 * xg + b2 * z_hi + b3 * xg * z_hi
+
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fig = plt.figure(figsize=(8, 6))
+        sc = plt.scatter(x, y, c=z, cmap="viridis", alpha=0.80, edgecolors="none")
+        plt.plot(xg, y_lo, color="#1f77b4", linewidth=2.2, label="low complexity (q25)")
+        plt.plot(xg, y_hi, color="#d62728", linewidth=2.2, label="high complexity (q75)")
+        plt.xlabel("topsim intensional levenshtein")
+        plt.ylabel("n")
+        tag = str(profile_tag) if profile_tag else "default"
+        plt.title(f"topsim x complexity interaction for n ({tag})")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        cbar = plt.colorbar(sc)
+        cbar.set_label("log2(complexity)")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"topsim_n_interaction_{tag}_{self.name}.png", dpi=150)
+        plt.close(fig)
+
+
+
+class MayPlots(ExperimentPlots):
+    """Plots for the may experiment: n properties × hidden size (48 / 96 / 192).
+    Each condition (unary+neg, unary, conjunction) is run with 5 seeds.
+    Produces complexity-suite figures, accuracy summaries, and homonymy exports.
+    """
+    def __init__(self, datapoints, name=None):
+        super().__init__(datapoints, name)
+        self.hidden_colors = self._hidden_palette()
+
     def plot_may_accuracy_summary(self, *, out_dir="plots_may"):
         """Accuracy statistics vs complexity, saved alongside the topsim figure.
         Uses only eval data — no language files loaded."""
@@ -1290,6 +1971,7 @@ class ComplexityMemory:
         fig.savefig(out_dir / f"may_accuracy_{self.name}.png", dpi=150)
         plt.close(fig)
         print(f"[INFO] Saved may_accuracy_{self.name}.png")
+
 
     def export_may_homonymy(self, *, out_dir="plots_may"):
         """Homonymy statistics vs complexity, streaming language files one run at a time.
@@ -2496,820 +3178,13 @@ class ComplexityMemory:
             fig.savefig(out_dir / f"may_message_efficiency_by_negation_{self.name}.png", dpi=150)
             plt.close(fig)
 
-    def _prepare_negation_top_df(self, neg_df):
-        if neg_df is None or len(neg_df) == 0:
-            return None
-        df = neg_df.copy()
-        # Backward/forward compatibility for metric naming:
-        # old: l_X, l_T, r ; new: h, t, c
-        if "h" in df.columns and "l_X" not in df.columns:
-            df["l_X"] = df["h"]
-        if "t" in df.columns and "l_T" not in df.columns:
-            df["l_T"] = df["t"]
-        if "c" in df.columns and "r" not in df.columns:
-            df["r"] = df["c"]
 
-        req = {"run_name", "n", "l_X", "l_T", "r", "atoms", "support"}
-        if not req.issubset(set(df.columns)):
-            print(f"[WARN] Negation dataframe missing columns: {sorted(req - set(df.columns))}")
-            return None
 
-        df["run_name"] = df["run_name"].astype(str)
-        meta = self._build_run_meta_df()[["run_name", "complexity", "hidden_size", "no_negation", "no_conjunction", "properties", "reaper_interval", "voc_penalty"]]
-        needed_meta = [c for c in ["complexity", "hidden_size", "no_negation", "no_conjunction", "reaper_interval", "voc_penalty"] if c not in df.columns]
-        if needed_meta:
-            df = df.merge(meta[["run_name"] + needed_meta], on="run_name", how="left")
-        if "properties" not in df.columns:
-            df = df.merge(meta[["run_name", "properties"]], on="run_name", how="left")
-        if "no_negation" in df.columns:
-            df = df[df["no_negation"] == False]
-        for c in ["complexity", "hidden_size", "reaper_interval", "voc_penalty", "n", "l_X", "l_T", "r", "atoms", "support"]:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-        if "properties" in df.columns:
-            df["properties"] = df["properties"].astype(str)
-        df["leak_unary_x"] = np.where(df["atoms"] <= 1, df["l_X"], np.nan)
-        df["leak_x"] = df["l_X"]
-        df["leak_composite_t"] = np.where(df["atoms"] > 1, df["l_T"], np.nan)
-        return df.dropna(subset=["complexity", "n"])
-
-    def plot_negation_metrics_by_voc_penalty(self, neg_df, *, out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return
-        if "voc_penalty" not in df.columns:
-            print("[INFO] voc_penalty plot skipped (missing voc_penalty metadata).")
-            return
-        df = df[df["voc_penalty"].notna()]
-        if df.empty:
-            print("[INFO] voc_penalty plot skipped (no valid voc_penalty values).")
-            return
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        metric_defs = [
-            ("n", "n", "#1f77b4"),
-            ("l_X", "l_X", "#ff7f0e"),
-            ("leak_composite_t", "l_T (composite)", "#2ca02c"),
-            ("r", "r", "#d62728"),
-        ]
-
-        def _format_penalty_tick(x):
-            if not np.isfinite(x):
-                return ""
-            if abs(float(x)) < 1e-15:
-                return "0"
-            s = f"{float(x):.12f}".rstrip("0").rstrip(".")
-            return s if s else "0"
-
-        fig = plt.figure(figsize=(10, 6))
-        plotted = 0
-        for col, label, color in metric_defs:
-            sub = df[df[col].notna()]
-            if sub.empty:
-                continue
-            stats = sub.groupby("voc_penalty")[col].agg(mean="mean", median="median").reset_index().sort_values("voc_penalty")
-            plt.plot(stats["voc_penalty"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
-            plt.plot(stats["voc_penalty"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
-            plotted += 1
-        if plotted == 0:
-            plt.close(fig)
-            return
-
-        xticks = sorted(pd.to_numeric(df["voc_penalty"], errors="coerce").dropna().unique())
-        pos_ticks = [x for x in xticks if x > 0]
-        if len(pos_ticks) > 0:
-            # Log-like spacing for positive penalties; keeps 0 visible if present.
-            if any(x <= 0 for x in xticks):
-                linthresh = min(pos_ticks) / 2.0
-                plt.xscale("symlog", linthresh=linthresh, base=10)
-            else:
-                plt.xscale("log", base=10)
-        if xticks:
-            if len(xticks) > 10:
-                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
-                shown_ticks = [xticks[i] for i in idx]
-            else:
-                shown_ticks = xticks
-            labels = [_format_penalty_tick(x) for x in shown_ticks]
-            rot = 0 if len(xticks) <= 8 else 45
-            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
-        plt.title("negation by voc_penalty")
-        plt.xlabel("voc_penalty")
-        plt.ylabel("score")
-        plt.grid(True, alpha=0.3)
-        plt.legend(ncol=2)
-        fig.tight_layout()
-        fig.savefig(out_dir / f"negation_by_voc_penalty_{self.name}.png", dpi=150)
-        plt.close(fig)
-
-    def plot_f_scores_by_voc_penalty(self, neg_df, *, out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return
-        if "voc_penalty" not in df.columns:
-            print("[INFO] voc_penalty F-score plot skipped (missing voc_penalty metadata).")
-            return
-        df = df[df["voc_penalty"].notna()]
-        if df.empty:
-            print("[INFO] voc_penalty F-score plot skipped (no valid voc_penalty values).")
-            return
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        metric_defs = [
-            ("F1_nr", "F1_nr", "#9467bd"),
-            ("F1_nT", "F1_nT", "#8c564b"),
-        ]
-
-        def _format_penalty_tick(x):
-            if not np.isfinite(x):
-                return ""
-            if abs(float(x)) < 1e-15:
-                return "0"
-            s = f"{float(x):.12f}".rstrip("0").rstrip(".")
-            return s if s else "0"
-
-        fig = plt.figure(figsize=(10, 6))
-        plotted = 0
-        for col, label, color in metric_defs:
-            if col not in df.columns:
-                continue
-            sub = df[df[col].notna()]
-            if sub.empty:
-                continue
-            stats = sub.groupby("voc_penalty")[col].agg(mean="mean", median="median").reset_index().sort_values("voc_penalty")
-            plt.plot(stats["voc_penalty"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
-            plt.plot(stats["voc_penalty"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
-            plotted += 1
-        if plotted == 0:
-            plt.close(fig)
-            return
-
-        xticks = sorted(pd.to_numeric(df["voc_penalty"], errors="coerce").dropna().unique())
-        pos_ticks = [x for x in xticks if x > 0]
-        if len(pos_ticks) > 0:
-            if any(x <= 0 for x in xticks):
-                linthresh = min(pos_ticks) / 2.0
-                plt.xscale("symlog", linthresh=linthresh, base=10)
-            else:
-                plt.xscale("log", base=10)
-        if xticks:
-            if len(xticks) > 10:
-                idx = np.unique(np.linspace(0, len(xticks) - 1, num=10).round().astype(int))
-                shown_ticks = [xticks[i] for i in idx]
-            else:
-                shown_ticks = xticks
-            labels = [_format_penalty_tick(x) for x in shown_ticks]
-            rot = 0 if len(xticks) <= 8 else 45
-            plt.xticks(shown_ticks, labels, rotation=rot, ha="right" if rot else "center")
-        plt.title("negation f-scores by voc_penalty")
-        plt.xlabel("voc_penalty")
-        plt.ylabel("score")
-        plt.grid(True, alpha=0.3)
-        plt.legend(ncol=2)
-        fig.tight_layout()
-        fig.savefig(out_dir / f"negation_f_scores_by_voc_penalty_{self.name}.png", dpi=150)
-        plt.close(fig)
-
-    def plot_negation_metrics_by_reaper_interval(self, neg_df, *, profile_tag="", out_dir="plots", metrics=None):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return
-        if "reaper_interval" not in df.columns:
-            return
-
-        df = df.copy()
-        df = df[df["reaper_interval"].notna()]
-        df = df[df["reaper_interval"] > 0]
-        if df.empty:
-            print("[INFO] Reaper-interval plots skipped (no valid reaper interval in config).")
-            return
-
-        # F1 between negation score and non-leak composite score.
-        non_leak_t = 1.0 - df["leak_composite_t"]
-        denom = df["n"] + non_leak_t
-        df["f1_nT"] = np.where((denom > 0) & np.isfinite(non_leak_t), 2.0 * df["n"] * non_leak_t / denom, np.nan)
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        tag = str(profile_tag) if profile_tag else "default"
-
-        complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
-        if not complexities:
-            return
-        palette = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
-        c_map = {c: palette[i] for i, c in enumerate(complexities)}
-        c_label = {}
-        for c in complexities:
-            props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
-            props = sorted(props, key=self._properties_sort_key)
-            c_label[c] = props[0] if len(props) else str(int(c))
-
-        if metrics is None:
-            metrics = ["f1_nT", "n", "l_X", "leak_composite_t", "r"]
-
-        metric_spec = {
-            "f1_nT": ("F1_nT", "f1_nt"),
-            "n": ("n", "n"),
-            "l_X": ("l_X", "l_x"),
-            "leak_composite_t": ("l_T (composite)", "l_t_composite"),
-            "r": ("r", "r"),
-        }
-
-        def _clean_interval_ticks(values):
-            ticks = sorted(pd.to_numeric(values, errors="coerce").dropna().unique())
-            if len(ticks) <= 10:
-                return ticks
-            # Keep ticks legible when many intervals are present.
-            idx = np.unique(np.linspace(0, len(ticks) - 1, num=10).round().astype(int))
-            return [ticks[i] for i in idx]
-
-        def _plot_interval_metric(metric_col, metric_label, file_suffix):
-            sub = df[df[metric_col].notna()]
-            if sub.empty:
-                return
-            interval_ticks = _clean_interval_ticks(sub["reaper_interval"])
-            fig = plt.figure(figsize=(10, 6))
-            for c in complexities:
-                g = sub[sub["complexity"] == c]
-                if g.empty:
-                    continue
-                stats = (
-                    g.groupby("reaper_interval")[metric_col]
-                    .agg(mean="mean")
-                    .reset_index()
-                    .sort_values("reaper_interval")
-                )
-                col = c_map[c]
-                plt.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=col, label=f"{c_label[c]} mean")
-
-            plt.xscale("log")
-            if interval_ticks:
-                labels = [str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks]
-                rot = 0 if len(interval_ticks) <= 8 else 45
-                plt.xticks(interval_ticks, labels, rotation=rot, ha="right" if rot else "center")
-            plt.xlabel("reaper interval")
-            plt.ylabel(metric_label)
-            plt.title(f"{metric_label} by reaper interval ({tag})")
-            plt.grid(True, alpha=0.3)
-            plt.legend(ncol=2, title="properties")
-            fig.tight_layout()
-            fig.savefig(out_dir / f"negation_{file_suffix}_by_reaper_interval_{tag}_{self.name}.png", dpi=150)
-            plt.close(fig)
-
-        for metric in metrics:
-            spec = metric_spec.get(metric)
-            if spec is None:
-                continue
-            label, suffix = spec
-            _plot_interval_metric(metric, label, suffix)
-
-    def plot_reaper_step_vs_f_scores(self, neg_df, *, profile_tag="", out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return
-        if "reaper_interval" not in df.columns:
-            return
-
-        df = df.copy()
-        df = df[df["reaper_interval"].notna()]
-        df = df[df["reaper_interval"] > 0]
-        if df.empty:
-            return
-
-        if "F1_nT" not in df.columns:
-            n = pd.to_numeric(df.get("n"), errors="coerce")
-            l_t = pd.to_numeric(df.get("l_T"), errors="coerce")
-            den = n + l_t
-            df["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
-        if "F1_nr" not in df.columns:
-            n = pd.to_numeric(df.get("n"), errors="coerce")
-            r = pd.to_numeric(df.get("r"), errors="coerce")
-            den = n + r
-            df["F1_nr"] = np.where((den > 0) & n.notna() & r.notna(), 2.0 * n * r / den, np.nan)
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        tag = str(profile_tag) if profile_tag else "default"
-
-        fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
-        x_raw = pd.to_numeric(df["reaper_interval"], errors="coerce").to_numpy(dtype=float)
-        x = np.log2(np.maximum(x_raw, 1.0))
-        z = np.log2(np.maximum(pd.to_numeric(df["complexity"], errors="coerce").to_numpy(dtype=float), 1.0))
-        metric_defs = [("F1_nT", "F1_nT"), ("F1_nr", "F1_nr")]
-
-        for ax, (col, label) in zip(axes, metric_defs):
-            y = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
-            mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(x_raw)
-            if mask.sum() < 2:
-                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax.transAxes)
-                ax.set_title(label)
-                continue
-
-            sc = ax.scatter(x_raw[mask], y[mask], c=z[mask], cmap="viridis", alpha=0.85, edgecolors="none")
-            ax.set_xscale("log", base=2)
-
-            if np.ptp(x[mask]) > 1e-12:
-                a, b = np.polyfit(x[mask], y[mask], deg=1)
-                xg_raw = np.logspace(np.log2(x_raw[mask].min()), np.log2(x_raw[mask].max()), 120, base=2.0)
-                xg = np.log2(xg_raw)
-                ax.plot(xg_raw, a * xg + b, color="#111111", linewidth=2.0)
-
-            r_val, p_val = self._pearson_r_p(x[mask], y[mask])
-            r_txt = f"r={r_val:.3f}" if np.isfinite(r_val) else "r=nan"
-            ax.set_title(f"{label} vs reaper_step ({r_txt}, {self._format_p_value(p_val)})")
-            ax.set_xlabel("reaper_step")
-            ax.set_ylabel(label)
-            ax.grid(True, alpha=0.3)
-            cbar = fig.colorbar(sc, ax=ax)
-            cbar.set_label("log2(complexity)")
-
-        fig.suptitle(f"reaper step correlation with F-scores ({tag})")
-        fig.tight_layout(rect=[0, 0, 1, 0.95])
-        fig.savefig(out_dir / f"reaper_step_vs_f_scores_{tag}_{self.name}.png", dpi=150)
-        plt.close(fig)
-
-    def _complexity_ticks(self, df):
-        xticks = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
-        labels = []
-        for c in xticks:
-            if "properties" not in df.columns:
-                labels.append(str(int(c)))
-                continue
-            props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
-            props = sorted(props, key=self._properties_sort_key)
-            if not props:
-                labels.append(str(int(c)))
-            else:
-                labels.append(f"{int(c)} ({'/'.join(props)})")
-        return xticks, labels
-
-    def _leak_metric_specs(self):
-        return [
-            ("leak_unary_x", "l_X (unary)", "leak_unary_x", "#2ca02c"),
-            ("leak_x", "l_X (all)", "leak_x", "#ff7f0e"),
-            ("leak_composite_t", "l_T (composite)", "leak_composite_t", "#1f77b4"),
-        ]
-
-    def _pearson_r_p(self, x, y):
-        x = np.asarray(x, dtype=float)
-        y = np.asarray(y, dtype=float)
-        mask = np.isfinite(x) & np.isfinite(y)
-        if mask.sum() < 2:
-            return np.nan, np.nan
-        x_m = x[mask]
-        y_m = y[mask]
-        if np.ptp(x_m) <= 1e-12 or np.ptp(y_m) <= 1e-12:
-            return np.nan, np.nan
-        r, p = pearsonr(x_m, y_m)
-        return float(r), float(p)
-
-    def _spearman_r_p(self, x, y):
-        x = np.asarray(x, dtype=float)
-        y = np.asarray(y, dtype=float)
-        mask = np.isfinite(x) & np.isfinite(y)
-        if mask.sum() < 3:
-            return np.nan, np.nan
-        r, p = spearmanr(x[mask], y[mask])
-        return float(r), float(p)
-
-    def _format_p_value(self, p):
-        if not np.isfinite(p):
-            return "p=nan"
-        if p < 1e-3:
-            return f"p={p:.1e}"
-        return f"p={p:.3f}"
-
-    def _negation_timeline_df(self, neg_df):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return None
-        if "epoch_analyzed" not in df.columns:
-            print("[WARN] Negation dataframe has no epoch_analyzed column; timeline plots skipped.")
-            return None
-
-        df = df.copy()
-        df["epoch_analyzed"] = pd.to_numeric(df["epoch_analyzed"], errors="coerce")
-        df = df.dropna(subset=["epoch_analyzed"])
-        if df.empty:
-            return None
-
-        order_cols = ["run_name", "epoch_analyzed", "n", "r", "l_T", "l_X"]
-        order_asc = [True, True, False, False, True, True]
-        ranked = df.sort_values(order_cols, ascending=order_asc, na_position="last")
-        key = ["run_name", "epoch_analyzed"]
-
-        best = ranked.groupby(key, as_index=False).first()
-        comp = ranked[ranked["atoms"] > 1]
-        if comp.empty:
-            best["l_T_composite"] = np.nan
-        else:
-            comp_best = comp.groupby(key, as_index=False).first()[key + ["l_T"]]
-            comp_best = comp_best.rename(columns={"l_T": "l_T_composite"})
-            best = best.merge(comp_best, on=key, how="left")
-
-        return best
-
-    def _plot_timeline_metric_set(self, timeline_df, metrics, title, filename, out_dir):
-        if timeline_df is None or timeline_df.empty:
-            return
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        complexities = sorted(pd.to_numeric(timeline_df["complexity"], errors="coerce").dropna().unique())
-        if not complexities:
-            return
-        prop_label = {}
-        for c in complexities:
-            props = (
-                timeline_df.loc[timeline_df["complexity"] == c, "properties"]
-                .dropna()
-                .astype(str)
-                .unique()
-            )
-            props = sorted(props, key=self._properties_sort_key)
-            if len(props) == 0:
-                prop_label[c] = str(int(c))
-            elif len(props) == 1:
-                prop_label[c] = props[0]
-            else:
-                prop_label[c] = "/".join(props)
-        palette = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
-        c_map = {c: palette[i] for i, c in enumerate(complexities)}
-
-        fig, axes = plt.subplots(len(metrics), 1, figsize=(10, 4 * len(metrics)), sharex=True)
-        if len(metrics) == 1:
-            axes = [axes]
-
-        for ax, (col, label) in zip(axes, metrics):
-            sub_all = timeline_df[timeline_df[col].notna()]
-            for c in complexities:
-                sub = sub_all[sub_all["complexity"] == c]
-                if sub.empty:
-                    continue
-                stats = (
-                    sub.groupby("epoch_analyzed")[col]
-                    .agg(
-                        median="median",
-                        q25=lambda x: np.nanquantile(x, 0.25),
-                        q75=lambda x: np.nanquantile(x, 0.75),
-                    )
-                    .reset_index()
-                    .sort_values("epoch_analyzed")
-                )
-                colr = c_map[c]
-                ax.fill_between(stats["epoch_analyzed"], stats["q25"], stats["q75"], color=colr, alpha=0.15)
-                ax.plot(stats["epoch_analyzed"], stats["median"], color=colr, linewidth=2.0, label=prop_label[c])
-            ax.set_title(label)
-            ax.set_ylabel("score")
-            ax.grid(True, alpha=0.3)
-
-        axes[-1].set_xlabel("epoch")
-        handles, labels = axes[0].get_legend_handles_labels()
-        fig.suptitle(title, y=0.995)
-        if handles:
-            fig.legend(
-                handles,
-                labels,
-                loc="upper center",
-                bbox_to_anchor=(0.5, 0.955),
-                ncol=min(6, len(labels)),
-                frameon=False,
-                title="properties",
-            )
-            fig.tight_layout(rect=[0, 0, 1, 0.90])
-        else:
-            fig.tight_layout(rect=[0, 0, 1, 0.96])
-        fig.savefig(out_dir / filename, dpi=150)
-        plt.close(fig)
-
-    def plot_negation_metrics_over_epochs(self, neg_df, *, profile_tag="", out_dir="plots"):
-        timeline_df = self._negation_timeline_df(neg_df)
-        if timeline_df is None or timeline_df.empty:
-            return
-        if timeline_df["epoch_analyzed"].nunique() < 2:
-            print("[INFO] Negation timeline plots skipped (only one epoch available).")
-            return
-
-        tag = str(profile_tag) if profile_tag else "default"
-        self._plot_timeline_metric_set(
-            timeline_df,
-            metrics=[("n", "n"), ("l_X", "l_X"), ("l_T_composite", "l_T (composite)")],
-            title=f"negation metrics over epochs ({tag})",
-            filename=f"negation_timeline_n_lx_ltcomp_{tag}_{self.name}.png",
-            out_dir=out_dir,
-        )
-        self._plot_timeline_metric_set(
-            timeline_df,
-            metrics=[("n", "n"), ("r", "r")],
-            title=f"negation and remainder over epochs ({tag})",
-            filename=f"negation_timeline_n_r_{tag}_{self.name}.png",
-            out_dir=out_dir,
-        )
-
-    def plot_negation_metrics_by_complexity(self, neg_df, *, out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        reaper_vals = sorted(pd.to_numeric(df.get("reaper_interval"), errors="coerce").dropna().unique()) if "reaper_interval" in df.columns else []
-        use_reaper_split = len(reaper_vals) > 1
-
-        # combined 4-metric view across complexities
-        metric_defs = [
-            ("n", "n", "#1f77b4"),
-            ("l_X", "l_X", "#ff7f0e"),
-            ("leak_composite_t", "l_T (composite)", "#2ca02c"),
-            ("r", "r", "#d62728"),
-        ]
-        if use_reaper_split:
-            complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
-            if not complexities:
-                return
-            pal = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
-            comp_color = {c: pal[i] for i, c in enumerate(complexities)}
-            comp_label = {}
-            for c in complexities:
-                props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
-                props = sorted(props, key=self._properties_sort_key)
-                comp_label[c] = props[0] if len(props) else str(int(c))
-            interval_ticks = sorted(pd.to_numeric(df["reaper_interval"], errors="coerce").dropna().unique())
-
-            fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
-            axes = axes.flatten()
-            for ax, (col, label, _) in zip(axes, metric_defs):
-                sub = df[df[col].notna() & df["reaper_interval"].notna()]
-                if sub.empty:
-                    ax.set_visible(False)
-                    continue
-                for c in complexities:
-                    g = sub[sub["complexity"] == c]
-                    if g.empty:
-                        continue
-                    stats = g.groupby("reaper_interval")[col].agg(mean="mean").reset_index().sort_values("reaper_interval")
-                    ax.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=comp_color[c], label=comp_label[c])
-                ax.set_xscale("log", base=2)
-                ax.set_xticks(interval_ticks)
-                ax.set_xticklabels([str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
-                ax.set_title(label)
-                ax.set_ylabel("score")
-                ax.grid(True, alpha=0.3)
-            axes[-2].set_xlabel("reaper interval")
-            axes[-1].set_xlabel("reaper interval")
-            handles, hlabels = axes[0].get_legend_handles_labels()
-            if handles:
-                fig.legend(handles, hlabels, title="properties", loc="upper center", ncol=min(6, len(hlabels)))
-                fig.tight_layout(rect=[0, 0, 1, 0.93])
-            else:
-                fig.tight_layout()
-            fig.suptitle("negation by reaper interval", y=0.995)
-            fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
-            plt.close(fig)
-        else:
-            fig = plt.figure(figsize=(10, 6))
-            plotted = 0
-            for col, label, color in metric_defs:
-                sub = df[df[col].notna()]
-                if sub.empty:
-                    continue
-                stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
-                plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
-                plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
-                plotted += 1
-            if plotted > 0:
-                xticks, labels = self._complexity_ticks(df)
-                plt.xscale("log", base=2)
-                plt.xticks(xticks, labels, rotation=45, ha="right")
-                plt.title("negation by complexity")
-                plt.xlabel("complexity")
-                plt.ylabel("score")
-                plt.grid(True, alpha=0.3)
-                plt.legend(ncol=2)
-                fig.tight_layout()
-                fig.savefig(out_dir / f"negation_by_complexity_{self.name}.png", dpi=150)
-            plt.close(fig)
-
-        # F-score view across complexities
-        fscore_defs = [
-            ("F1_nr", "F1_nr", "#9467bd"),
-            ("F1_nT", "F1_nT", "#8c564b"),
-        ]
-        if use_reaper_split:
-            complexities = sorted(pd.to_numeric(df["complexity"], errors="coerce").dropna().unique())
-            if not complexities:
-                return
-            pal = sns.color_palette("viridis", n_colors=max(1, len(complexities)))
-            comp_color = {c: pal[i] for i, c in enumerate(complexities)}
-            comp_label = {}
-            for c in complexities:
-                props = df.loc[df["complexity"] == c, "properties"].dropna().astype(str).unique()
-                props = sorted(props, key=self._properties_sort_key)
-                comp_label[c] = props[0] if len(props) else str(int(c))
-            interval_ticks = sorted(pd.to_numeric(df["reaper_interval"], errors="coerce").dropna().unique())
-
-            fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharex=True)
-            any_plot = False
-            for ax, (col, label, _) in zip(axes, fscore_defs):
-                if col not in df.columns:
-                    ax.set_visible(False)
-                    continue
-                sub = df[df[col].notna() & df["reaper_interval"].notna()]
-                if sub.empty:
-                    ax.set_visible(False)
-                    continue
-                for c in complexities:
-                    g = sub[sub["complexity"] == c]
-                    if g.empty:
-                        continue
-                    stats = g.groupby("reaper_interval")[col].agg(mean="mean").reset_index().sort_values("reaper_interval")
-                    ax.plot(stats["reaper_interval"], stats["mean"], marker="o", linewidth=2.0, color=comp_color[c], label=comp_label[c])
-                    any_plot = True
-                ax.set_xscale("log", base=2)
-                ax.set_xticks(interval_ticks)
-                ax.set_xticklabels([str(int(x)) if float(x).is_integer() else f"{x:g}" for x in interval_ticks])
-                ax.set_title(label)
-                ax.set_xlabel("reaper interval")
-                ax.set_ylabel("score")
-                ax.grid(True, alpha=0.3)
-            if any_plot:
-                handles, hlabels = axes[0].get_legend_handles_labels()
-                if handles:
-                    fig.legend(handles, hlabels, title="properties", loc="upper center", ncol=min(6, len(hlabels)))
-                    fig.tight_layout(rect=[0, 0, 1, 0.90])
-                else:
-                    fig.tight_layout()
-                fig.suptitle("negation f-scores by reaper interval", y=0.995)
-                fig.savefig(out_dir / f"negation_f_scores_by_complexity_{self.name}.png", dpi=150)
-            plt.close(fig)
-        else:
-            fig = plt.figure(figsize=(10, 6))
-            plotted = 0
-            for col, label, color in fscore_defs:
-                if col not in df.columns:
-                    continue
-                sub = df[df[col].notna()]
-                if sub.empty:
-                    continue
-                stats = sub.groupby("complexity")[col].agg(mean="mean", median="median").reset_index()
-                plt.plot(stats["complexity"], stats["mean"], marker="o", color=color, linewidth=2.0, label=f"{label} mean")
-                plt.plot(stats["complexity"], stats["median"], marker="o", linestyle=":", color=color, alpha=0.9, label=f"{label} median")
-                plotted += 1
-            if plotted > 0:
-                xticks, labels = self._complexity_ticks(df)
-                plt.xscale("log", base=2)
-                plt.xticks(xticks, labels, rotation=45, ha="right")
-                plt.title("negation f-scores by complexity")
-                plt.xlabel("complexity")
-                plt.ylabel("score")
-                plt.grid(True, alpha=0.3)
-                plt.legend(ncol=2)
-                fig.tight_layout()
-                fig.savefig(out_dir / f"negation_f_scores_by_complexity_{self.name}.png", dpi=150)
-            plt.close(fig)
-
-    def plot_negation_metric_slopes(self, neg_df, *, profile_tag="", out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        if df is None or df.empty:
-            return
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        df = df.copy()
-        df["run_id"] = df["run_name"].map(self._extract_run_id)
-        tag = str(profile_tag) if profile_tag else "default"
-        for col, label, suffix, color in self._leak_metric_specs():
-            sub = df[df[col].notna()]
-            if sub.empty:
-                continue
-            slope_df = sub.groupby(["run_id", "complexity"]).agg(leak=("{}".format(col), "mean")).reset_index()
-            fig = plt.figure(figsize=(10, 6))
-            for _, grp in slope_df.groupby("run_id"):
-                grp = grp.sort_values("complexity")
-                if len(grp) < 2:
-                    continue
-                plt.plot(grp["complexity"], grp["leak"], color="#808080", alpha=0.35, linewidth=1.0)
-            agg = slope_df.groupby("complexity")["leak"].agg(mean="mean", median="median").reset_index()
-            plt.plot(agg["complexity"], agg["mean"], color=color, marker="o", linewidth=2.2, label="mean")
-            plt.plot(agg["complexity"], agg["median"], color=color, marker="o", linestyle=":", linewidth=2.0, label="median")
-            xticks, labels = self._complexity_ticks(slope_df)
-            plt.xscale("log", base=2)
-            plt.xticks(xticks, labels, rotation=45, ha="right")
-            plt.title(f"{label} slopes across complexity ({tag})")
-            plt.xlabel("complexity")
-            plt.ylabel("score")
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            fig.tight_layout()
-            fig.savefig(out_dir / f"negation_{suffix}_slopes_{tag}_{self.name}.png", dpi=150)
-            plt.close(fig)
-
-    def plot_topsim_vs_negation(self, neg_df, *, profile_tag="", out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        topsim_df = self._build_topsim_df()
-        if df is None or df.empty or topsim_df is None:
-            return
-        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
-        if merged.empty:
-            return
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        cvals = np.log2(np.maximum(merged["complexity"].astype(float), 1.0))
-        tag = str(profile_tag) if profile_tag else "default"
-        for col, label, suffix, color in self._leak_metric_specs():
-            sub = merged[merged[col].notna()]
-            if sub.empty:
-                continue
-            x = sub["topsim_intensional_levenshtein"].to_numpy(dtype=float)
-            y = sub[col].to_numpy(dtype=float)
-            z = np.log2(np.maximum(sub["complexity"].to_numpy(dtype=float), 1.0))
-            fig = plt.figure(figsize=(8, 6))
-            sc = plt.scatter(x, y, c=z, cmap="viridis", alpha=0.85, edgecolors="none")
-            mask = np.isfinite(x) & np.isfinite(y)
-            if mask.sum() >= 2 and np.ptp(x[mask]) > 1e-12:
-                a, b = np.polyfit(x[mask], y[mask], deg=1)
-                xg = np.linspace(x[mask].min(), x[mask].max(), 100)
-                plt.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
-            r, p = self._pearson_r_p(x[mask], y[mask])
-            r_txt = f"r={r:.3f}" if np.isfinite(r) else "r=nan"
-            plt.title(f"topsim vs {label} ({tag}, {r_txt}, {self._format_p_value(p)})")
-            plt.xlabel("topsim intensional levenshtein")
-            plt.ylabel(label)
-            plt.grid(True, alpha=0.3)
-            cbar = plt.colorbar(sc)
-            cbar.set_label("log2(complexity)")
-            fig.tight_layout()
-            fig.savefig(out_dir / f"topsim_vs_negation_{suffix}_{tag}_{self.name}.png", dpi=150)
-            plt.close(fig)
-
-    def plot_topsim_vs_n_f1(self, neg_df, *, control_col=None, profile_tag="", out_dir="plots"):
-        df = self._prepare_negation_top_df(neg_df)
-        topsim_df = self._build_topsim_df()
-        if df is None or df.empty or topsim_df is None:
-            return
-        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
-        if merged.empty:
-            return
-
-        merged = merged.copy()
-        if "F1_nT" not in merged.columns:
-            n = pd.to_numeric(merged.get("n"), errors="coerce")
-            l_t = pd.to_numeric(merged.get("l_T"), errors="coerce")
-            den = n + l_t
-            merged["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
-
-        out_dir = pathlib.Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        tag = str(profile_tag) if profile_tag else "default"
-        metrics = [("n", "n"), ("F1_nT", "F1_nT")]
-        x = pd.to_numeric(merged["topsim_intensional_levenshtein"], errors="coerce").to_numpy(dtype=float)
-
-        fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
-        for ax, (col, label) in zip(axes, metrics):
-            y = pd.to_numeric(merged[col], errors="coerce").to_numpy(dtype=float)
-            mask = np.isfinite(x) & np.isfinite(y)
-            if mask.sum() < 2:
-                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax.transAxes)
-                ax.set_title(label)
-                continue
-
-            if control_col is not None and control_col in merged.columns and merged[control_col].notna().any():
-                c = pd.to_numeric(merged[control_col], errors="coerce").to_numpy(dtype=float)
-                c_mask = mask & np.isfinite(c)
-                if c_mask.sum() >= 2:
-                    sc = ax.scatter(x[c_mask], y[c_mask], c=c[c_mask], cmap="viridis", alpha=0.85, edgecolors="none")
-                    cbar = fig.colorbar(sc, ax=ax)
-                    cbar.set_label(control_col)
-                else:
-                    ax.scatter(x[mask], y[mask], alpha=0.85, edgecolors="none")
-            else:
-                ax.scatter(x[mask], y[mask], alpha=0.85, edgecolors="none")
-
-            if np.ptp(x[mask]) > 1e-12:
-                a, b = np.polyfit(x[mask], y[mask], deg=1)
-                xg = np.linspace(x[mask].min(), x[mask].max(), 100)
-                ax.plot(xg, a * xg + b, color="#111111", linewidth=2.0)
-
-            corr, p = self._pearson_r_p(x[mask], y[mask])
-            corr_txt = f"r={corr:.3f}" if np.isfinite(corr) else "r=nan"
-            ax.set_title(f"{label} ({corr_txt}, {self._format_p_value(p)})")
-            ax.grid(True, alpha=0.3)
-            ax.set_xlabel("topsim intensional levenshtein")
-            ax.set_ylabel(label)
-
-        suptitle = "topsim correlation with n and F1_nT"
-        if control_col:
-            suptitle += f" by {control_col}"
-        fig.suptitle(f"{suptitle} ({tag})")
-        fig.tight_layout(rect=[0, 0, 1, 0.95])
-        suffix = f"_by_{control_col}" if control_col else ""
-        fig.savefig(out_dir / f"topsim_vs_n_f1{suffix}_{tag}_{self.name}.png", dpi=150)
-        plt.close(fig)
+class JunePlots(ExperimentPlots):
+    """Plots for the june experiment: beth_reaper_step × voc_penalty over p ∈ {16, 32, 64}.
+    Produces pressure heatmaps, interaction plots, intergenerational stability figures,
+    and LaTeX exports for all of the above.
+    """
 
     # ---- voc_reaper factorial plots (m2_resetandvoc and similar 2-factor experiments) ----
 
@@ -3375,12 +3250,16 @@ class ComplexityMemory:
                            rotation=45, ha="right", fontsize=7)
         ax.set_yticks(range(len(reaper_vals)))
         ax.set_yticklabels([self._fmt_reaper_label(r) for r in reaper_vals], fontsize=7)
-        midpoint = vmin + (vmax - vmin) * 0.5
+        _cmap_fn = plt.get_cmap(cmap)
+        _cmap_range = max(vmax - vmin, 1e-12)
         for ri in range(len(reaper_vals)):
             for vi in range(len(voc_vals)):
                 val = heat[ri, vi]
                 if np.isfinite(val):
-                    txt_color = "white" if val < midpoint else "black"
+                    norm_v = float(np.clip((val - vmin) / _cmap_range, 0.0, 1.0))
+                    r, g, b, _ = _cmap_fn(norm_v)
+                    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                    txt_color = "white" if luminance < 0.45 else "black"
                     ax.text(vi, ri, f"{val:.2f}", ha="center", va="center",
                             fontsize=5.5, color=txt_color)
         r_matches = [i for i, r in enumerate(reaper_vals) if int(float(r)) >= baseline_reaper]
@@ -3765,73 +3644,6 @@ class ComplexityMemory:
         plt.close(fig)
         print(f"[INFO] Saved negation_interaction_reaper_voc_{self.name}.png")
 
-    @staticmethod
-    def _token_levenshtein(a_tokens, b_tokens):
-        """Token-level edit distance between two token lists."""
-        m, n = len(a_tokens), len(b_tokens)
-        if m == 0: return n
-        if n == 0: return m
-        dp = list(range(n + 1))
-        for i in range(1, m + 1):
-            prev, dp[0] = dp[0], i
-            for j in range(1, n + 1):
-                prev, dp[j] = dp[j], (prev if a_tokens[i-1] == b_tokens[j-1]
-                                       else 1 + min(prev, dp[j], dp[j-1]))
-        return dp[n]
-
-    def _message_agreement(self, lang_a, lang_b):
-        """Mean normalised Levenshtein similarity of modal messages across predicates.
-        Similarity = 1 - edit_distance / max(len_a, len_b), averaged over predicates.
-        Tokens are the discrete signal units; pad token '0' is stripped first."""
-        for df in (lang_a, lang_b):
-            if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-                return np.nan
-            if "pred_str" not in df.columns or "msg" not in df.columns:
-                return np.nan
-
-        def _modal(df):
-            return (df.groupby("pred_str")["msg"]
-                    .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else "")
-                    .reset_index())
-
-        def _tok(s):
-            return [t for t in str(s).split() if t != "0"]
-
-        a_agg = _modal(lang_a)
-        b_agg = _modal(lang_b)
-        merged = a_agg.merge(b_agg, on="pred_str", suffixes=("_a", "_b"))
-        if merged.empty:
-            return np.nan
-
-        sims = []
-        for _, row in merged.iterrows():
-            ta, tb = _tok(row["msg_a"]), _tok(row["msg_b"])
-            denom = max(len(ta), len(tb))
-            if denom == 0:
-                sims.append(1.0)
-            else:
-                sims.append(1.0 - self._token_levenshtein(ta, tb) / denom)
-        return float(np.mean(sims))
-
-    @staticmethod
-    def _kernel_smooth(x, y, n_points=60, bw=0.25):
-        """Gaussian kernel smoother. bw is bandwidth as fraction of x range."""
-        x = np.asarray(x, float)
-        y = np.asarray(y, float)
-        mask = np.isfinite(x) & np.isfinite(y)
-        x, y = x[mask], y[mask]
-        if len(x) < 3:
-            return x, y
-        xg = np.linspace(x.min(), x.max(), n_points)
-        xrange = x.max() - x.min()
-        if xrange < 1e-9:
-            return x, y
-        sigma = bw * xrange
-        yg = np.array([
-            np.average(y, weights=np.exp(-0.5 * ((x - xi) / sigma) ** 2))
-            for xi in xg
-        ])
-        return xg, yg
 
     def plot_intergenerational_stability(self, *, out_dir="plots"):
         """Language stability across generation boundaries.
@@ -4195,6 +4007,63 @@ class ComplexityMemory:
                              f"$p = {p_str}$."),
                     label=f"fig:pressure_heatmap_{file_tag}_p{p_str}",
                     baseline_rc=brc,
+                )
+                print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_pressure_table(self, *, out_dir="plots"):
+        """Booktabs tables (one per complexity p) of median accuracy and topsim
+        over all (reaper_interval × voc_penalty) combinations.  Rows = reaper_interval,
+        columns = voc_penalty; one table file per (metric, p).
+        """
+        df = self._build_final_metrics_df()
+        if df is None or df.empty:
+            return
+        required = {"reaper_interval", "voc_penalty", "complexity"}
+        if not required.issubset(df.columns):
+            return
+        sub = df.dropna(subset=list(required))
+        if sub.empty:
+            return
+
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        reaper_vals = sorted(sub["reaper_interval"].unique())
+        voc_vals    = sorted(sub["voc_penalty"].unique())
+        complexities = sorted(sub["complexity"].unique())
+
+        metric_specs = []
+        if "final_accuracy" in sub.columns and sub["final_accuracy"].notna().any():
+            metric_specs.append(("final_accuracy", "accuracy"))
+        if "final_topsim" in sub.columns and sub["final_topsim"].notna().any():
+            metric_specs.append(("final_topsim", "topsim"))
+
+        for metric_col, file_tag in metric_specs:
+            for p in complexities:
+                psub = sub[sub["complexity"] == p].dropna(subset=[metric_col])
+                if psub.empty:
+                    continue
+                agg = (psub.groupby(["reaper_interval", "voc_penalty"])[metric_col]
+                       .median().reset_index())
+                pivot = (agg.pivot(index="reaper_interval", columns="voc_penalty",
+                                   values=metric_col)
+                         .reindex(index=reaper_vals, columns=voc_vals))
+                pivot.index = [self._fmt_reaper_label(r) for r in reaper_vals]
+                pivot.columns = [self._fmt_voc_label(v) for v in voc_vals]
+                pivot.index.name = "reset interval"
+                tbl = pivot.reset_index()
+                tbl.columns = [str(c) for c in tbl.columns]
+                for c in tbl.columns[1:]:
+                    tbl[c] = tbl[c].map(lambda v: f"{v:.2f}" if pd.notna(v) else "--")
+                p_str = str(int(p)) if float(p).is_integer() else str(p)
+                fname = f"pressure_table_{file_tag}_p{p_str}_{self.name}.tex"
+                self._write_latex_table(
+                    latex_dir / fname, tbl,
+                    caption=(f"Median {file_tag} by reset interval "
+                             r"$\times$ vocabulary pressure. "
+                             f"$p = {p_str}$."),
+                    label=f"tab:pressure_{file_tag}_p{p_str}",
                 )
                 print(f"[INFO] LaTeX: saved {fname}")
 
@@ -4699,43 +4568,113 @@ class ComplexityMemory:
         )
         print(f"[INFO] LaTeX: saved {fname}")
 
-    def plot_topsim_interaction_n(self, neg_df, *, profile_tag="", out_dir="plots"):
+    def plot_topsim_vs_negation_june(self, neg_df, *, profile_tag="", out_dir="plots"):
+        """Scatter of topsim vs F1_nT (strong) and F1_nr (weak) negation, faceted by
+        complexity p.  Points coloured by reaper_interval (viridis), marker shape by
+        voc_penalty level.  One regression line per panel; Pearson r annotated.
+        """
         df = self._prepare_negation_top_df(neg_df)
         topsim_df = self._build_topsim_df()
         if df is None or df.empty or topsim_df is None:
             return
-        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(subset=["topsim_intensional_levenshtein"])
+
+        df = df.copy()
+        if "F1_nT" not in df.columns:
+            n = pd.to_numeric(df.get("n"), errors="coerce")
+            l_t = pd.to_numeric(df.get("l_T"), errors="coerce")
+            den = n + l_t
+            df["F1_nT"] = np.where((den > 0) & n.notna() & l_t.notna(), 2.0 * n * l_t / den, np.nan)
+        if "F1_nr" not in df.columns:
+            n = pd.to_numeric(df.get("n"), errors="coerce")
+            r = pd.to_numeric(df.get("r"), errors="coerce")
+            den = n + r
+            df["F1_nr"] = np.where((den > 0) & n.notna() & r.notna(), 2.0 * n * r / den, np.nan)
+
+        merged = df.merge(topsim_df, on="run_name", how="inner").dropna(
+            subset=["topsim_intensional_levenshtein"])
         if merged.empty:
             return
 
-        x = merged["topsim_intensional_levenshtein"].to_numpy(dtype=float)
-        y = merged["n"].to_numpy(dtype=float)
-        z = np.log2(np.maximum(merged["complexity"].to_numpy(dtype=float), 1.0))
-        mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-        if mask.sum() < 4:
+        p_vals = sorted(pd.to_numeric(merged["complexity"], errors="coerce").dropna().unique())
+        voc_vals = sorted(pd.to_numeric(merged["voc_penalty"], errors="coerce").dropna().unique())
+        if not p_vals:
             return
-        x, y, z = x[mask], y[mask], z[mask]
-        X = np.column_stack([np.ones_like(x), x, z, x * z])
-        b0, b1, b2, b3 = np.linalg.lstsq(X, y, rcond=None)[0]
-        xg = np.linspace(x.min(), x.max(), 100)
-        z_lo, z_hi = np.quantile(z, [0.25, 0.75])
-        y_lo = b0 + b1 * xg + b2 * z_lo + b3 * xg * z_lo
-        y_hi = b0 + b1 * xg + b2 * z_hi + b3 * xg * z_hi
+
+        marker_cycle = ["o", "s", "^", "D", "v", "P", "X"]
+        marker_map = {v: marker_cycle[i % len(marker_cycle)] for i, v in enumerate(voc_vals)}
+
+        metrics = [("F1_nT", r"$F_{1,nT}$ (strong)"), ("F1_nr", r"$F_{1,nr}$ (weak)")]
+        n_rows, n_cols = len(metrics), len(p_vals)
+        tag = str(profile_tag) if profile_tag else "default"
 
         out_dir = pathlib.Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        fig = plt.figure(figsize=(8, 6))
-        sc = plt.scatter(x, y, c=z, cmap="viridis", alpha=0.80, edgecolors="none")
-        plt.plot(xg, y_lo, color="#1f77b4", linewidth=2.2, label="low complexity (q25)")
-        plt.plot(xg, y_hi, color="#d62728", linewidth=2.2, label="high complexity (q75)")
-        plt.xlabel("topsim intensional levenshtein")
-        plt.ylabel("n")
-        tag = str(profile_tag) if profile_tag else "default"
-        plt.title(f"topsim x complexity interaction for n ({tag})")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        cbar = plt.colorbar(sc)
-        cbar.set_label("log2(complexity)")
+
+        fig, axes = plt.subplots(n_rows, n_cols,
+                                 figsize=(4.2 * n_cols, 4.0 * n_rows),
+                                 squeeze=False)
+
+        reap_all = pd.to_numeric(merged["reaper_interval"], errors="coerce").dropna()
+        reap_min = float(reap_all.min())
+        reap_max = float(reap_all.max())
+        cmap = plt.get_cmap("viridis")
+        norm = plt.Normalize(vmin=reap_min, vmax=reap_max)
+
+        for row_i, (col, ylabel) in enumerate(metrics):
+            for col_i, p in enumerate(p_vals):
+                ax = axes[row_i][col_i]
+                sub = merged[pd.to_numeric(merged["complexity"], errors="coerce") == p].copy()
+                sub = sub.dropna(subset=["topsim_intensional_levenshtein", col,
+                                         "reaper_interval"])
+
+                x_all = pd.to_numeric(sub["topsim_intensional_levenshtein"], errors="coerce").to_numpy(float)
+                y_all = pd.to_numeric(sub[col], errors="coerce").to_numpy(float)
+                reap_col = pd.to_numeric(sub["reaper_interval"], errors="coerce")
+                voc_col = pd.to_numeric(sub["voc_penalty"], errors="coerce")
+
+                for v in voc_vals:
+                    mask = (voc_col == v).to_numpy() & np.isfinite(x_all) & np.isfinite(y_all) & reap_col.notna().to_numpy()
+                    if not mask.any():
+                        continue
+                    colors = cmap(norm(reap_col.to_numpy(float)[mask]))
+                    ax.scatter(x_all[mask], y_all[mask],
+                               c=colors, marker=marker_map[v], s=28,
+                               alpha=0.85, edgecolors="none",
+                               label=self._fmt_voc_label(v) if (row_i == 0 and col_i == 0) else None)
+
+                fit_mask = np.isfinite(x_all) & np.isfinite(y_all)
+                if fit_mask.sum() >= 2 and np.ptp(x_all[fit_mask]) > 1e-12:
+                    a, b = np.polyfit(x_all[fit_mask], y_all[fit_mask], deg=1)
+                    xg = np.linspace(x_all[fit_mask].min(), x_all[fit_mask].max(), 100)
+                    ax.plot(xg, a * xg + b, color="#111111", linewidth=1.8, zorder=5)
+
+                r_val, p_val = self._pearson_r_p(x_all[fit_mask], y_all[fit_mask])
+                r_txt = f"r={r_val:.2f}" if np.isfinite(r_val) else "r=nan"
+                ax.set_title(f"p={int(p)}  {r_txt} ({self._format_p_value(p_val)})", fontsize=9)
+                ax.set_xlabel("topsim", fontsize=8)
+                if col_i == 0:
+                    ax.set_ylabel(ylabel, fontsize=9)
+                ax.grid(True, alpha=0.25)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=axes[:, -1].tolist(), fraction=0.035, pad=0.04)
+        cbar.set_label("reaper_interval", fontsize=8)
+
+        if voc_vals:
+            handles = [
+                plt.Line2D([0], [0], marker=marker_map[v], color="grey",
+                           linestyle="none", markersize=6,
+                           label=self._fmt_voc_label(v))
+                for v in voc_vals
+            ]
+            axes[0][0].legend(handles=handles, fontsize=7,
+                              title="voc_penalty", title_fontsize=7,
+                              loc="upper left")
+
+        fig.suptitle(f"topsim vs negation profiles ({tag})", fontsize=11,
+                     fontweight="bold", y=1.01)
         fig.tight_layout()
-        fig.savefig(out_dir / f"topsim_n_interaction_{tag}_{self.name}.png", dpi=150)
+        fig.savefig(out_dir / f"topsim_vs_negation_june_{tag}_{self.name}.png", dpi=150)
         plt.close(fig)
+
