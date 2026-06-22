@@ -497,7 +497,8 @@ def _select_language_for_epoch(languages, target_epoch):
 
 def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
     latest_only: bool = False, best_accuracy_only: bool = False, outputs_dir=None,
-    profile: str = "fast", operator: str = "or", n_jobs: int = 1):
+    profile: str = "fast", operator: str = "or", n_jobs: int = 1,
+    filter_predicates: bool = False):
     """Perform analysis over datapoints and export a csv with top rows and a csv with the one top row."""
     if(outputs_dir is None): outputs_dir = pathlib.Path(__file__).resolve().parent / "outputs"
     outputs_dir = pathlib.Path(outputs_dir)
@@ -535,8 +536,11 @@ def export_analysis(datapoints_list, experiment_name: str, top_rows: int = 10,
         vocab_size = dp["evaluation"]["eval/vocab_used"].iloc[-1]
         for lang_entry in language_entries:
             epoch_number = lang_entry["epoch_number"]
+            lang_df = lang_entry["language"]
+            if filter_predicates:
+                lang_df = lang_df[~lang_df["pred_str"].str.contains("∧", regex=False)]
             tasks.append((
-                lang_entry["language"],
+                lang_df,
                 top_rows,
                 profile,
                 operator,

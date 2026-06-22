@@ -818,7 +818,9 @@ class ExperimentPlots:
     def _write_latex_heatmap(self, path, value_matrix, row_labels, col_labels, *,
                               vmin, vmax, colormap="viridis", fmt="{:.2f}",
                               caption="", label="fig:heatmap",
-                              baseline_rc=None, preamble=None):
+                              baseline_rc=None, preamble=None,
+                              horizontal=True, colorbar_label="",
+                              xlabel="", ylabel=""):
         """Write a pgfplots matrix-plot heatmap with annotated cells (.tex).
 
         value_matrix : 2D numpy array (n_rows × n_cols); row 0 → y=1 (bottom).
@@ -826,7 +828,16 @@ class ExperimentPlots:
         col_labels   : tick labels for x-axis (one per col).
         baseline_rc  : (row_idx, col_idx) → red outline rectangle on that cell.
         preamble     : extra lines inserted between \\centering and \\begin{tikzpicture}.
+        horizontal   : if True, transpose so the longer axis runs along x (wide layout,
+                       square cells).
+        colorbar_label: ylabel string for the colorbar (empty = no label).
         """
+        if horizontal:
+            value_matrix = value_matrix.T
+            row_labels, col_labels = col_labels, row_labels
+            if baseline_rc is not None:
+                baseline_rc = (baseline_rc[1], baseline_rc[0])
+
         n_rows, n_cols = value_matrix.shape
         _cmap_fn = plt.get_cmap(colormap)
         _cmap_range = max(vmax - vmin, 1e-12)
@@ -837,8 +848,10 @@ class ExperimentPlots:
             luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
             return "white" if luminance < 0.45 else "black"
 
-        pw = round(max(0.09 * n_cols, 0.28), 2)
-        ph = round(max(0.07 * n_rows, 0.18), 2)
+        # Square cells: fit the wider axis to 0.72\linewidth.
+        cell_size = round(min(0.08, 0.72 / max(n_cols, 1)), 4)
+        pw = round(cell_size * n_cols, 2)
+        ph = round(cell_size * n_rows, 2)
 
         def _fmtv(v):
             if not np.isfinite(float(v)):
@@ -848,17 +861,25 @@ class ExperimentPlots:
         lines = [r"\begin{figure}[htbp]", r"\centering"]
         if preamble:
             lines += list(preamble)
-        lines += [
+        axis_opts = [
             r"\begin{tikzpicture}",
             r"\begin{axis}[",
             r"    scale only axis,",
             f"    width={pw:.2f}\\linewidth,",
             f"    height={ph:.2f}\\linewidth,",
-            f"    xmin=0.5, xmax={n_cols + 0.5},",
-            f"    ymin=0.5, ymax={n_rows + 0.5},",
+        ]
+        if xlabel:
+            axis_opts.append(f"    xlabel={{{xlabel}}},")
+        if ylabel:
+            axis_opts.append(f"    ylabel={{{ylabel}}},")
+        axis_opts += [
+            r"    xmin=0.5,",
+            f"    xmax={n_cols + 0.5},",
+            r"    ymin=0.5,",
+            f"    ymax={n_rows + 0.5},",
             f"    xtick={{{','.join(str(i + 1) for i in range(n_cols))}}},",
             f"    xticklabels={{{','.join(str(l) for l in col_labels)}}},",
-            r"    x tick label style={rotate=45,anchor=east,font=\scriptsize},",
+            r"    x tick label style={rotate=0,anchor=east,font=\scriptsize,yshift=-0.6em},",
             f"    ytick={{{','.join(str(i + 1) for i in range(n_rows))}}},",
             f"    yticklabels={{{','.join(str(l) for l in row_labels)}}},",
             r"    y tick label style={font=\scriptsize},",
@@ -867,14 +888,21 @@ class ExperimentPlots:
             r"    enlargelimits=false,",
             f"    colormap/{colormap},",
             r"    colorbar,",
-            r"    colorbar style={yticklabel style={font=\scriptsize}},",
+            (f"    colorbar style={{ylabel={{{colorbar_label}}},yticklabel style={{font=\\scriptsize}},ylabel style={{font=\\scriptsize}}}},"
+             if colorbar_label else
+             r"    colorbar style={yticklabel style={font=\scriptsize}},"),
             f"    point meta min={vmin:.4g},",
             f"    point meta max={vmax:.4g},",
             f"    mesh/cols={n_cols},",
             r"]",
             r"",
-            r"\addplot[matrix plot*, point meta=explicit, draw=none] coordinates {",
+            r"\addplot[",
+            r"    matrix plot*,",
+            r"    point meta=explicit,",
+            r"    draw=none",
+            r"] coordinates {",
         ]
+        lines += axis_opts
         for ri in range(n_rows):
             row_parts = []
             for ci in range(n_cols):
@@ -912,6 +940,194 @@ class ExperimentPlots:
             lines.append("")
         lines += [
             r"\end{axis}",
+            r"\end{tikzpicture}",
+            f"\\caption{{{caption}}}",
+            f"\\label{{{label}}}",
+            r"\end{figure}",
+            "",
+        ]
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines))
+
+    def _write_latex_heatmap_groupplot(self, path, panels, row_labels, col_labels, *,
+                                        vmin, vmax, colormap="viridis", fmt="{:.2f}",
+                                        xlabel="", ylabel="", colorbar_label="",
+                                        caption="", label="fig:heatmap_grouped",
+                                        secondary_matrices=None, secondary_fmt="{:+.2f}",
+                                        n_cols_group=1, col_titles=None):
+        """Write a pgfplots groupplot of heatmap panels.
+
+        panels           : list of (matrix, title_str, baseline_rc_or_None), row-major.
+                           matrix shape: (n_rows × n_cols) as it should appear on screen.
+        secondary_matrices: optional list of arrays (one per panel, same shape as primary).
+                           When provided each cell shows two stacked annotations: primary
+                           value (scriptsize, upper) and secondary value (tiny, lower).
+                           Cell color is always driven by the primary matrix.
+        row_labels   : y-axis tick labels.
+        col_labels   : x-axis tick labels.
+        n_cols_group : number of groupplot columns (default 1; use 2 for side-by-side metrics).
+        col_titles   : list of title strings for top-row panels (one per group column).
+        Colorbar placed on last panel only; all panels share point meta min/max.
+        Requires \\usepgfplotslibrary{groupplots} in the document preamble.
+        """
+        n_rows = len(row_labels)
+        n_cols = len(col_labels)
+        n_panels = len(panels)
+        n_rows_group = (n_panels + n_cols_group - 1) // n_cols_group
+
+        _cmap_fn = plt.get_cmap(colormap)
+        _cmap_range = max(vmax - vmin, 1e-12)
+
+        def _text_color(v):
+            norm_v = float(np.clip((v - vmin) / _cmap_range, 0.0, 1.0))
+            r, g, b, _ = _cmap_fn(norm_v)
+            luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            return "white" if luminance < 0.45 else "black"
+
+        cell_size = round(min(0.08, 0.72 / max(n_cols * n_cols_group, 1)), 4)
+        pw = round(cell_size * n_cols, 2)
+        ph = round(cell_size * n_rows, 2)
+
+        def _fmtv(v):
+            if not np.isfinite(float(v)):
+                return ""
+            return fmt.format(float(v))
+
+        lines = [
+            r"\begin{figure}[htbp]",
+            r"\centering",
+            r"\begin{tikzpicture}",
+            r"\begin{groupplot}[",
+            r"    group style={",
+            f"        group size={n_cols_group} by {n_rows_group},",
+            r"        vertical sep=0.8cm,",
+        ]
+        if n_cols_group > 1:
+            lines.append(r"        horizontal sep=1.2cm,")
+        lines += [
+            r"        xlabels at=edge bottom,",
+            r"        ylabels at=edge left,",
+            r"    },",
+            r"    scale only axis,",
+            f"    width={pw:.2f}\\linewidth,",
+            f"    height={ph:.2f}\\linewidth,",
+        ]
+        if xlabel and n_cols_group > 1:
+            lines.append(f"    xlabel={{{xlabel}}},")
+        lines += [
+            r"    xmin=0.5,",
+            f"    xmax={n_cols + 0.5},",
+            r"    ymin=0.5,",
+            f"    ymax={n_rows + 0.5},",
+            f"    xtick={{{','.join(str(i + 1) for i in range(n_cols))}}},",
+            f"    xticklabels={{{','.join(str(l) for l in col_labels)}}},",
+            r"    x tick label style={rotate=0,anchor=east,font=\scriptsize,yshift=-0.6em},",
+            f"    ytick={{{','.join(str(i + 1) for i in range(n_rows))}}},",
+            f"    yticklabels={{{','.join(str(l) for l in row_labels)}}},",
+            r"    y tick label style={font=\scriptsize},",
+            r"    tick style={draw=none},",
+            r"    axis line style={draw=none},",
+            r"    enlargelimits=false,",
+            f"    colormap/{colormap},",
+            f"    point meta min={vmin:.4g},",
+            f"    point meta max={vmax:.4g},",
+            f"    mesh/cols={n_cols},",
+            r"]",
+            r"",
+        ]
+
+        for panel_idx, (mat, title_str, brc) in enumerate(panels):
+            col_in_group = panel_idx % n_cols_group
+            row_in_group = panel_idx // n_cols_group
+            is_last = (panel_idx == n_panels - 1)
+            is_left_col = (col_in_group == 0)
+            is_top_row = (row_in_group == 0)
+
+            panel_opts = []
+            if is_left_col:
+                panel_opts.append(f"    ylabel={{$|\\mathcal{{V}}_i|{{=}}{title_str}$}},")
+            else:
+                panel_opts.append(r"    yticklabels={},")
+
+            if is_top_row and col_titles and col_in_group < len(col_titles):
+                panel_opts.append(f"    title={{{col_titles[col_in_group]}}},")
+
+            if is_last:
+                panel_opts.append(r"    colorbar,")
+                if colorbar_label:
+                    panel_opts.append(
+                        f"    colorbar style={{ylabel={{{colorbar_label}}},yticklabel style={{font=\\scriptsize}},ylabel style={{font=\\scriptsize}}}},"
+                    )
+                else:
+                    panel_opts.append(r"    colorbar style={yticklabel style={font=\scriptsize}},")
+
+            if xlabel and n_cols_group == 1 and is_last:
+                panel_opts.append(f"    xlabel={{{xlabel}}},")
+
+            lines.append(r"\nextgroupplot[")
+            lines += panel_opts
+            lines.append(r"]")
+            lines += [
+                r"\addplot[",
+                r"    matrix plot*,",
+                r"    point meta=explicit,",
+                r"    draw=none",
+                r"] coordinates {",
+            ]
+            for ri in range(n_rows):
+                row_parts = []
+                for ci in range(n_cols):
+                    v = float(mat[ri, ci])
+                    try:
+                        cell_val = float(fmt.format(v)) if np.isfinite(v) else vmin
+                    except Exception:
+                        cell_val = v if np.isfinite(v) else vmin
+                    row_parts.append(f"({ci + 1},{ri + 1}) [{cell_val:.4g}]")
+                lines.append("    " + " ".join(row_parts))
+            lines += ["};", ""]
+
+            sec_mat = secondary_matrices[panel_idx] if secondary_matrices is not None else None
+            for ri in range(n_rows):
+                for ci in range(n_cols):
+                    v = float(mat[ri, ci])
+                    if not np.isfinite(v):
+                        continue
+                    color = _text_color(v)
+                    if sec_mat is not None:
+                        v2 = float(sec_mat[ri, ci])
+                        sec_str = secondary_fmt.format(float(v2)) if np.isfinite(v2) else ""
+                        lines.append(
+                            f"\\node[font=\\scriptsize,text={color}]"
+                            f" at (axis cs:{ci + 1},{ri + 1 + 0.15}) {{{_fmtv(v)}}};"
+                        )
+                        if sec_str:
+                            lines.append(
+                                f"\\node[font=\\tiny,text={color}]"
+                                f" at (axis cs:{ci + 1},{ri + 1 - 0.18}) {{{sec_str}}};"
+                            )
+                    else:
+                        lines.append(
+                            f"\\node[font=\\scriptsize,text={color}]"
+                            f" at (axis cs:{ci + 1},{ri + 1}) {{{_fmtv(v)}}};"
+                        )
+            lines.append("")
+
+            if brc is not None:
+                bri, bci = brc
+                lines.append(
+                    f"\\draw[red,ultra thick]"
+                    f" (axis cs:{bci + 1 - 0.5},{bri + 1 - 0.5})"
+                    f" rectangle (axis cs:{bci + 1 + 0.5},{bri + 1 + 0.5});"
+                )
+                lines.append("")
+
+        mid_row = (n_rows_group + 1) // 2
+        lines.append(r"\end{groupplot}")
+        if ylabel:
+            lines.append(
+                f"\\node[rotate=90,font=\\small] at ($(group c1r{mid_row}.west)+(-2.2cm,0)$) {{{ylabel}}};"
+            )
+        lines += [
             r"\end{tikzpicture}",
             f"\\caption{{{caption}}}",
             f"\\label{{{label}}}",
@@ -2514,7 +2730,7 @@ class MayPlots(ExperimentPlots):
         tex_lines += [
             r"\pgfplotsset{every axis/.append style={",
             r"    grid=both, ymin=0,",
-            r"    x tick label style={rotate=45,anchor=east,font=\scriptsize},",
+            r"    x tick label style={rotate=0,anchor=east,font=\scriptsize,yshift=-0.6em},",
             r"    title style={font=\small},",
             r"    label style={font=\small},",
             r"    tick label style={font=\scriptsize},",
@@ -3191,10 +3407,10 @@ class JunePlots(ExperimentPlots):
     def _build_final_metrics_df(self):
         """Per-run summary: final-epoch accuracy, topsim, reaper, voc, complexity."""
         topsim_priority = [
-            "eval/topsim_extensional_norm_levenshtein",
             "eval/topsim_intensional_norm_levenshtein",
-            "eval/topsim_extensional_levenshtein",
+            "eval/topsim_extensional_norm_levenshtein",
             "eval/topsim_intensional_levenshtein",
+            "eval/topsim_extensional_levenshtein",
         ]
         rows = []
         for dp in self.datapoints:
@@ -3231,14 +3447,64 @@ class JunePlots(ExperimentPlots):
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         return df
 
+    def _build_best_accuracy_metrics_df(self):
+        """Per-run summary at best-accuracy epoch: accuracy, topsim, reaper, voc, complexity."""
+        topsim_priority = [
+            "eval/topsim_intensional_norm_levenshtein",
+            "eval/topsim_extensional_norm_levenshtein",
+            "eval/topsim_intensional_levenshtein",
+            "eval/topsim_extensional_levenshtein",
+        ]
+        rows = []
+        for dp in self.datapoints:
+            cfg = dp.get("config", {})
+            eval_df = dp.get("evaluation")
+            if eval_df is None or eval_df.empty:
+                continue
+            reaper = cfg.get("beth_reaper_step") or cfg.get("reaper_step")
+            voc = cfg.get("voc_penalty", cfg.get("voc_pen"))
+            complexity = cfg.get("num_predicates")
+            acc_col = "eval/accuracy" if "eval/accuracy" in eval_df.columns else (
+                "eval/perf" if "eval/perf" in eval_df.columns else None)
+            if acc_col:
+                row = eval_df.loc[eval_df[acc_col].idxmax()]
+            else:
+                row = eval_df.iloc[-1]
+            acc = pd.to_numeric(row.get("eval/accuracy"), errors="coerce")
+            topsim = np.nan
+            for tc in topsim_priority:
+                if tc in eval_df.columns:
+                    v = pd.to_numeric(row.get(tc), errors="coerce")
+                    if pd.notna(v):
+                        topsim = v
+                        break
+            rows.append({
+                "run_name": str(dp.get("run_name", "")),
+                "complexity": complexity,
+                "properties": str(cfg.get("properties")),
+                "reaper_interval": reaper,
+                "voc_penalty": voc,
+                "final_accuracy": float(acc) if pd.notna(acc) else np.nan,
+                "final_topsim": float(topsim) if pd.notna(topsim) else np.nan,
+            })
+        if not rows:
+            return None
+        df = pd.DataFrame(rows)
+        for c in ["complexity", "reaper_interval", "voc_penalty", "final_accuracy", "final_topsim"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        return df
+
     def _fmt_voc_label(self, v):
         if not np.isfinite(float(v)) or abs(float(v)) < 1e-15:
             return "0"
         return f"{float(v):.1e}"
 
-    def _fmt_reaper_label(self, v):
+    def _fmt_reaper_label(self, v, latex=False):
         iv = int(float(v))
-        return f"{iv}\n(no reset)" if iv >= 120 else str(iv)
+        if iv >= 120:
+            return r"$\emptyset$" if latex else "no reset"
+        return str(iv)
 
     def _draw_heatmap_panel(self, ax, pivot, reaper_vals, voc_vals, *,
                             vmin, vmax, cmap="viridis",
@@ -3971,12 +4237,12 @@ class JunePlots(ExperimentPlots):
         except Exception:
             pass
 
-        row_labels = [self._fmt_reaper_label(r) for r in reaper_vals]
+        row_labels = [self._fmt_reaper_label(r, latex=True) for r in reaper_vals]
         col_labels = [self._fmt_voc_label(v) for v in voc_vals]
 
         metric_specs = []
         if "final_accuracy" in sub.columns and sub["final_accuracy"].notna().any():
-            metric_specs.append(("final_accuracy", "accuracy", "Blues", "accuracy", "{:.2f}"))
+            metric_specs.append(("final_accuracy", "accuracy", "viridis", "accuracy", "{:.2f}"))
         if "final_topsim" in sub.columns and sub["final_topsim"].notna().any():
             metric_specs.append(("final_topsim", "topsim", "viridis", "topsim", "{:.2f}"))
 
@@ -4007,8 +4273,163 @@ class JunePlots(ExperimentPlots):
                              f"$p = {p_str}$."),
                     label=f"fig:pressure_heatmap_{file_tag}_p{p_str}",
                     baseline_rc=brc,
+                    horizontal=True, colorbar_label=f"median {metric_label}",
+                    xlabel="reset interval", ylabel="vocabulary pressure",
                 )
                 print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_pressure_heatmaps_grouped(self, *, out_dir="plots"):
+        """Grouped multi-panel heatmaps: one panel per complexity p, vertically stacked.
+        Generates both best-accuracy-epoch (_bestacc) and final-epoch (_final) variants."""
+        epoch_sources = [
+            (self._build_best_accuracy_metrics_df(), "bestacc", "best-accuracy epoch"),
+            (self._build_final_metrics_df(),          "final",   "final epoch"),
+        ]
+
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        for df, epoch_tag, epoch_label in epoch_sources:
+            if df is None or df.empty:
+                continue
+            required = {"reaper_interval", "voc_penalty", "complexity"}
+            if not required.issubset(df.columns):
+                continue
+            sub = df.dropna(subset=list(required))
+            if sub.empty:
+                continue
+
+            reaper_vals  = sorted(sub["reaper_interval"].unique())
+            voc_vals     = sorted(sub["voc_penalty"].unique())
+            complexities = sorted(sub["complexity"].unique())
+
+            col_labels = [self._fmt_reaper_label(r, latex=True) for r in reaper_vals]
+            row_labels = [self._fmt_voc_label(v) for v in voc_vals]
+
+            brc_shared = None
+            try:
+                ri_b = [i for i, r in enumerate(reaper_vals) if float(r) >= 120]
+                ci_b = [i for i, v in enumerate(voc_vals) if abs(float(v)) < 1e-12]
+                if ri_b and ci_b:
+                    brc_shared = (ci_b[0], ri_b[0])
+            except Exception:
+                pass
+
+            metric_specs = []
+            if "final_accuracy" in sub.columns and sub["final_accuracy"].notna().any():
+                metric_specs.append(("final_accuracy", "accuracy", "viridis", "{:.2f}", "accuracy"))
+            if "final_topsim" in sub.columns and sub["final_topsim"].notna().any():
+                metric_specs.append(("final_topsim", "topsim", "viridis", "{:.2f}", "topsim"))
+
+            for metric_col, metric_label, colormap, fmt, file_tag in metric_specs:
+                valid = sub.dropna(subset=[metric_col])
+                if valid.empty:
+                    continue
+                vmin = float(np.nanpercentile(valid[metric_col], 5))
+                vmax = float(np.nanpercentile(valid[metric_col], 95))
+
+                panels = []
+                for c in complexities:
+                    csub = valid[valid["complexity"] == c]
+                    if csub.empty:
+                        continue
+                    heat_agg = (csub.groupby(["reaper_interval", "voc_penalty"])[metric_col]
+                                .median().reset_index())
+                    pivot = heat_agg.pivot(index="reaper_interval", columns="voc_penalty",
+                                           values=metric_col)
+                    mat = pivot.reindex(index=reaper_vals, columns=voc_vals).values.T
+                    props = csub["properties"].dropna().astype(str).unique()
+                    p_str = (sorted(props, key=self._properties_sort_key)[0]
+                             if len(props) else str(int(c)))
+                    panels.append((mat, p_str, brc_shared))
+
+                if not panels:
+                    continue
+
+                fname = f"pressure_heatmap_grouped_{file_tag}_{epoch_tag}_{self.name}.tex"
+                self._write_latex_heatmap_groupplot(
+                    latex_dir / fname, panels, row_labels, col_labels,
+                    vmin=vmin, vmax=vmax, colormap=colormap, fmt=fmt,
+                    xlabel="reset interval", ylabel="vocabulary pressure",
+                    colorbar_label=f"median {metric_label}",
+                    caption=(
+                        f"Median {metric_label} at {epoch_label} across the reset interval "
+                        r"$\times$ vocabulary pressure grid for all predicate-value counts. "
+                        r"Highlighted cell: no-pressure baseline ($r{=}120,\;\lambda{=}0$). "
+                        r"Colorbar is shared across all panels."
+                    ),
+                    label=f"fig:pressure_heatmap_grouped_{file_tag}_{epoch_tag}",
+                )
+                print(f"[INFO] LaTeX: saved {fname}")
+
+        # Combined topsim figure: bestacc color + final-epoch annotation below each value
+        df_ba = self._build_best_accuracy_metrics_df()
+        df_fi = self._build_final_metrics_df()
+        if df_ba is not None and df_fi is not None:
+            required = {"reaper_interval", "voc_penalty", "complexity"}
+            sub_ba = df_ba.dropna(subset=list(required)) if required.issubset(df_ba.columns) else None
+            sub_fi = df_fi.dropna(subset=list(required)) if required.issubset(df_fi.columns) else None
+            if (sub_ba is not None and not sub_ba.empty and
+                    sub_fi is not None and not sub_fi.empty and
+                    "final_topsim" in sub_ba.columns and "final_topsim" in sub_fi.columns):
+                reaper_vals  = sorted(sub_ba["reaper_interval"].unique())
+                voc_vals     = sorted(sub_ba["voc_penalty"].unique())
+                complexities = sorted(sub_ba["complexity"].unique())
+                col_labels   = [self._fmt_reaper_label(r, latex=True) for r in reaper_vals]
+                row_labels   = [self._fmt_voc_label(v) for v in voc_vals]
+                brc_shared = None
+                try:
+                    ri_b = [i for i, r in enumerate(reaper_vals) if float(r) >= 120]
+                    ci_b = [i for i, v in enumerate(voc_vals) if abs(float(v)) < 1e-12]
+                    if ri_b and ci_b:
+                        brc_shared = (ci_b[0], ri_b[0])
+                except Exception:
+                    pass
+                valid_ba = sub_ba.dropna(subset=["final_topsim"])
+                valid_fi = sub_fi.dropna(subset=["final_topsim"])
+                vmin = float(np.nanpercentile(valid_ba["final_topsim"], 5))
+                vmax = float(np.nanpercentile(valid_ba["final_topsim"], 95))
+                panels, secondary_matrices = [], []
+                for c in complexities:
+                    ba_c = valid_ba[valid_ba["complexity"] == c]
+                    fi_c = valid_fi[valid_fi["complexity"] == c]
+                    if ba_c.empty or fi_c.empty:
+                        continue
+                    def _pivot(df_c):
+                        agg = (df_c.groupby(["reaper_interval", "voc_penalty"])["final_topsim"]
+                               .median().reset_index())
+                        piv = agg.pivot(index="reaper_interval", columns="voc_penalty",
+                                        values="final_topsim")
+                        return piv.reindex(index=reaper_vals, columns=voc_vals).values.T
+                    mat_ba = _pivot(ba_c)
+                    mat_fi = _pivot(fi_c)
+                    props = ba_c["properties"].dropna().astype(str).unique()
+                    p_str = (sorted(props, key=self._properties_sort_key)[0]
+                             if len(props) else str(int(c)))
+                    panels.append((mat_ba, p_str, brc_shared))
+                    secondary_matrices.append(mat_fi - mat_ba)
+                if panels:
+                    fname = f"pressure_heatmap_grouped_topsim_combined_{self.name}.tex"
+                    self._write_latex_heatmap_groupplot(
+                        latex_dir / fname, panels, row_labels, col_labels,
+                        vmin=vmin, vmax=vmax, colormap="viridis", fmt="{:.2f}",
+                        xlabel="reset interval", ylabel="vocabulary pressure",
+                        colorbar_label="median topsim (best-acc epoch)",
+                        secondary_matrices=secondary_matrices,
+                        secondary_fmt="{:+.2f}",
+                        caption=(
+                            r"Median topographic similarity across the reset interval "
+                            r"$\times$ vocabulary pressure grid. "
+                            r"Cell colour and upper value: best-accuracy epoch. "
+                            r"Lower value (\textit{smaller font}): change to final epoch (epoch~119); "
+                            r"negative = topsim degraded. "
+                            r"Highlighted cell: no-pressure baseline ($r{=}120,\;\lambda{=}0$). "
+                            r"Colorbar is shared across all panels."
+                        ),
+                        label="fig:pressure_heatmap_grouped_topsim_combined",
+                    )
+                    print(f"[INFO] LaTeX: saved {fname}")
 
     def export_latex_pressure_table(self, *, out_dir="plots"):
         """Booktabs tables (one per complexity p) of median accuracy and topsim
@@ -4049,7 +4470,7 @@ class JunePlots(ExperimentPlots):
                 pivot = (agg.pivot(index="reaper_interval", columns="voc_penalty",
                                    values=metric_col)
                          .reindex(index=reaper_vals, columns=voc_vals))
-                pivot.index = [self._fmt_reaper_label(r) for r in reaper_vals]
+                pivot.index = [self._fmt_reaper_label(r, latex=True) for r in reaper_vals]
                 pivot.columns = [self._fmt_voc_label(v) for v in voc_vals]
                 pivot.index.name = "reset interval"
                 tbl = pivot.reset_index()
@@ -4110,7 +4531,7 @@ class JunePlots(ExperimentPlots):
         vmin = float(np.nanpercentile(f1_all, 5)) if len(f1_all) else 0.0
         vmax = float(np.nanpercentile(f1_all, 95)) if len(f1_all) else 1.0
 
-        row_labels = [self._fmt_reaper_label(r) for r in reaper_vals]
+        row_labels = [self._fmt_reaper_label(r, latex=True) for r in reaper_vals]
         col_labels = [self._fmt_voc_label(v) for v in voc_vals]
 
         brc = None
@@ -4135,14 +4556,114 @@ class JunePlots(ExperimentPlots):
                 fname = f"pressure_heatmap_{file_tag}_p{p}_{self.name}.tex"
                 self._write_latex_heatmap(
                     latex_dir / fname, mat, row_labels, col_labels,
-                    vmin=vmin, vmax=vmax, colormap="magma", fmt="{:.2f}",
+                    vmin=vmin, vmax=vmax, colormap="viridis", fmt="{:.2f}",
                     caption=(f"Median {metric_col} by reset interval "
                              r"$\times$ vocabulary pressure. "
                              f"$p = {p}$."),
                     label=f"fig:pressure_heatmap_{file_tag}_p{p}",
                     baseline_rc=brc,
+                    horizontal=True, colorbar_label=f"median {metric_col}",
+                    xlabel="reset interval", ylabel="vocabulary pressure",
                 )
                 print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_pressure_heatmaps_negation_grouped(self, neg_df, *, out_dir="plots"):
+        """Grouped multi-panel negation heatmaps: one panel per complexity p, vertically stacked.
+        Produces one grouped file per metric (F1_nT, F1_nr) instead of 3 separate per-p files."""
+        df_neg = self._prepare_negation_top_df(neg_df)
+        if df_neg is None or df_neg.empty:
+            return
+        required = {"reaper_interval", "voc_penalty", "complexity"}
+        if not required.issubset(df_neg.columns):
+            return
+        df_neg = df_neg.dropna(subset=list(required)).copy()
+        if df_neg.empty:
+            return
+
+        if "F1_nT" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            t = pd.to_numeric(df_neg.get("l_T", df_neg.get("t")), errors="coerce")
+            non_t = 1.0 - t
+            den = n + non_t
+            df_neg["F1_nT"] = np.where(
+                (den > 0) & n.notna() & t.notna(), 2.0 * n * non_t / den, np.nan)
+        if "F1_nr" not in df_neg.columns:
+            n = pd.to_numeric(df_neg.get("n"), errors="coerce")
+            r_col = pd.to_numeric(df_neg.get("r", df_neg.get("c")), errors="coerce")
+            den = n + r_col
+            df_neg["F1_nr"] = np.where(
+                (den > 0) & n.notna() & r_col.notna(), 2.0 * n * r_col / den, np.nan)
+
+        if "properties" in df_neg.columns and df_neg["properties"].notna().any():
+            df_neg["_p_label"] = df_neg["properties"].astype(str)
+        else:
+            df_neg["_p_label"] = df_neg["complexity"].astype(str)
+
+        p_vals      = sorted(df_neg["_p_label"].dropna().unique(), key=self._properties_sort_key)
+        reaper_vals = sorted(df_neg["reaper_interval"].dropna().unique())
+        voc_vals    = sorted(df_neg["voc_penalty"].dropna().unique())
+
+        # Shared colorscale across both metrics and all p values (same as per-p method)
+        f1_all = pd.concat([df_neg["F1_nT"].dropna(), df_neg["F1_nr"].dropna()])
+        vmin = float(np.nanpercentile(f1_all, 5)) if len(f1_all) else 0.0
+        vmax = float(np.nanpercentile(f1_all, 95)) if len(f1_all) else 1.0
+
+        # Transposed layout: cols=reaper (x), rows=voc (y)
+        col_labels = [self._fmt_reaper_label(r, latex=True) for r in reaper_vals]
+        row_labels = [self._fmt_voc_label(v) for v in voc_vals]
+
+        # Baseline after transposition: row=voc_0 index, col=reaper_120 index
+        brc_shared = None
+        try:
+            ri_b = [i for i, r in enumerate(reaper_vals) if float(r) >= 120]
+            ci_b = [i for i, v in enumerate(voc_vals) if abs(float(v)) < 1e-12]
+            if ri_b and ci_b:
+                brc_shared = (ci_b[0], ri_b[0])
+        except Exception:
+            pass
+
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build per-p matrices for both metrics; interleave into 2-col row-major order
+        panels = []
+        for p in p_vals:
+            mats = {}
+            for metric_col in ("F1_nT", "F1_nr"):
+                psub = df_neg[df_neg["_p_label"] == p].dropna(subset=[metric_col])
+                if psub.empty:
+                    mats[metric_col] = np.full((len(voc_vals), len(reaper_vals)), np.nan)
+                    continue
+                heat_agg = (psub.groupby(["reaper_interval", "voc_penalty"])[metric_col]
+                            .median().reset_index())
+                pivot = heat_agg.pivot(index="reaper_interval", columns="voc_penalty",
+                                       values=metric_col)
+                mats[metric_col] = pivot.reindex(index=reaper_vals, columns=voc_vals).values.T
+            panels.append((mats["F1_nT"], p, brc_shared))  # col 1: F_s
+            panels.append((mats["F1_nr"], p, brc_shared))  # col 2: F_w
+
+        if not panels:
+            return
+
+        fname = f"pressure_heatmap_grouped_negation_{self.name}.tex"
+        self._write_latex_heatmap_groupplot(
+            latex_dir / fname, panels, row_labels, col_labels,
+            vmin=vmin, vmax=vmax, colormap="viridis", fmt="{:.2f}",
+            xlabel="reset interval", ylabel="vocabulary pressure",
+            colorbar_label="median $F$",
+            caption=(
+                r"Median $F_s$ (left column) and $F_w$ (right column) across the "
+                r"reset interval $\times$ vocabulary pressure grid, for $|\mathcal{V}_i|\in\{16,32,64\}$ "
+                r"(rows). Best-accuracy epoch; top-1 negation feature per run. "
+                r"Highlighted cell: no-pressure baseline ($r{=}120,\;\lambda{=}0$). "
+                r"Colorbar shared across all panels."
+            ),
+            label="fig:pressure_heatmap_grouped_negation",
+            n_cols_group=2,
+            col_titles=[r"$F_s$", r"$F_w$"],
+        )
+        print(f"[INFO] LaTeX: saved {fname}")
 
     def export_latex_negation_interaction(self, neg_df, *, out_dir="plots"):
         """LaTeX version of plot_negation_interaction_reaper_voc: groupplot."""
@@ -4568,6 +5089,165 @@ class JunePlots(ExperimentPlots):
         )
         print(f"[INFO] LaTeX: saved {fname}")
 
+    def export_latex_negation_baseline_table(self, df_bestacc, df_latest, *, out_dir="plots"):
+        """Booktabs table of baseline (no-pressure) negation metrics, two subrows per p.
+
+        df_bestacc / df_latest : DataFrames with columns
+            properties, n, h, t, c, F1_nT, F1_nr  (one row per p value).
+        """
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        cols = ["n", "h", "t", "c", "F1_nT", "F1_nr"]
+        col_headers = [r"$n$", r"$h$", r"$t$", r"$c$", r"$F_s$", r"$F_w$"]
+        fmt = "{:.3f}"
+
+        def _sort_key(v):
+            try:
+                return int(float(v))
+            except Exception:
+                return 0
+
+        p_vals = sorted(df_bestacc["properties"].astype(str).unique(), key=_sort_key)
+
+        n_data_cols = len(cols)
+        col_spec = "ll" + "r" * n_data_cols
+        header = (r"$|\mathcal{V}_i|$ & epoch & "
+                  + " & ".join(col_headers) + r" \\")
+
+        lines = [
+            r"\begin{table}[htbp]",
+            r"\centering",
+            r"\begin{tabular}{" + col_spec + "}",
+            r"\toprule",
+            header,
+            r"\midrule",
+        ]
+
+        for i, p in enumerate(p_vals):
+            if i > 0:
+                lines.append(r"\addlinespace")
+            ba_row = df_bestacc[df_bestacc["properties"].astype(str) == p]
+            la_row = df_latest[df_latest["properties"].astype(str) == p]
+            if ba_row.empty or la_row.empty:
+                continue
+            ba = ba_row.iloc[0]
+            la = la_row.iloc[0]
+
+            ba_vals = " & ".join(fmt.format(float(ba[c])) for c in cols)
+            la_vals = " & ".join(fmt.format(float(la[c])) for c in cols)
+            indent  = r"\phantom{00}"
+
+            lines.append(
+                rf"\multirow{{2}}{{*}}{{{p}}} & best-acc & {ba_vals} \\"
+            )
+            lines.append(
+                rf"{indent} & final & {la_vals} \\"
+            )
+
+        lines += [
+            r"\bottomrule",
+            r"\end{tabular}",
+            (r"\caption{Negation metrics at the no-pressure baseline "
+             r"($r{=}120,\;\lambda{=}0$) for each predicate-value count. "
+             r"Two epoch conditions: best-accuracy epoch and final epoch (epoch~119). "
+             r"$F_s$~=~$F_1(n, 1{-}t)$; $F_w$~=~$F_1(n, c)$.}"),
+            r"\label{tab:negation_baseline}",
+            r"\end{table}",
+            "",
+        ]
+
+        fname = f"negation_baseline_table_{self.name}.tex"
+        with open(latex_dir / fname, "w") as fh:
+            fh.write("\n".join(lines))
+        print(f"[INFO] LaTeX: saved {fname}")
+
+    def export_latex_top10_tables(self, df_fs, df_fw, *, n=5, out_dir="plots"):
+        """Booktabs tables for top-n F_s and top-n F_w runs (default n=5)."""
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        col_headers = [
+            r"\#", r"$|\mathcal{V}_i|$", r"$r$", r"$\lambda$",
+            r"$n$", r"$h$", r"$t$", r"$c$", "atoms",
+            r"$F_s$", r"$F_w$", "topsim",
+        ]
+        col_keys = [
+            None, "properties", "reaper_interval", "voc_penalty",
+            "n", "h", "t", "c", "atoms",
+            "F1_nT", "F1_nr", "topsim_best",
+        ]
+        align = "r" + "r" * (len(col_headers) - 1)
+
+        def _fmt_voc(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return str(v)
+            if abs(f) < 1e-15:
+                return r"$0$"
+            exp = int(np.floor(np.log10(abs(f))))
+            man = f / 10**exp
+            if abs(man - 1.0) < 0.05:
+                return f"$10^{{{exp}}}$"
+            return f"${man:.0f}\\times10^{{{exp}}}$"
+
+        def _fmt_val(key, v):
+            if key is None:
+                return str(v)
+            if key == "voc_penalty":
+                return _fmt_voc(v)
+            if key in ("properties", "reaper_interval", "atoms"):
+                try:
+                    return str(int(float(v)))
+                except (TypeError, ValueError):
+                    return str(v)
+            try:
+                return f"{float(v):.3f}"
+            except (TypeError, ValueError):
+                return str(v)
+
+        for df, metric_label, file_tag, caption_metric in [
+            (df_fs, "$F_s$", f"top{n}_fs", r"$F_s$"),
+            (df_fw, "$F_w$", f"top{n}_fw", r"$F_w$"),
+        ]:
+            if df is None or df.empty:
+                continue
+            df = df.head(n)
+            lines = [
+                r"\begin{table}[htbp]",
+                r"\centering",
+                r"\footnotesize",
+                f"\\begin{{tabular}}{{{align}}}",
+                r"\toprule",
+                " & ".join(col_headers) + r" \\",
+                r"\midrule",
+            ]
+            for rank, (_, row) in enumerate(df.iterrows(), 1):
+                cells = []
+                for i, key in enumerate(col_keys):
+                    if key is None:
+                        cells.append(str(rank))
+                    else:
+                        cells.append(_fmt_val(key, row.get(key, "")))
+                lines.append(" & ".join(cells) + r" \\")
+            lines += [
+                r"\bottomrule",
+                r"\end{tabular}",
+                f"\\caption{{Top-{n} runs by {caption_metric} (best-accuracy epoch, top-1 negation feature). "
+                r"$r$: reset interval; $\lambda$: vocabulary penalty; "
+                r"$n$: negation rate; $h$: homogeneity; $t$: entanglement; $c$: value conservation.}}",
+                f"\\label{{tab:{file_tag}}}",
+                r"\end{table}",
+                "",
+            ]
+            fname = f"{file_tag}_{self.name}.tex"
+            with open(latex_dir / fname, "w") as fh:
+                fh.write("\n".join(lines))
+            print(f"[INFO] LaTeX: saved {fname}")
+
     def plot_topsim_vs_negation_june(self, neg_df, *, profile_tag="", out_dir="plots"):
         """Scatter of topsim vs F1_nT (strong) and F1_nr (weak) negation, faceted by
         complexity p.  Points coloured by reaper_interval (viridis), marker shape by
@@ -4677,4 +5357,256 @@ class JunePlots(ExperimentPlots):
         fig.tight_layout()
         fig.savefig(out_dir / f"topsim_vs_negation_june_{tag}_{self.name}.png", dpi=150)
         plt.close(fig)
+
+    def export_latex_topsim_vs_negation(self, neg_df, *, neg_df_final=None,
+                                         profile_tag="", out_dir="plots"):
+        """pgfplots scatter: topsim vs F_s and F_w, coloured by p.
+
+        neg_df       : negation df at best-accuracy epoch.
+        neg_df_final : negation df at final epoch (optional).  When provided,
+                       produces a 2×2 groupplot (columns=F_s/F_w, rows=best-acc/final);
+                       otherwise a 1×2 groupplot.
+        """
+        from scipy import stats as _scipy_stats
+
+        def _prep_neg(df):
+            if df is None:
+                return None
+            df = self._prepare_negation_top_df(df)
+            if df is None or df.empty:
+                return None
+            df = df.copy()
+            if "F1_nT" not in df.columns:
+                n = pd.to_numeric(df.get("n"), errors="coerce")
+                t = pd.to_numeric(df.get("l_T", df.get("t")), errors="coerce")
+                non_t = 1.0 - t
+                den = n + non_t
+                df["F1_nT"] = np.where(
+                    (den > 0) & n.notna() & t.notna(), 2.0 * n * non_t / den, np.nan)
+            if "F1_nr" not in df.columns:
+                n = pd.to_numeric(df.get("n"), errors="coerce")
+                r_col = pd.to_numeric(df.get("r", df.get("c")), errors="coerce")
+                den = n + r_col
+                df["F1_nr"] = np.where(
+                    (den > 0) & n.notna() & r_col.notna(), 2.0 * n * r_col / den, np.nan)
+            return df
+
+        df_ba_neg = _prep_neg(neg_df)
+        df_fi_neg = _prep_neg(neg_df_final)
+        if df_ba_neg is None:
+            return
+
+        df_ba_met = self._build_best_accuracy_metrics_df()
+        df_fi_met = self._build_final_metrics_df() if df_fi_neg is not None else None
+        if df_ba_met is None or df_ba_met.empty:
+            return
+
+        def _merge(df_neg, df_met):
+            m = df_neg.merge(df_met[["run_name", "final_topsim"]], on="run_name", how="inner")
+            return m.dropna(subset=["final_topsim"])
+
+        merged_ba = _merge(df_ba_neg, df_ba_met)
+        merged_fi = _merge(df_fi_neg, df_fi_met) if df_fi_neg is not None and df_fi_met is not None else None
+
+        if merged_ba.empty:
+            return
+
+        def _p_labels(df):
+            if "properties" in df.columns and df["properties"].notna().any():
+                return df["properties"].astype(str)
+            return df["complexity"].astype(str)
+
+        merged_ba["_p_label"] = _p_labels(merged_ba)
+        if merged_fi is not None:
+            merged_fi["_p_label"] = _p_labels(merged_fi)
+
+        p_vals = sorted(merged_ba["_p_label"].dropna().unique(), key=self._properties_sort_key)
+        p_colors = ["blue!70!black", "orange!70!black", "green!50!black"]
+        p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(p_vals)}
+
+        tag = str(profile_tag) if profile_tag else "default"
+        out_dir = pathlib.Path(out_dir)
+        latex_dir = out_dir / "latex"
+        latex_dir.mkdir(parents=True, exist_ok=True)
+
+        # Panels: each entry is (merged_df, metric_col, metric_label, epoch_label, show_legend)
+        # 2-panel: best-acc F_s, best-acc F_w
+        # 4-panel (2×2 row-major): best-acc F_s, best-acc F_w, final F_s, final F_w
+        epoch_sources = [(merged_ba, "best-accuracy epoch")]
+        if merged_fi is not None:
+            epoch_sources.append((merged_fi, "final epoch"))
+        n_rows_grp = len(epoch_sources)
+        n_cols_grp = 2  # F_s, F_w
+
+        # Global x and y ranges shared across all panels
+        all_x = pd.concat([m["final_topsim"] for m, _ in epoch_sources])
+        all_x = pd.to_numeric(all_x, errors="coerce").dropna()
+        if all_x.empty:
+            return
+        all_y = pd.concat([
+            pd.to_numeric(m[mc], errors="coerce").dropna()
+            for m, _ in epoch_sources for mc in ("F1_nT", "F1_nr")
+        ])
+        x_pad = max((float(all_x.max()) - float(all_x.min())) * 0.05, 0.005)
+        y_pad = max((float(all_y.max()) - float(all_y.min())) * 0.05, 0.005)
+        xmin_g = round(float(all_x.min()) - x_pad, 4)
+        xmax_g = round(float(all_x.max()) + x_pad, 4)
+        ymin_g = round(float(all_y.min()) - y_pad, 4)
+        ymax_g = round(float(all_y.max()) + y_pad, 4)
+
+        lines = [
+            r"\begin{figure}[htbp]",
+            r"\centering",
+            r"\begin{tikzpicture}",
+            r"\begin{groupplot}[",
+            r"    group style={",
+            f"        group size={n_cols_grp} by {n_rows_grp},",
+            r"        horizontal sep=0.8cm,",
+            r"        vertical sep=0.6cm,",
+            r"    },",
+            r"    scale only axis,",
+            r"    width=0.38\linewidth,",
+            r"    height=0.28\linewidth,",
+            f"    xmin={xmin_g}, xmax={xmax_g},",
+            f"    ymin={ymin_g}, ymax={ymax_g},",
+            r"    x tick label style={font=\scriptsize},",
+            r"    y tick label style={font=\scriptsize},",
+            r"    tick style={draw=none},",
+            r"    grid=major,",
+            r"    grid style={draw=gray!15},",
+            r"]",
+            r"",
+        ]
+
+        panel_idx = 0
+        for row_i, (merged, epoch_label) in enumerate(epoch_sources):
+            for col_i, (metric_col, metric_label) in enumerate([("F1_nT", "$F_s$"), ("F1_nr", "$F_w$")]):
+                is_top_left = (row_i == 0 and col_i == 0)
+                is_top_row = (row_i == 0)
+
+                is_right_col = (col_i > 0)
+                panel_opts = []
+                if is_top_row:
+                    panel_opts.append(f"    title={{{metric_label}}},")
+                if is_right_col:
+                    panel_opts.append(r"    yticklabels={},")
+                if is_top_left:
+                    panel_opts += [
+                        r"    legend to name=scatterlegend,",
+                        r"    legend style={legend columns=-1, font=\scriptsize,"
+                        r" column sep=0.5em},",
+                    ]
+                lines.append(r"\nextgroupplot[")
+                lines += panel_opts
+                lines.append(r"]")
+
+                rho_parts = []
+                _rng = np.random.default_rng(42)
+                _max_pts = 120  # cap per series to stay within TeX memory
+                for p in p_vals:
+                    color = p_color_map[p]
+                    psub = merged[merged["_p_label"] == p].dropna(
+                        subset=["final_topsim", metric_col])
+                    if psub.empty:
+                        continue
+                    xv = pd.to_numeric(psub["final_topsim"], errors="coerce").to_numpy(float)
+                    yv = pd.to_numeric(psub[metric_col], errors="coerce").to_numpy(float)
+                    mask = np.isfinite(xv) & np.isfinite(yv)
+                    xv, yv = xv[mask], yv[mask]
+                    if len(xv) == 0:
+                        continue
+
+                    # Subsample for scatter display; regression uses all points
+                    if len(xv) > _max_pts:
+                        idx = _rng.choice(len(xv), _max_pts, replace=False)
+                        xv_plot, yv_plot = xv[idx], yv[idx]
+                    else:
+                        xv_plot, yv_plot = xv, yv
+
+                    forget = r", forget plot" if not is_top_left else ""
+                    coord_str = " ".join(f"({x:.4f},{y:.4f})" for x, y in zip(xv_plot, yv_plot))
+                    lines += [
+                        f"\\addplot[only marks, mark=*, mark size=0.9pt,"
+                        f" color={color}, opacity=0.6{forget}] coordinates {{",
+                        f"    {coord_str}",
+                        r"};",
+                    ]
+                    if is_top_left:
+                        lines.append(f"\\addlegendentry{{$|\\mathcal{{V}}_i|{{=}}{p}$}}")
+                    lines.append("")
+
+                    if len(xv) >= 2 and np.ptp(xv) > 1e-12:
+                        a, b = np.polyfit(xv, yv, deg=1)
+                        x0, x1 = float(xv.min()), float(xv.max())
+                        lines += [
+                            f"\\addplot[{color}, thick, forget plot,"
+                            f" domain={x0:.5f}:{x1:.5f}, samples=2]"
+                            f" {{{a:.6f}*x + {b:.6f}}};",
+                            "",
+                        ]
+
+                    if len(xv) >= 3:
+                        rho, pval = _scipy_stats.spearmanr(xv, yv)
+                        sig = "^{**}" if pval < 0.01 else ("^{*}" if pval < 0.05 else "")
+                        rho_parts.append(
+                            f"$|\\mathcal{{V}}_i|{{=}}{p}$:\\;"
+                            f"$\\rho{sig}{{=}}{rho:.2f}$"
+                        )
+
+                if rho_parts:
+                    rho_text = r"\\" + r"\\".join(rho_parts)
+                    lines.append(
+                        r"\node[anchor=south east, font=\tiny, align=right]"
+                        r" at (current axis.south east) "
+                        f"{{{rho_text}}};"
+                    )
+                lines.append("")
+                panel_idx += 1
+
+        epoch_note = "best-accuracy epoch" if merged_fi is None else "best-accuracy (top rows) and final epoch (bottom rows)"
+        mid_row = (n_rows_grp + 1) // 2
+        after_nodes = [r"\end{groupplot}"]
+        # Global y-axis label centred on left
+        after_nodes.append(
+            f"\\node[rotate=90, anchor=south, font=\\small] at"
+            f" ($(group c1r1.west)!0.5!(group c1r{n_rows_grp}.west)+(-1.2cm,0)$)"
+            r" {negation score};"
+        )
+        # Global x-axis label centred on bottom
+        after_nodes.append(
+            f"\\node[anchor=north, font=\\small] at"
+            f" ($(group c1r{n_rows_grp}.south)!0.5!(group c2r{n_rows_grp}.south)+(0,-0.3cm)$)"
+            r" {topsim};"
+        )
+        # Row labels on right side
+        for row_i, (_, epoch_label) in enumerate(epoch_sources):
+            after_nodes.append(
+                f"\\node[rotate=-90, anchor=south, font=\\small] at"
+                f" ($(group c2r{row_i + 1}.east)+(0.9cm,0)$) {{{epoch_label}}};"
+            )
+        # Flat legend centred below
+        after_nodes.append(
+            f"\\node[anchor=north] at"
+            f" ($(group c1r{n_rows_grp}.south)!0.5!(group c2r{n_rows_grp}.south)+(0,-1.0cm)$)"
+            r" {\pgfplotslegendfromname{scatterlegend}};"
+        )
+        lines += after_nodes + [r"\end{tikzpicture}",
+            r"\caption{Scatter of topographic similarity against $F_s$ (left) and $F_w$ (right) "
+            f"at {epoch_note}. "
+            r"Each point represents one run; colour encodes $|\mathcal{V}_i|$. "
+            f"Points are randomly subsampled to {_max_pts} per series for display; "
+            r"regression lines and $\rho$ use all data. "
+            r"$\rho$: Spearman rank correlation ($^{*}p{<}0.05$, $^{**}p{<}0.01$).}",
+            r"\label{fig:topsim_vs_negation_scatter}",
+            r"\end{figure}",
+            "",
+        ]
+
+        epoch_tag = "both_epochs" if merged_fi is not None else "bestacc"
+        # Strip the selection-mode suffix from self.name so it doesn't mislead
+        base_name = self.name.replace("_best_accuracy", "").replace("_latest", "")
+        fname = f"topsim_vs_negation_{tag}_{base_name}_{epoch_tag}.tex"
+        with open(latex_dir / fname, "w") as fh:
+            fh.write("\n".join(lines))
+        print(f"[INFO] LaTeX: saved {fname}")
 

@@ -30,7 +30,9 @@ if __name__ == "__main__":
     parser.add_argument("--best-accuracy", action="store_true", help="analyze only the language dump closest to the first epoch that reached max eval accuracy")
     parser.add_argument("--min-eval-accuracy", type=float, default=None, help="analyze only runs whose max eval/accuracy is >= threshold (e.g. 0.95)")
     parser.add_argument("--n-jobs", type=int, default=1, help="parallel jobs for negation export")
+    parser.add_argument("--filter-predicates", action="store_true", help="filter out conjunction predicates (pred_str containing ∧) from language before negation analysis")
     parser.add_argument("--plots", action="store_true", help="generate plots")
+    parser.add_argument("--intergen", action="store_true", help="generate intergenerational stability plots (slow: loads all language dumps)")
     args = parser.parse_args()
     if args.latest_only and args.best_accuracy:
         parser.error("--latest-only and --best-accuracy are mutually exclusive.")
@@ -131,6 +133,8 @@ if __name__ == "__main__":
         lname = str(name).lower()
         if ("reap" in lname or "reset" in lname) and "voc" in lname:
             return "voc_reaper"
+        if "scope_interaction" in lname:
+            return "voc_reaper"
         if "voc_pen" in lname:
             return "voc_pen"
         if "beth_reaper" in lname:
@@ -216,6 +220,7 @@ if __name__ == "__main__":
                         latest_only=(selection_mode == "latest"),
                         best_accuracy_only=(selection_mode == "best_accuracy"),
                         n_jobs=args.n_jobs,
+                        filter_predicates=args.filter_predicates,
                         outputs_dir=pathlib.Path(__file__).resolve().parent / "outputs",
                     )
 
@@ -235,7 +240,7 @@ if __name__ == "__main__":
 
                 out_dir = pathlib.Path(__file__).resolve().parent / "plots"
                 out_dir_may = repo_root / "plots_may"
-                out_dir_june = repo_root / "plots_june"
+                out_dir_june = repo_root / "thesis" / "plots_june"
                 if is_primary_mode and not same_runs_as_unfiltered:
                     epochs_df = cm_static._build_epochs_df()
                     if epochs_df is not None:
@@ -255,11 +260,29 @@ if __name__ == "__main__":
                         cm_static.export_latex_pressure_heatmaps(out_dir=out_dir_june)
                         cm_static.export_latex_pressure_table(out_dir=out_dir_june)
                         cm_static.plot_topsim_interaction_reaper_voc(out_dir=out_dir_june)
-                        # Intergenerational stability needs all language dumps per run, not just the
-                        # latest/best one that prepared_datapoints keeps.
-                        cm_all_langs = plots.JunePlots(filtered_datapoints, name=static_plot_name)
-                        cm_all_langs.plot_intergenerational_stability(out_dir=out_dir_june)
-                        cm_all_langs.export_latex_intergenerational_stability(out_dir=out_dir_june)
+                        cm_static.export_latex_pressure_heatmaps_grouped(out_dir=out_dir_june)
+                        _baseline_csv_dir = repo_root / "thesis" / "analysis_notes" / "csv"
+                        _ba_csv = _baseline_csv_dir / "s5_negation_baseline_bestacc.csv"
+                        _la_csv = _baseline_csv_dir / "s5_negation_baseline_latest.csv"
+                        if _ba_csv.is_file() and _la_csv.is_file():
+                            cm_static.export_latex_negation_baseline_table(
+                                pd.read_csv(_ba_csv), pd.read_csv(_la_csv),
+                                out_dir=out_dir_june,
+                            )
+                        _fs_csv = _baseline_csv_dir / "s6b_top10_f1_nt.csv"
+                        _fw_csv = _baseline_csv_dir / "s6b_top10_f1_nr.csv"
+                        if _fs_csv.is_file() or _fw_csv.is_file():
+                            cm_static.export_latex_top10_tables(
+                                pd.read_csv(_fs_csv) if _fs_csv.is_file() else None,
+                                pd.read_csv(_fw_csv) if _fw_csv.is_file() else None,
+                                out_dir=out_dir_june,
+                            )
+                        if args.intergen:
+                            # Intergenerational stability needs all language dumps per run, not just
+                            # the latest/best one that prepared_datapoints keeps.
+                            cm_all_langs = plots.JunePlots(filtered_datapoints, name=static_plot_name)
+                            cm_all_langs.plot_intergenerational_stability(out_dir=out_dir_june)
+                            cm_all_langs.export_latex_intergenerational_stability(out_dir=out_dir_june)
                     elif plot_family == "beth_reaper":
                         cm_static.plot_eval_accuracy_over_epochs(group_col="reaper_interval", out_dir=out_dir)
                         cm_static.plot_eval_accuracy_over_epochs_by_reaper_and_complexity(out_dir=out_dir)
@@ -323,6 +346,7 @@ if __name__ == "__main__":
                             if plot_family == "voc_reaper":
                                 cm_neg_src.plot_pressure_heatmaps_negation(source_df, out_dir=out_dir_june)
                                 cm_neg_src.export_latex_pressure_heatmaps_negation(source_df, out_dir=out_dir_june)
+                                cm_neg_src.export_latex_pressure_heatmaps_negation_grouped(source_df, out_dir=out_dir_june)
                                 cm_neg_src.plot_negation_interaction_reaper_voc(source_df, out_dir=out_dir_june)
                                 cm_neg_src.export_latex_negation_interaction(source_df, out_dir=out_dir_june)
                                 cm_neg_src.compute_optimal_table(
@@ -333,6 +357,12 @@ if __name__ == "__main__":
                                 cm_neg_src.export_epoch_analyzed_table(source_df, out_dir=out_dir_june)
                                 cm_neg_src.export_latex_epoch_analyzed_table(source_df, out_dir=out_dir_june)
                                 cm_neg_src.plot_topsim_vs_negation_june(source_df, profile_tag=args.feat_operator, out_dir=out_dir_june)
+                                if selection_mode == "best_accuracy":
+                                    _fi_csv = cache_dir / f"negation_top_1_{experiment_tag}_{args.feat_operator}_{args.negation_profile}_latest.csv"
+                                    _neg_df_fi = pd.read_csv(_fi_csv) if _fi_csv.is_file() else None
+                                    cm_neg_src.export_latex_topsim_vs_negation(
+                                        source_df, neg_df_final=_neg_df_fi,
+                                        profile_tag=args.feat_operator, out_dir=out_dir_june)
                             elif plot_family == "complexity_memory":
                                 cm_neg_src.plot_negation_metrics_over_epochs(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
                                 cm_neg_src.plot_negation_metrics_by_reaper_interval(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
