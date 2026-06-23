@@ -362,9 +362,15 @@ class FailureBasedDistribution:
             self.failure_vector_shm.close()
         elif(status == 1):
             self.counts_vector_shm.close()
-            self.counts_vector_shm.unlink()
+            try:
+                self.counts_vector_shm.unlink()
+            except FileNotFoundError:
+                pass
             self.failure_vector_shm.close()
-            self.failure_vector_shm.unlink()
+            try:
+                self.failure_vector_shm.unlink()
+            except FileNotFoundError:
+                pass
 
     # predicate_idx: np.array[int]
     # failure: np.array[float]
