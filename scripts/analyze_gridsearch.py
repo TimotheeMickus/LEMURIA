@@ -192,38 +192,49 @@ def build_single_figures(df, metric):
     return figures
 
 
+def _draw_heatmap(fig, ax, values, cnt, p1, p2, title, cbar_label):
+    """Draw a single labelled heatmap (values grid + per-cell n) onto ax."""
+    im = ax.imshow(values.values, aspect="auto", cmap="viridis", origin="lower")
+    ax.set_xticks(range(len(values.columns)))
+    ax.set_xticklabels([str(c) for c in values.columns], rotation=45, ha="right")
+    ax.set_yticks(range(len(values.index)))
+    ax.set_yticklabels([str(i) for i in values.index])
+    ax.set_xlabel(p2)
+    ax.set_ylabel(p1)
+    ax.set_title(title)
+
+    for i in range(values.shape[0]):
+        for j in range(values.shape[1]):
+            v = values.values[i, j]
+            if not np.isnan(v):
+                n = int(cnt.values[i, j]) if not np.isnan(cnt.values[i, j]) else 0
+                ax.text(j, i, f"{v:.3f}\nn={n}", ha="center", va="center",
+                        color="white", fontsize=8)
+
+    fig.colorbar(im, ax=ax, label=cbar_label, fraction=0.046, pad=0.04)
+
+
 def build_pair_figures(df, metric):
-    """(ii) Build one heatmap per pair of hyperparameters.
-    Returns a list of (name, figure)."""
+    """(ii) Build one figure per pair of hyperparameters, with two grids
+    side by side: mean metric and max metric. Returns (name, figure) list."""
     figures = []
     for p1, p2 in itertools.combinations(PARAMS, 2):
-        pivot = df.pivot_table(values="perf", index=p1, columns=p2, aggfunc="mean")
-        cnt = df.pivot_table(values="perf", index=p1, columns=p2, aggfunc="count")
         rows_o, cols_o = sorted_values(df, p1), sorted_values(df, p2)
-        pivot = pivot.reindex(index=rows_o, columns=cols_o)
-        cnt = cnt.reindex(index=rows_o, columns=cols_o)
 
-        fig, ax = plt.subplots(figsize=(6, 5))
-        im = ax.imshow(pivot.values, aspect="auto", cmap="viridis",
-                       origin="lower")
-        ax.set_xticks(range(len(pivot.columns)))
-        ax.set_xticklabels([str(c) for c in pivot.columns], rotation=45,
-                           ha="right")
-        ax.set_yticks(range(len(pivot.index)))
-        ax.set_yticklabels([str(i) for i in pivot.index])
-        ax.set_xlabel(p2)
-        ax.set_ylabel(p1)
-        ax.set_title(f"Mean {metric}: {p1} vs {p2}")
+        def grid(aggfunc):
+            g = df.pivot_table(values="perf", index=p1, columns=p2,
+                               aggfunc=aggfunc)
+            return g.reindex(index=rows_o, columns=cols_o)
 
-        for i in range(pivot.shape[0]):
-            for j in range(pivot.shape[1]):
-                v = pivot.values[i, j]
-                if not np.isnan(v):
-                    n = int(cnt.values[i, j]) if not np.isnan(cnt.values[i, j]) else 0
-                    ax.text(j, i, f"{v:.3f}\nn={n}", ha="center", va="center",
-                            color="white", fontsize=8)
+        mean_g = grid("mean")
+        max_g = grid("max")
+        cnt = grid("count")
 
-        fig.colorbar(im, ax=ax, label=f"mean {metric}")
+        fig, (ax_mean, ax_max) = plt.subplots(1, 2, figsize=(12, 5))
+        _draw_heatmap(fig, ax_mean, mean_g, cnt, p1, p2,
+                      f"Mean {metric}: {p1} vs {p2}", f"mean {metric}")
+        _draw_heatmap(fig, ax_max, max_g, cnt, p1, p2,
+                      f"Max {metric}: {p1} vs {p2}", f"max {metric}")
         fig.tight_layout()
         figures.append((f"pair_{p1}__{p2}", fig))
     return figures
