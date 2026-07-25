@@ -35,6 +35,11 @@ import numpy as np
 import pandas as pd
 import wandb
 
+# We intentionally build every figure before emitting (the PDF path writes them
+# all into one file), so more than 20 are open at once. They are all closed at
+# emit time, so silence matplotlib's precautionary "too many open figures" warning.
+plt.rcParams["figure.max_open_warning"] = 0
+
 # Metric always used for filtering the worst runs, independent of --metric.
 FILTER_METRIC = "eval/perf"
 
@@ -60,6 +65,7 @@ def fetch_runs(project, metric):
             "state": run.state,
             "perf": run.summary.get(metric),
             "filter_perf": run.summary.get(FILTER_METRIC),
+            "runtime": run.summary.get("_runtime"),  # run duration in seconds
         }
         for p in PARAMS:
             row[p] = run.config.get(p)
@@ -192,6 +198,51 @@ def build_single_figures(df, metric):
     return figures
 
 
+def build_runtime_figures(df):
+    """One grouped bar chart per hyperparameter: average and median run time
+    (in minutes) for each value. Returns a list of (name, figure)."""
+    figures = []
+    if "runtime" not in df.columns or df["runtime"].notna().sum() == 0:
+        print("no runtime data available; skipping run-time figures")
+        return figures
+
+    rt = df["runtime"] / 60.0  # seconds -> minutes
+    for p in PARAMS:
+        g = df.assign(_rt=rt).groupby(p)["_rt"]
+        stats = g.agg(["mean", "median"])
+        counts = g.count()
+        vals = sorted_values(df, p)
+        stats = stats.reindex(vals)
+        counts = counts.reindex(vals).fillna(0).astype(int)
+
+        x = np.arange(len(vals))
+        w = 0.38
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        b1 = ax.bar(x - w / 2, stats["mean"].values, w, label="mean",
+                    color="#4C72B0")
+        b2 = ax.bar(x + w / 2, stats["median"].values, w, label="median",
+                    color="#C44E52")
+        for bars in (b1, b2):
+            for rect in bars:
+                h = rect.get_height()
+                if not np.isnan(h):
+                    ax.text(rect.get_x() + rect.get_width() / 2, h,
+                            f"{h:.1f}", ha="center", va="bottom", fontsize=8)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{v}\n(n={counts[v]})" for v in vals])
+        ax.set_xlim(-0.5, len(vals) - 0.5)
+        ax.set_xlabel(p)
+        ax.set_ylabel("run time (minutes)")
+        ax.set_title(f"Run time by {p}")
+        ax.legend(fontsize=8)
+        ax.grid(axis="y", ls=":", alpha=0.4)
+        fig.tight_layout()
+        figures.append((f"runtime_{p}", fig))
+    return figures
+
+
 def _draw_heatmap(fig, ax, values, cnt, p1, p2, title, cbar_label):
     """Draw a single labelled heatmap (values grid + per-cell n) onto ax."""
     im = ax.imshow(values.values, aspect="auto", cmap="viridis", origin="lower")
@@ -299,9 +350,14 @@ def main():
 
     os.makedirs(args.outdir, exist_ok=True)
 
-    # Filesystem-safe suffix so different metric/filter values don't overwrite.
-    safe_metric = re.sub(r"[^0-9A-Za-z]+", "-", args.metric).strip("-")
-    suffix = f"_metric-{safe_metric}_filter-{args.filter_x:g}"
+    # Filesystem-safe suffix so different project/metric/filter values
+    # don't overwrite each other.
+    def safe(s):
+        return re.sub(r"[^0-9A-Za-z]+", "-", str(s)).strip("-")
+
+    suffix = (f"_project-{safe(args.project)}"
+              f"_metric-{safe(args.metric)}"
+              f"_filter-{args.filter_x:g}")
 
     df = fetch_runs(args.project, args.metric)
     print(f"\n{len(df)} usable runs")
@@ -313,6 +369,7 @@ def main():
     print_top(top, args.metric)
 
     figures = build_single_figures(df, args.metric) \
+        + build_runtime_figures(df) \
         + build_pair_figures(df, args.metric)
 
     if args.format == "pdf":
