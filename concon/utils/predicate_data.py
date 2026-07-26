@@ -166,7 +166,7 @@ class Value(Predicate):
     # name: str
     # prop: Property
     def __init__(self, name, prop):
-        super(Value, self).__init__()
+        super().__init__()
         
         self.name = name
         self.prop = prop
@@ -204,7 +204,7 @@ class Value(Predicate):
 
 class Negation(Predicate):
     def __init__(self, predicate):
-        super(Negation, self).__init__()
+        super().__init__()
         
         self.predicate = predicate # Predicate
 
@@ -234,7 +234,7 @@ class Negation(Predicate):
 class Conjunction(Predicate):
     # pred1, pred2: Predicate
     def __init__(self, pred1, pred2):
-        super(Conjunction, self).__init__()
+        super().__init__()
         
         self.pred1 = pred1
         self.pred2 = pred2
@@ -545,7 +545,7 @@ class Dataset(SeqAsyncDataset):
     def turnAsynchronous(self, *args, **kwargs):
         self.failure_based_distribution.to_shared_memory()
         
-        super(Dataset, self).turnAsynchronous(*args, **kwargs) 
+        super().turnAsynchronous(*args, **kwargs)
 
     def _close(self):
         self.failure_based_distribution.close()

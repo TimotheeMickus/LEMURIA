@@ -8,7 +8,7 @@ from ..utils.modules import build_cnn_encoder_from_args, build_embeddings
 
 class SenderReceiver(Agent):
     def __init__(self, sender, receiver, check_shared_params=True):
-        super(Agent, self).__init__()
+        super().__init__()
 
         if(check_shared_params):
             assert sender.image_encoder is receiver.image_encoder, 'parameters are not shared'

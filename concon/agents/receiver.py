@@ -19,7 +19,7 @@ class Receiver(Agent):
     Based on K presented images and a given signal, chooses which image the signal refers to.
     """
     def __init__(self, image_encoder, signal_encoder, args, has_shared_param):
-        super(Agent, self).__init__()
+        super().__init__()
 
         self.image_encoder = image_encoder
         self.signal_encoder = signal_encoder

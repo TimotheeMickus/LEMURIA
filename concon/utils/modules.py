@@ -49,7 +49,7 @@ class SignalEncoder(nn.Module):
     Encodes a signal of discrete symbols in a single vector.
     """
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, symbol_embeddings):
-        super(SignalEncoder, self).__init__()
+        super().__init__()
 
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=output_dim, num_layers=1, batch_first=True)
@@ -88,7 +88,7 @@ class SignalDecoder(nn.Module):
       stops after producing EOS and pad rest.
     '''
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, max_signal_len, symbol_embeddings):
-        super(SignalDecoder, self).__init__()
+        super().__init__()
 
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
@@ -192,7 +192,7 @@ class SignalDecoder(nn.Module):
 # Adds noise to vectors.
 class NoiseAdder(nn.Module):
     def __init__(self):
-        super(NoiseAdder, self).__init__()
+        super().__init__()
 
     # input: tensor of any shape
     # output: tensor of the same shape

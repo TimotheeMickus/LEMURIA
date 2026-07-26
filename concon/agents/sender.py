@@ -12,7 +12,7 @@ Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 # Produces a signal based on an image.
 class Sender(Agent):
     def __init__(self, image_encoder, signal_decoder, args, has_shared_param):
-        super(Agent, self).__init__()
+        super().__init__()
         
         self.image_encoder = image_encoder
         self.signal_decoder = signal_decoder

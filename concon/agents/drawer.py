@@ -12,7 +12,7 @@ Outcome = namedtuple("Outcome", ["image", "img_spigot"])
 # Produces an image based on a signal.
 class Drawer(Agent):
     def __init__(self, signal_encoder, middle_nn, image_decoder, args, has_shared_param):
-        super(Agent, self).__init__()
+        super().__init__()
 
         self.signal_encoder = signal_encoder
         self.middle_nn = middle_nn
