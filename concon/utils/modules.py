@@ -128,7 +128,7 @@ class SignalDecoder(nn.Module):
         for step in range(self.max_signal_len):
             # Forces a final EOS for signals reaching the maximum length.
             if(step == (self.max_signal_len - 1)):
-                forced_symbol = torch.full_like(signal[-1], self.padding_idx).masked_fill(~has_stopped, self.eos_index)
+                forced_symbol = torch.full_like(has_stopped, self.padding_idx, dtype=torch.long).masked_fill(~has_stopped, self.eos_index)
                 signal.append(forced_symbol)
                 log_probs.append(torch.zeros_like(has_stopped, dtype=torch.float))
                 entropy.append(torch.zeros_like(has_stopped, dtype=torch.float))
@@ -197,7 +197,7 @@ class NoiseAdder(nn.Module):
     # input: tensor of any shape
     # output: tensor of the same shape
     def forward(self, input):
-        noise = torch.randn_like(input, device=input.device)
+        noise = torch.randn_like(input)
 
         return (input + noise)
 
