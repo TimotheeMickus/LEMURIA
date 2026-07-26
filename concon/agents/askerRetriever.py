@@ -16,7 +16,6 @@ class AskerRetriever(Agent):
 
     @classmethod
     def from_args(cls, args):
-        # Only the symbol embeddings are shared.
         symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # The vocabulary size is base_alphabet_size + 3 (EOS, padding, BOS). BOS is required by the asker's signal decoder; the retriever's signal encoder does not use it.
 
         asker = Asker.from_args(args, symbol_embeddings=symbol_embeddings)

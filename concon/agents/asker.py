@@ -33,7 +33,7 @@ class Asker(Agent):
             Output:
                 `outcome`, Outcome where `.action` is the produced signal.
         """
-        encoded_predicate = self.predicate_encoder(predicate_idx) # Shape: (number of predicate indices)
+        encoded_predicate = self.predicate_encoder(predicate_idx) # Shape: (batch size, embedding size)
         outputs = self.signal_decoder(encoded_predicate)
 
         outcome = Outcome(

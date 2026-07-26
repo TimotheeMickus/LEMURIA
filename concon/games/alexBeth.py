@@ -260,11 +260,10 @@ class AlexBeth(Game):
             artifact.add_file(rows_path)
             wandb_run.log_artifact(artifact)
     
-    # The name is misleading (reflects an older version): this only converts truth to a tensor on the device
+    # The name is misleading (reflects an older version): this only converts truth to a tensor on the device.
     def _compute_truth_targets(self, batch):
         """
-        Returns a float tensor of shape (batch size,) where 1.0 denotes that the
-        predicate holds for the candidate, and 0.0 otherwise.
+        Returns a float tensor of shape (batch size, nb candidates) where 1.0 denotes that the predicate holds for the candidate, and 0.0 otherwise.
         """
         return batch.candidate_truth
     
@@ -436,7 +435,7 @@ class AlexBeth(Game):
         retriever_selecting = misc.selecting(retriever_scores)
         dist = retriever_selecting["dist"] # RMK: dist.logits == retriever_scores
 
-        perf = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)).detach() # Shape: (batch, num_candidates)
+        perf = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)).detach() # Shape: (batch_size, num candidates)
         
         entropy = dist.entropy().mean()
         
@@ -517,7 +516,7 @@ class AlexBeth(Game):
             self.start_episode(train_episode=False)
             
             batch = data_loader.get_batch(size=batch_size, data_type='test', predicate_sampling='random') # RMK: `data_type` currently has no effect.
-            truth_targets = self._compute_truth_targets(batch) # Shape: (batch, num candidates)
+            truth_targets = self._compute_truth_targets(batch) # Shape: (batch_size, num_candidates)
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 
@@ -528,16 +527,16 @@ class AlexBeth(Game):
             
             retriever_loss = F.binary_cross_entropy_with_logits(retriever_outcome.scores, truth_targets, reduction='mean').item()
 
-            correct_prob = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)) # Shape: (batch, num_candidates)
-            perf = correct_prob.mean().item() # Shape: (batch, num_candidates)
+            correct_prob = torch.where((truth_targets > 0.5), dist.probs, (1.0 - dist.probs)) # Shape: (batch_size, num_candidates)
+            perf = correct_prob.mean().item() # Shape: (batch_size, num_candidates)
             
-            correct_pred = torch.isclose(retriever_selecting["actions"], truth_targets).float() # Shape: (batch_num_candidates)
+            correct_pred = torch.isclose(retriever_selecting["actions"], truth_targets).float() # Shape: (batch_size, num_candidates)
             accuracy = correct_pred.mean().item() # average over all candidates
 
             # Updates the failure-based distribution.
             num_candidates = retriever_outcome.scores.shape[-1]
-            predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch * num_candidates)
-            failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
+            predicate_idx = batch.predicate_idx.repeat_interleave(num_candidates).cpu().numpy() # Shape: (batch_size * num_candidates)
+            failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch_size * num_candidates)
             data_loader.failure_based_distribution.update(predicate_idx, failure, new_epoch=(batch_index == 0))
 
             # `signal_length`: average length (including EOS) of the signals in this batch.
@@ -545,9 +544,9 @@ class AlexBeth(Game):
             # `total_vocab_counts`: count symbols used in signals (excluding EOS and padding).
             signal_tokens = asker_outcome.action[0]
             max_len = signal_tokens.size(1)
-            positions = torch.arange(max_len, device=signal_tokens.device).unsqueeze(0) # int tensor of shape TODO
+            positions = torch.arange(max_len, device=signal_tokens.device).unsqueeze(0) # int tensor of shape (1, max_len)
             signal_lens = asker_outcome.action[1].int().view(-1)
-            in_signal = positions < (signal_lens.unsqueeze(1) - 1) # boolean tensor of shape TODO, True for positions strictly before EOS in each signal.
+            in_signal = positions < (signal_lens.unsqueeze(1) - 1) # boolean tensor of shape (batch_size, max_len), True for positions strictly before EOS in each signal
             if in_signal.any():
                 used_tokens = signal_tokens[in_signal]
                 vocab_counts = torch.bincount(used_tokens, minlength=self.full_alphabet_size).to("cpu")
@@ -576,7 +575,7 @@ class AlexBeth(Game):
             total_entropy += entropy * batch_items
             total_signal_length += signal_length * batch_items
 
-            # Split candidate decisions into verify/falsify subsets.
+            # Splits candidate decisions into verify/falsify subsets.
             verify_mask = (truth_targets > 0.5)
             falsify_mask = ~verify_mask
             if(verify_mask.any()):
@@ -588,8 +587,8 @@ class AlexBeth(Game):
                 total_falsify_ce += (1.0 - dist.probs[falsify_mask]).sum().item()
                 total_falsify_items += int(falsify_mask.sum().item())
 
-            # Scramble the symbol order inside signals and recompute correctness probs on these.
-            # Then we check how much original performance is kept.
+            # Scrambles the symbol order inside signals and recompute correctness probs on these.
+            # Then checks how much original performance is kept.
             # If retention is high, semantics likely rely less on order/composition.
             if(self.run_fancy_lang_eval):
                 batch_signals = asker_outcome.action[0].detach().clone()
@@ -605,7 +604,7 @@ class AlexBeth(Game):
 
                 scrambled_correct_prob = torch.where(truth_targets > 0.5, scrambled_probs, 1.0 - scrambled_probs)
 
-                # Limit at min(original, scrambled) so scrambling does not increase score.
+                # Limits at min(original, scrambled) so scrambling does not increase score.
                 perf_scrambled += torch.minimum(correct_prob, scrambled_correct_prob).sum().item()
                 perf_baseline += correct_prob.sum().item()
 

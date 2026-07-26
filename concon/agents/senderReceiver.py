@@ -20,7 +20,7 @@ class SenderReceiver(Agent):
     @classmethod
     def from_args(cls, args):
         image_encoder = build_cnn_encoder_from_args(args)
-        symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # +2: padding symbol, BOS symbol
+        symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # The vocabulary size is base_alphabet_size + 3 (EOS, padding, BOS). BOS is required by the asker's signal decoder; the retriever's signal encoder does not use it.
         
         sender = Sender.from_args(args, image_encoder=image_encoder, symbol_embeddings=symbol_embeddings)
         receiver = Receiver.from_args(args, image_encoder=image_encoder, symbol_embeddings=symbol_embeddings)
