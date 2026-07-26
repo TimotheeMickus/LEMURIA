@@ -90,31 +90,30 @@ class Retriever(Agent):
             parameters.data.copy_(other_parameters[name].data.to(device=parameters.device, dtype=parameters.dtype))
             parameters.requires_grad = other_parameters[name].requires_grad
 
-    # The two optional arguments are specified when creating a SenderReceiver.
-    # image_encoder: torch.nn.Module
+    # The optional argument is specified when creating an AskerRetriever.
+    # candidate_encoder: torch.nn.Module
     # symbol_embeddings: torch.nn.Embedding
     @classmethod
-    def from_args(cls, args, candidate_encoder=None, symbol_embeddings=None):
-        has_shared_param = (candidate_encoder is not None) or (symbol_embeddings is not None)
+    def from_args(cls, args, symbol_embeddings=None):
+        has_shared_param = (symbol_embeddings is not None)
         
-        if(candidate_encoder is None):
-            if(args.candidate_encoder == "node_averager"):
-                candidate_encoder = CandidateNodeAverager(
-                    node_vocab_size=args.node_vocab_size, 
-                    hidden_size=args.hidden_size, 
-                    padding_idx=args.node_padding_idx
-                )
-            elif(args.candidate_encoder == "graph_transformer"):
-                candidate_encoder = CandidateGraphEncoder(
-                    node_vocab_size=args.node_vocab_size,
-                    edge_vocab_size=args.edge_vocab_size,
-                    num_layers=args.graph_num_layers,
-                    d_model=args.graph_d_model,
-                    num_heads=args.graph_num_heads,
-                    d_hidden=args.graph_d_hidden,
-                    dropout=args.graph_dropout,
-                    use_norm=not args.graph_no_norm
-                )
+        if(args.candidate_encoder == "node_averager"):
+            candidate_encoder = CandidateNodeAverager(
+                node_vocab_size=args.node_vocab_size,
+                hidden_size=args.hidden_size,
+                padding_idx=args.node_padding_idx
+            )
+        elif(args.candidate_encoder == "graph_transformer"):
+            candidate_encoder = CandidateGraphEncoder(
+                node_vocab_size=args.node_vocab_size,
+                edge_vocab_size=args.edge_vocab_size,
+                num_layers=args.graph_num_layers,
+                d_model=args.graph_d_model,
+                num_heads=args.graph_num_heads,
+                d_hidden=args.graph_d_hidden,
+                dropout=args.graph_dropout,
+                use_norm=not args.graph_no_norm
+            )
         #candidate_encoder = torch.compile(candidate_encoder)
                 
         signal_encoder = SignalEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
