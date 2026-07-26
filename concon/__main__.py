@@ -52,13 +52,13 @@ if(__name__ == "__main__"):
     if(args.do == 'evaluate_language'):
         from .eval.evaluate_language import main
         main(args) # maybe switch to main(args, remaining_args)
-    elif(args.do == 'args.visualize'):
+    elif(args.do == 'visualize'):
         from .eval.visualize import main
         main(args) # maybe switch to main(args, remaining_args)
-    elif(args.do == 'args.compute_correlation'):
+    elif(args.do == 'compute_correlation'):
         from .eval.compute_correlation import main
         main(args) # maybe switch to main(args, remaining_args)
-    elif(args.do == 'args.threeway_correlation'):
+    elif(args.do == 'threeway_correlation'):
         from .eval.three_way_correlation import main
         main(args) # maybe switch to main(args, remaining_args)
     elif(args.do == 'image_signalling_game'):
