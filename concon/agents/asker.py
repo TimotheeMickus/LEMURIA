@@ -22,7 +22,7 @@ class Asker(Agent):
 
         self.alphabet_size = self.message_decoder.alphabet_size
         self.eos_index = self.message_decoder.eos_index
-        self.padding_idx = self.message_decoder.padding_idx # TODO improve consistency
+        self.padding_idx = self.message_decoder.padding_idx
         self.bos_index = self.message_decoder.bos_index # not actually used in the signals produced
 
     def forward(self, predicate_idx):

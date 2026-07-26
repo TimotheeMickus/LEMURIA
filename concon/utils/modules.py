@@ -78,14 +78,14 @@ class MessageEncoder(nn.Module):
 
 class MessageDecoder(nn.Module):
     '''
-    This is a 1-layer LSTM that generates tokens autoregressively
-    The predicate embedding is projected into initial LSTM cell and hidden state
+    This is a 1-layer LSTM that generates tokens autoregressively.
+    The predicate embedding is projected into initial LSTM cell and hidden state.
     At each step:
-      embed the last symbol
-      run LSTM step
-      project to token logits (`action_space_proj`)
-      sample a token (training) or argmax (eval)
-      stop after producing EOS and pad rest
+      embeds the last symbol,
+      runs LSTM step,
+      projects to token logits (`action_space_proj`),
+      samples a token (training) or argmax (eval),
+      stops after producing EOS and pad rest.
     '''
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, max_msg_len, symbol_embeddings):
         super(MessageDecoder, self).__init__()
@@ -125,8 +125,16 @@ class MessageDecoder(nn.Module):
         has_stopped = torch.zeros(encoded.size(0), device=encoded.device, dtype=torch.bool)
 
         # Produces the messages.
-        # TODO Je serais d'avis à ne pas utiliser de EOS. Si l'action EOS est choisie, le message serait terminé sans qu'aucun symbol ne soit ajouté (ou plus techniquement, on ajoute un padding symbol). En fait, ça revient plus ou moins à fusionner le EOS et le padding symbol. Cela permettrait d'éviter d'avoir un symbol spécial apparaissant souvent mais pas toujours dans les "vrais" messages, ce qui peut compliquer l'analyse.
-        for _ in range(self.max_msg_len):
+        for step in range(self.max_msg_len):
+            # Forces a final EOS for signals reaching the maximum length.
+            if(step == (self.max_msg_len - 1)):
+                forced_symbol = torch.full_like(message[-1], self.padding_idx).masked_fill(~has_stopped, self.eos_index)
+                message.append(forced_symbol)
+                log_probs.append(torch.zeros_like(has_stopped, dtype=torch.float))
+                entropy.append(torch.zeros_like(has_stopped, dtype=torch.float))
+                
+                break
+
             output, state = self.lstm(self.symbol_embeddings(last_symbol).unsqueeze(0), state)
             output = self.action_space_proj(output).squeeze(0)
 
@@ -148,7 +156,7 @@ class MessageDecoder(nn.Module):
 
             # Stops if all messages are complete.
             has_stopped = has_stopped | (action == self.eos_index)
-            if has_stopped.all():
+            if(has_stopped.all()):
                 break
 
             last_symbol = action

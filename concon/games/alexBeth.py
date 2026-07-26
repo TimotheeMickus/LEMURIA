@@ -401,8 +401,8 @@ class AlexBeth(Game):
 
         return (rewards, perf)
 
-    # Returns (loss, perf, rewards) where loss is scalar and perf/rewards are (batch,)
-    # asker_outcome: (log_prob of (batch, max_msg_len), entropy (batch, 1))
+    # Returns (loss, perf, rewards) where loss is a scalar and perf and rewards are of shape (batch,)
+    # asker_outcome: (log_prob tensor of shape (batch, max msg len), entropy tensor of shape (batch, 1))
     # retriever_scores: tensor of shape (batch size, number of candidates)
     # truth_targets: tensor of shape (batch size, number of candidates)
     def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
@@ -547,7 +547,7 @@ class AlexBeth(Game):
             max_len = msg_tokens.size(1)
             positions = torch.arange(max_len, device=msg_tokens.device).unsqueeze(0) # int tensor of shape TODO
             msg_lens = asker_outcome.action[1].int().view(-1)
-            in_message = positions < (msg_lens.unsqueeze(1) - 1) # boolean tensor of shape TODO, True for positions strictly before EOS in each signal. TODO No, for signals reaching the length limit, the last token might be not an EOS. Anyway, padding tokens are all occurrences of the padding symbol, so I guess that all of this can be simplified.
+            in_message = positions < (msg_lens.unsqueeze(1) - 1) # boolean tensor of shape TODO, True for positions strictly before EOS in each signal.
             if in_message.any():
                 used_tokens = msg_tokens[in_message]
                 vocab_counts = torch.bincount(used_tokens, minlength=self.full_alphabet_size).to("cpu")
