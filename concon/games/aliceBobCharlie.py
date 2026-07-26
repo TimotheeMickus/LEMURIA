@@ -197,7 +197,7 @@ class AliceBobCharlie(AliceBob):
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
-        if(self.loss_weight_temp == 0.0): optimization = [optimization[np.argmax(-scores)]]
+        if(self.loss_weight_temp == 0.0): optimization = [optimization[torch.argmax(-scores).item()]]
 
         # Updates each agent's success rate tracker.
         sender_score = ((2 * sender_perf) - 1) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
