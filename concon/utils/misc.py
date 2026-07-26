@@ -26,6 +26,7 @@ def sum_params(model, abs=False):
 # agent: 
 # spigot: GradSpigot
 def get_backward_f(loss, agent=None, spigot=None):
+    # Setting `retain_graph` to True makes it possible to backpropagate multiple times through the same tensors.
     def backward_f(retain_graph):
         if(agent is None):
             assert spigot is None

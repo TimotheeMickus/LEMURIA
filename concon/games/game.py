@@ -125,7 +125,7 @@ class Game(metaclass=ABCMeta):
 
                 # RMK: It could be easier to have all of the optimization within `compute_interaction` (possibly renamed).
                 for i, (_, _, backward_f) in enumerate(optimization):
-                    retain_graph = (i != len(optimization))
+                    retain_graph = (i != (len(optimization) - 1)) # True except for the last element.
                     backward_f(retain_graph) # Backpropagation
 
                 for (optim, loss, _) in optimization:
