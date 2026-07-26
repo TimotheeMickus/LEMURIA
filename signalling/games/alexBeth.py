@@ -267,9 +267,6 @@ class AlexBeth(Game):
         """
         return batch.candidate_truth
     
-    def agents_for_CNN_pretraining(self):
-        raise NotImplementedError # In fact, the method should not even exist (the superclass should be modified).
-
     # batch: Batch
     def _alex_input(self, batch):
         return batch.predicate_idx

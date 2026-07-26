@@ -18,11 +18,12 @@ from ..eval import compute_correlation
 from ..eval import decision_tree
 
 from .game import Game
+from .pretraining import CNNPretrainable
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
-class AliceBob(Game):
+class AliceBob(CNNPretrainable, Game):
     def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
 

@@ -11,6 +11,7 @@ import tqdm
 import numpy as np
 
 from .games import AliceBob, AliceBobPopulation, AliceBobCharlie
+from .games.pretraining import CNNPretrainable
 from .utils.image_data import get_data_loader, Batch
 from .utils.misc import build_optimizer, get_default_fn, path_replace
 from .utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
@@ -63,6 +64,9 @@ def do(args):
             torch.autograd.set_detect_anomaly(True)
 
         if(args.pretrain_CNNs): # Pretrains the agents.
+            if(not isinstance(model, CNNPretrainable)):
+                raise TypeError("--pretrain_CNNs was set, but %s does not support CNN pretraining." % type(model).__name__)
+
             print(("[%s] pretraining start…" % datetime.now()), flush=True)
 
             dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
