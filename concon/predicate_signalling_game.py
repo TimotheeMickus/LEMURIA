@@ -43,14 +43,14 @@ def do(args):
         run_name = build_run_name(name_args, run, name_with=args.name_with, defaults=name_defaults)
         run_summary_dir = summary_dir / run_name
         run_models_dir = models_dir / run_name
-        message_dump_dir = run_summary_dir if(args.dump_messages is not None) else None
+        signal_dump_dir = run_summary_dir if(args.dump_signals is not None) else None
 
         # Loads the data.
         data_loader = get_data_loader(args)
         nb_workers, nb_prefetch = (2, 2) # TODO There should be command line arguments for these.
         if((nb_workers > 0) and (nb_prefetch > 0)): data_loader.turnAsynchronous(nb_workers=nb_workers, nb_prefetch=nb_prefetch)
 
-        # Size of the message space (number of predicates).
+        # Size of the signal space (number of predicates).
         # TIMOTHÉE Why do you have to inject so much stuff in `args`? (TODO I think that you should not.)
         args.num_predicates = len(data_loader.predicates)
 
@@ -96,7 +96,7 @@ def do(args):
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
 
         # Creates the model.
-        model = AlexBeth(args, autologger, data_loader, message_dump_dir)
+        model = AlexBeth(args, autologger, data_loader, signal_dump_dir)
         model = model.to(args.device)
 
         if(args.detect_anomaly):
@@ -181,7 +181,7 @@ def get_args(remaining_args=None):
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
-    group.add_argument('--dump_messages', help='dump messages: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
+    group.add_argument('--dump_signals', help='dump signals: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
     group.add_argument('--name_with', help="build the run folder/W&B name from these argument names, e.g. --name_with [min_depth, max_depth]  ->  'mind=1__maxd=3__t=<timestamp>__run=0'. Accepts brackets/commas/spaces (quote it if it contains spaces, e.g. '[min_depth, max_depth]'). A launch timestamp and the run index are always appended. If unset, the name is generated automatically from the non-default arguments.", nargs='+', default=None)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
@@ -198,7 +198,7 @@ def get_args(remaining_args=None):
     group.add_argument('--quiet', help='display less information', action='store_true')
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
-    group.add_argument('--len_penalty', help='coefficient for the length penalty of the messages', default=0.0, type=float)
+    group.add_argument('--len_penalty', help='coefficient for the length penalty of the signals', default=0.0, type=float)
     group.add_argument('--voc_penalty', help='coefficient for the vocabulary usage penalty', default=0.0, type=float)
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument('--beta_asker', help='asker entropy penalty coefficient', type=float, default=0.01)
@@ -209,7 +209,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Language', description='arguments relative to language capacity')
     group.add_argument('--base_alphabet_size', help='size of the alphabet (not including special symbols)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
-    group.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
+    group.add_argument('--max_len', help='maximum length of signals produced', default=10, type=int) # Previously 16.
 
     group = arg_parser.add_argument_group(title='Perfs', description='arguments relative to performances')
     # device_choices = ['cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'msnpu']
@@ -230,7 +230,7 @@ def get_args(remaining_args=None):
     group.add_argument('--graph_dropout', help='graph transformer dropout', type=float, default=0.1)
     group.add_argument('--graph_no_norm', help='disable layer norm in graph encoder', action='store_true')
     group.add_argument('--blind_candidates', help='debug: retriever ignores candidate features (scores become constant across candidates)', action='store_true')
-    group.add_argument('--blind_message', help='debug: retriever ignores message embedding', action='store_true')
+    group.add_argument('--blind_signal', help='debug: retriever ignores signal embedding', action='store_true')
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
     group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')
@@ -245,7 +245,7 @@ def get_args(remaining_args=None):
     group.add_argument('--beth_reaper_step', help='reinitialize Beth every N training epochs', default=None, type=int)
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
-    group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
+    group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')
     group.add_argument('--jaccard', help='enable Jaccard-based topsim metrics (more expensive)', action='store_true')
     group.add_argument('--dump_predicate_perf', help='dump per-predicate performance tables and log them as a W&B artifact', action='store_true')
     group.add_argument('--dump_eval_metrics', help='dump per-eval-call aggregate metrics CSV and log it as a W&B artifact', action='store_true')

@@ -12,15 +12,15 @@ from ..utils import misc
 from ..utils.modules import build_cnn_decoder_from_args
 
 # In this game, there is a population of senders (Alice·s) and of receivers (Bob·s).
-# For each training batch, a pair of (Alice, Bob) is randomly selected and trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
+# For each training batch, a pair of (Alice, Bob) is randomly selected and trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # If required, the agents are regularly reinitialized.
 class AliceBobPopulation(AliceBob):
-    def __init__(self, args, logger, message_dump_dir): # TODO We could consider calling super().__init__(args)
+    def __init__(self, args, logger, signal_dump_dir): # TODO We could consider calling super().__init__(args)
         self.max_perf = 0.0
 
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
-        self.max_len_msg = args.max_len
+        self.max_len_signal = args.max_len
 
         self.use_expectation = args.use_expectation
         self.grad_scaling = args.grad_scaling or 0
@@ -68,10 +68,10 @@ class AliceBobPopulation(AliceBob):
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
 
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (leading to successful communication)
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (leading to successful communication)
         
         self.debug = args.debug
-        self.message_dump_file = args.message_dump_file
+        self.signal_dump_file = args.signal_dump_file
 
     @property
     def sender(self):

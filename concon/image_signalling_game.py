@@ -41,7 +41,7 @@ def do(args):
 
         run_summary_dir = summary_dir / str(run)
         run_models_dir = models_dir / str(run)
-        message_dump_dir = run_summary_dir if(args.dump_message) else None
+        signal_dump_dir = run_summary_dir if(args.dump_signal) else None
 
         # Loads the data.
         data_loader = get_data_loader(args)
@@ -54,9 +54,9 @@ def do(args):
         # Creates the model.
         if(args.charlie):
             assert (args.population is None) # NotImplementedFeature
-            model = AliceBobCharlie(args, autologger, data_loader, message_dump_dir)
-        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader, message_dump_dir)
-        else: model = AliceBob(args, autologger, data_loader, message_dump_dir)
+            model = AliceBobCharlie(args, autologger, data_loader, signal_dump_dir)
+        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader, signal_dump_dir)
+        else: model = AliceBob(args, autologger, data_loader, signal_dump_dir)
         model = model.to(args.device)
 
         if(args.detect_anomaly):
@@ -163,7 +163,7 @@ def get_args(remaining_args=None):
     group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
-    group.add_argument('--dump_message', help='whether to regularly save the messages in a file', action="store_true")
+    group.add_argument('--dump_signal', help='whether to regularly save the signals in a file', action="store_true")
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --display tqdm should be inferred from the env
@@ -181,7 +181,7 @@ def get_args(remaining_args=None):
     group.add_argument('--quiet', help='display less information', action='store_true')
 
     group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
-    group.add_argument('--len_penalty', help='coefficient for the length penalty of the messages', default=0.01, type=float)
+    group.add_argument('--len_penalty', help='coefficient for the length penalty of the signals', default=0.01, type=float)
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument('--beta_sender', help='sender entropy penalty coefficient', type=float, default=0.01)
     group.add_argument('--beta_receiver', help='sender entropy penalty coefficient', type=float, default=0.001)
@@ -191,7 +191,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Language', description='arguments relative to language capacity')
     group.add_argument('--base_alphabet_size', help='size of the alphabet (not including special symbols)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
-    group.add_argument('--max_len', help='maximum length of messages produced', default=10, type=int) # Previously 16.
+    group.add_argument('--max_len', help='maximum length of signals produced', default=10, type=int) # Previously 16.
 
     group = arg_parser.add_argument_group(title='Perfs', description='arguments relative to performances')
     # device_choices = ['cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'msnpu']
@@ -236,7 +236,7 @@ def get_args(remaining_args=None):
     group.add_argument('--autoencode_receiver_inputs', help='run all receiver image inputs through a pretrained autoencoder', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
-    group.add_argument('--correct_only', help='analyse the language constisting of the messages produced in successful rounds only', action='store_true')
+    group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')
     
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 

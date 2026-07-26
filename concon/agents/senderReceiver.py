@@ -12,7 +12,7 @@ class SenderReceiver(Agent):
 
         if(check_shared_params):
             assert sender.image_encoder is receiver.image_encoder, 'parameters are not shared'
-            assert receiver.message_encoder.symbol_embeddings is sender.message_decoder.symbol_embeddings, 'parameters are not shared'
+            assert receiver.signal_encoder.symbol_embeddings is sender.signal_decoder.symbol_embeddings, 'parameters are not shared'
 
         self.sender = sender
         self.receiver = receiver

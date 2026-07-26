@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Reduce msgs*.csv row counts while preserving per-predicate signal proportions.
+Reduce signals*.csv row counts while preserving per-predicate signal proportions.
 
 For each file:
-- Group rows by (pred_col, msg_col)
+- Group rows by (pred_col, signal_col)
 - For each predicate, divide signal counts by gcd(counts)
 - Rewrite with those reduced multiplicities
 
 Example:
-  pred A: msg x -> 20, msg y -> 10  => gcd=10 => keep x:2, y:1
-  pred B: msg z -> 7                 => gcd=7  => keep z:1
+  pred A: signal x -> 20, signal y -> 10  => gcd=10 => keep x:2, y:1
+  pred B: signal z -> 7                 => gcd=7  => keep z:1
 
 Default mode is dry-run. Use --apply to write files in place.
 """
@@ -65,52 +65,52 @@ def _gcd_many(values: List[int]) -> int:
 def _process_file(
     path: pathlib.Path,
     pred_col: str,
-    msg_col: str,
+    signal_col: str,
     apply: bool,
 ) -> FileStats:
     stats = FileStats(path=path)
 
-    by_pred_msg: Dict[str, Counter] = defaultdict(Counter)
+    by_pred_signal: Dict[str, Counter] = defaultdict(Counter)
     pred_order: List[str] = []
-    msg_order: Dict[str, List[str]] = defaultdict(list)
+    signal_order: Dict[str, List[str]] = defaultdict(list)
     first_row_by_pair: Dict[Tuple[str, str], Dict[str, str]] = {}
     first_signature_by_pair: Dict[Tuple[str, str], Tuple[Tuple[str, str], ...]] = {}
 
     with path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
-        if pred_col not in fieldnames or msg_col not in fieldnames:
+        if pred_col not in fieldnames or signal_col not in fieldnames:
             stats.schema_ok = False
             return stats
 
         for row in reader:
             stats.rows_before += 1
             pred = row[pred_col]
-            msg = row[msg_col]
-            key = (pred, msg)
+            signal = row[signal_col]
+            key = (pred, signal)
 
-            if pred not in by_pred_msg:
+            if pred not in by_pred_signal:
                 pred_order.append(pred)
-            if msg not in by_pred_msg[pred]:
-                msg_order[pred].append(msg)
+            if signal not in by_pred_signal[pred]:
+                signal_order[pred].append(signal)
 
-            by_pred_msg[pred][msg] += 1
+            by_pred_signal[pred][signal] += 1
             if key not in first_row_by_pair:
                 first_row_by_pair[key] = row.copy()
                 # Keep a lightweight signature to detect inconsistent extra columns in duplicates
-                sig = tuple((k, row.get(k, "")) for k in fieldnames if k not in (pred_col, msg_col))
+                sig = tuple((k, row.get(k, "")) for k in fieldnames if k not in (pred_col, signal_col))
                 first_signature_by_pair[key] = sig
             else:
-                sig = tuple((k, row.get(k, "")) for k in fieldnames if k not in (pred_col, msg_col))
+                sig = tuple((k, row.get(k, "")) for k in fieldnames if k not in (pred_col, signal_col))
                 if sig != first_signature_by_pair[key]:
                     stats.conflicts += 1
 
-    stats.predicates = len(by_pred_msg)
+    stats.predicates = len(by_pred_signal)
     reduced_counts: Dict[Tuple[str, str], int] = {}
-    for pred, msg_counts in by_pred_msg.items():
-        g = _gcd_many(list(msg_counts.values()))
-        for msg, count in msg_counts.items():
-            reduced_counts[(pred, msg)] = count // g
+    for pred, signal_counts in by_pred_signal.items():
+        g = _gcd_many(list(signal_counts.values()))
+        for signal, count in signal_counts.items():
+            reduced_counts[(pred, signal)] = count // g
             stats.rows_after += count // g
 
     stats.reducible = stats.rows_after < stats.rows_before
@@ -118,7 +118,7 @@ def _process_file(
     if not apply:
         return stats
 
-    # Rebuild file in a stable order using the first row observed per (pred,msg)
+    # Rebuild file in a stable order using the first row observed per (pred,signal)
     with path.open("r", newline="", encoding="utf-8") as f:
         fieldnames = csv.DictReader(f).fieldnames or []
 
@@ -130,8 +130,8 @@ def _process_file(
         writer.writeheader()
 
         for pred in pred_order:
-            for msg in msg_order[pred]:
-                key = (pred, msg)
+            for signal in signal_order[pred]:
+                key = (pred, signal)
                 row = first_row_by_pair[key]
                 n = reduced_counts[key]
                 for _ in range(n):
@@ -152,11 +152,11 @@ def main():
     )
     parser.add_argument(
         "--glob",
-        default="msgs*.csv",
-        help="File glob to match recursively (default: msgs*.csv).",
+        default="signals*.csv",
+        help="File glob to match recursively (default: signals*.csv).",
     )
     parser.add_argument("--pred-col", default="pred_str", help="Predicate column name.")
-    parser.add_argument("--msg-col", default="msg", help="Signal/message column name.")
+    parser.add_argument("--signal-col", default="signal", help="Signal/signal column name.")
     parser.add_argument(
         "--apply",
         action="store_true",
@@ -189,12 +189,12 @@ def main():
         stats = _process_file(
             path=path,
             pred_col=args.pred_col,
-            msg_col=args.msg_col,
+            signal_col=args.signal_col,
             apply=args.apply,
         )
         if not stats.schema_ok:
             schema_bad += 1
-            print(f"[SKIP schema] {path} (missing '{args.pred_col}' and/or '{args.msg_col}')")
+            print(f"[SKIP schema] {path} (missing '{args.pred_col}' and/or '{args.signal_col}')")
             continue
 
         total_before += stats.rows_before

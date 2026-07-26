@@ -12,7 +12,7 @@ class AskerRetriever(Agent):
 
         if(check_shared_params):
             assert asker.predicate_encoder is retriever.predicate_encoder, 'parameters are not shared'
-            assert retriever.message_encoder.symbol_embeddings is asker.message_decoder.symbol_embeddings, 'parameters are not shared'
+            assert retriever.signal_encoder.symbol_embeddings is asker.signal_decoder.symbol_embeddings, 'parameters are not shared'
 
         self.asker = asker
         self.retriever = retriever

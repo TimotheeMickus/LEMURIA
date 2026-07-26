@@ -226,13 +226,13 @@ def compute_entropy(counts, base=None):
 
     return entropy
 
-def compute_entropy_stats(sample_messages, sample_categories, base=None):
-    # We starts by counting the occurences of each messages for each category
+def compute_entropy_stats(sample_signals, sample_categories, base=None):
+    # We starts by counting the occurences of each signals for each category
     entropy_dict = collections.defaultdict(collections.Counter)
-    for msg, cat in zip(sample_messages, sample_categories): entropy_dict[cat][msg] += 1.0
+    for signal, cat in zip(sample_signals, sample_categories): entropy_dict[cat][signal] += 1.0
 
     # We then computes the entropy of each category's distribution
-    entropy_cats = [compute_entropy(torch.tensor(list(messages_counter.values())), base=base) for messages_counter in entropy_dict.values()]
+    entropy_cats = [compute_entropy(torch.tensor(list(signals_counter.values())), base=base) for signals_counter in entropy_dict.values()]
     entropy_cats = np.array(entropy_cats)
 
     return entropy_cats.min(), entropy_cats.mean(), np.median(entropy_cats), entropy_cats.max(), entropy_cats.var()

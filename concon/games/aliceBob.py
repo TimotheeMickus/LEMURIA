@@ -20,15 +20,15 @@ from ..eval import decision_tree
 from .game import Game
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
-# They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a message, Bob sees the message and then the target image and a "distractor image".
+# They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
 class AliceBob(Game):
-    def __init__(self, args, logger, dataset, message_dump_dir):
+    def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
 
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
-        self.max_len_msg = args.max_len
+        self.max_len_signal = args.max_len
 
         self.use_expectation = args.use_expectation
         self.grad_scaling = (args.grad_scaling or 0)
@@ -59,10 +59,10 @@ class AliceBob(Game):
             self._sender_avg_reward = misc.Averager(size=12800)
             self._receiver_avg_reward = misc.Averager(size=12800)
 
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         
         self.debug = args.debug
-        self.message_dump_dir = message_dump_dir # str|None
+        self.signal_dump_dir = signal_dump_dir # str|None
         self._init_receiver_preprocessor(args, dataset)
     
     #TODO: the preprocessor currently requires the dataloader to be passed as argument upon construction.
@@ -164,12 +164,12 @@ class AliceBob(Game):
         loss = sender_loss + receiver_loss
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
-        msg_length = sender_outcome.action[1].float().mean()
+        signal_length = sender_outcome.action[1].float().mean()
 
-        return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
+        return optimization, sender_rewards, sender_perf, signal_length, sender_entropy, receiver_entropy
 
     # Returns two tensors of shape (batch size).
-    # sender_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
+    # sender_action: pair (signal, length) where signal is a tensor of shape (batch size, max signal length) and length a tensor of shape (batch size)
     # img_scores: tensor of shape (batch size, nb img)
     def compute_sender_rewards(self, sender_action, img_scores, target_idx):
         """
@@ -183,13 +183,13 @@ class AliceBob(Game):
         if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
         else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
 
-        msg_lengths = sender_action[1].view(-1).float() # Shape: (batch size)
+        signal_lengths = sender_action[1].view(-1).float() # Shape: (batch size)
 
-        rewards += -1 * (msg_lengths >= self.max_len_msg) # -1 reward anytime we reach the message length limit
+        rewards += -1 * (signal_lengths >= self.max_len_signal) # -1 reward anytime we reach the signal length limit
 
         if(self.len_penalty > 0.0):
-            # The penalty equals to 0 when `args.len_penalty` is set to 0, and increases to 1 with the length of the message otherwise.
-            length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * msg_lengths)) # Shape: (batch,)
+            # The penalty equals to 0 when `args.len_penalty` is set to 0, and increases to 1 with the length of the signal otherwise.
+            length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * signal_lengths)) # Shape: (batch,)
 
             rewards = (rewards - length_penalties) # Shape: (batch size)
 
@@ -286,7 +286,7 @@ class AliceBob(Game):
         n = min(max_datapoints, n)
         nb_batch = int(np.ceil(n / batch_size))
 
-        messages = []
+        signals = []
         categories = []
         input_ids = []
         batch_numbers = range(nb_batch)
@@ -315,44 +315,44 @@ class AliceBob(Game):
             np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
             np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
-            scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
-            for i, datapoint in enumerate(batch.original): # Saves the (message, category) pairs and prepares for scrambling
-                msg = sender_outcome.action[0][i]
-                msg_len = sender_outcome.action[1][i]
+            scrambled_signals = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original signals
+            for i, datapoint in enumerate(batch.original): # Saves the (signal, category) pairs and prepares for scrambling
+                signal = sender_outcome.action[0][i]
+                signal_len = sender_outcome.action[1][i]
                 cat = datapoint.category
 
                 if((not self.correct_only) or (receiver_pointing['action'][i] == 0)):
-                    messages.append(msg.tolist()[:msg_len])
+                    signals.append(signal.tolist()[:signal_len])
                     categories.append(cat)
                     input_ids.append(datapoint.idx)
-                # Scrambles the whole message, including the EOS (but not the padding symbols, of course)
-                l = msg_len.item()
-                scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
+                # Scrambles the whole signal, including the EOS (but not the padding symbols, of course)
+                l = signal_len.item()
+                scrambled_signals[i, :l] = scrambled_signals[i][torch.randperm(l)]
 
-            scrambled_receiver_outcome = self.receiver(self._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+            scrambled_receiver_outcome = self.receiver(self._bob_input(batch), signal=scrambled_signals, length=sender_outcome.action[1])
             scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
             scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
-        if(self.message_dump_dir is not None):
+        if(self.signal_dump_dir is not None):
             import csv
             import os
 
-            filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
+            filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
-                _ = writer.writerow(['msg', 'cat', 'idx'])
-                for msg, cat, idx in zip(messages, categories, input_ids):
-                    msg = ' '.join(map(str, msg))
+                _ = writer.writerow(['signal', 'cat', 'idx'])
+                for signal, cat, idx in zip(signals, categories, input_ids):
+                    signal = ' '.join(map(str, signal))
                     cat = ' '.join(map(str, cat))
-                    row = [msg, cat, idx]
+                    row = [signal, cat, idx]
                     _ = writer.writerow(row)
 
         success_prob = torch.stack(success_prob)
         scrambled_success_prob = torch.stack(scrambled_success_prob)
-        scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
+        scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count signals that become accidentaly better after scrambling
         log('eval/scrambling-resistance', scrambling_resistance)
 
-        # Here, we try to see how much the messages describe the categories and not the particular images
+        # Here, we try to see how much the signals describe the categories and not the particular images
         # To do so, we use the original image as target, and an image of the same category as distractor
         abstractness = []
         n = (32 * data_iterator.nb_categories)
@@ -469,12 +469,12 @@ class AliceBob(Game):
         if(main_perf > self.max_perf): self.max_perf = main_perf
 
         # Computes metrics related to symbol-order.
-        # First tries to rank each symbol according to its average relative position in messages.
+        # First tries to rank each symbol according to its average relative position in signals.
         rel_positions = {} # From symbol to list of relative positions
-        for message in messages:
-            for pos, sym in enumerate(message[:-1]): # For each symbol except the EOS
+        for signal in signals:
+            for pos, sym in enumerate(signal[:-1]): # For each symbol except the EOS
                 if(sym not in rel_positions): rel_positions[sym] = []
-                rel_positions[sym].append(pos / len(message)) # Relative position of the symbol in the message
+                rel_positions[sym].append(pos / len(signal)) # Relative position of the symbol in the signal
 
         avg_positions = [(np.mean(l), sym) for (sym, l) in rel_positions.items()]
         avg_positions.sort()
@@ -483,10 +483,10 @@ class AliceBob(Game):
         # Then builds the two lists that we want to test the correlation of.
         value_list = []
         position_list = []
-        for message in messages:
-            for pos, sym in enumerate(message[:-1]): # For each symbol except the EOS
+        for signal in signals:
+            for pos, sym in enumerate(signal[:-1]): # For each symbol except the EOS
                 value_list.append(mapping[sym])
-                position_list.append(pos / len(message)) # Relative position of the symbol in the message
+                position_list.append(pos / len(signal)) # Relative position of the symbol in the signal
 
         res_spearman = scipy.stats.spearmanr(value_list, position_list)
         log('eval/sym-order-corr', res_spearman.correlation)
@@ -494,15 +494,15 @@ class AliceBob(Game):
 
 
         # Computes compositionality measures
-        # First selects a sample of (message, category) pairs
+        # First selects a sample of (signal, category) pairs
         size_sample = 1024
 
-        sample = list(zip(messages, categories))
+        sample = list(zip(signals, categories))
         random.shuffle(sample)
         sample = sample[:size_sample]
-        # (To sample from each category instead, start with: d = misc.group_by(messages, categories))
+        # (To sample from each category instead, start with: d = misc.group_by(signals, categories))
 
-        # Checks that the sample contains at least two different categories and two differents messages
+        # Checks that the sample contains at least two different categories and two differents signals
         ok = False
         mes = set()
         cat = set()
@@ -514,39 +514,39 @@ class AliceBob(Game):
                 break
 
         if(ok == False):
-            print(f'Compositionality measures cannot be computed ({len(mes)} messages and {len(cat)} categories in the sample).') # Unique messages and unique categories.
+            print(f'Compositionality measures cannot be computed ({len(mes)} signals and {len(cat)} categories in the sample).') # Unique signals and unique categories.
         else:
-            sample_messages, sample_categories = zip(*sample)
-            sample_messages, sample_categories = list(map(tuple, sample_messages)), list(map(tuple, sample_categories))
+            sample_signals, sample_categories = zip(*sample)
+            sample_signals, sample_categories = list(map(tuple, sample_signals)), list(map(tuple, sample_categories))
 
-            l_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, correl_only=True)
+            l_cor, *_ = compute_correlation.mantel(sample_signals, sample_categories, correl_only=True)
             log('FM_corr/Lev-based comp', l_cor)
             #log('FM_corr/Lev-based comp (z-score)', l_cor_n)
             #log('FM_corr/Lev-based comp (random)', l_cor_rd)
 
-            l_n_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.levenshtein_normalised, correl_only=True)
+            l_n_cor, *_ = compute_correlation.mantel(sample_signals, sample_categories, signal_distance=compute_correlation.levenshtein_normalised, correl_only=True)
             log('FM_corr/Normalised Lev-based comp', l_n_cor)
             #log('FM_corr/Normalised Lev-based comp (z-score)', l_n_cor_n)
             #log('FM_corr/Normalised Lev-based comp (random)', l_n_cor_rd)
 
-            j_cor, *_ = compute_correlation.mantel(sample_messages, sample_categories, message_distance=compute_correlation.jaccard, map_msg_to_str=False, correl_only=True)
+            j_cor, *_ = compute_correlation.mantel(sample_signals, sample_categories, signal_distance=compute_correlation.jaccard, map_signal_to_str=False, correl_only=True)
             log('FM_corr/Jaccard-based comp', j_cor)
             #log('FM_corr/Jaccard-based comp (z-score)', j_cor_n)
             #log('FM_corr/Jaccard-based comp (random)', j_cor_rd)
 
             if(l_n_cor > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (j_cor / l_n_cor))
 
-            minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_messages, sample_categories, base=2)
-            log('FM_corr/min Entropy category per msgs', minH)
-            log('FM_corr/mean Entropy category per msgs', meanH)
-            log('FM_corr/med Entropy category per msgs', medH)
-            log('FM_corr/max Entropy category per msgs', maxH)
-            log('FM_corr/var Entropy category per msgs', varH)
+            minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_signals, sample_categories, base=2)
+            log('FM_corr/min Entropy category per signals', minH)
+            log('FM_corr/mean Entropy category per signals', meanH)
+            log('FM_corr/med Entropy category per signals', medH)
+            log('FM_corr/max Entropy category per signals', maxH)
+            log('FM_corr/var Entropy category per signals', varH)
 
         # Decision tree stuff
         alphabet_size = (self.base_alphabet_size + 1)
         gram_size = 1 # Max size of n-grams to consider
-        tmp = decision_tree.analyse(messages, categories, alphabet_size, data_iterator.concepts, gram_size)
+        tmp = decision_tree.analyse(signals, categories, alphabet_size, data_iterator.concepts, gram_size)
         (full_tree, full_tree_accuracy) = tmp['full_tree']
         conceptual_trees = tmp['conceptual_trees']
 
@@ -622,7 +622,7 @@ class AliceBob(Game):
         receiver_part_base_distractors = batch.base_distractors_img(stack=True, f=(lambda img: img.grad.detach()))
         receiver_part_base_distractors = process(receiver_part_base_distractors, 2, mode)
 
-        # Message Bob-model visualisation (inspired by Simonyan et al. 2013)
+        # Signal Bob-model visualisation (inspired by Simonyan et al. 2013)
         #receiver_dream = add_normal_noise((0.5 + torch.zeros_like(batch.original_img)), std_dev=0.1, clamp_values=(0,1)) # Starts with normally-random images
         receiver_dream = torch.stack([data_iterator.average_image() for _ in range(batch_size)]) # Starts with the average of the dataset
         #show_imgs([data_iterator.average_image()], 1)
@@ -630,7 +630,7 @@ class AliceBob(Game):
         receiver_dream = receiver_dream.clone().detach() # Creates a leaf that is a copy of `receiver_dream`
         receiver_dream.requires_grad = True
 
-        encoded_message = self.receiver.encode_message(*sender_outcome.action).detach()
+        encoded_signal = self.receiver.encode_signal(*sender_outcome.action).detach()
 
         # Defines a filter for checking smoothness
         channels = 3
@@ -651,7 +651,7 @@ class AliceBob(Game):
                 print(i)
                 j = i
 
-            tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_message)
+            tmp_outcome = self.receiver.aux_forward(receiver_dream, encoded_signal)
             loss = -tmp_outcome.scores[:, 0].sum()
 
             regularisation_loss = 0.0

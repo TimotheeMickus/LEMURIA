@@ -14,7 +14,7 @@ class MultiHeadsClassifier:
         self.get_head_targets = get_head_targets
         self.device = device
 
-    def run_batch(self, batch): # Only the target messages will be used
+    def run_batch(self, batch): # Only the target signals will be used
         self.optimizer.zero_grad()
 
         hits, losses = self.forward(batch)
@@ -27,7 +27,7 @@ class MultiHeadsClassifier:
 
         return hits, loss
 
-    def forward(self, batch): # Only the target messages will be used
+    def forward(self, batch): # Only the target signals will be used
         batch_img = batch.target_img(stack=True)
         activation = self.image_encoder(batch_img)
         targets = batch.target_category(stack=True, f=self.get_head_targets, device=self.device)
@@ -43,29 +43,29 @@ class MultiHeadsClassifier:
         return hits, losses # Lists with one element per head
 
 
-# Message -> vector
-class MessageEncoder(nn.Module):
+# Signal -> vector
+class SignalEncoder(nn.Module):
     """
     Encodes a signal of discrete symbols in a single vector.
     """
     def __init__(self, base_alphabet_size, embedding_dim, output_dim, symbol_embeddings):
-        super(MessageEncoder, self).__init__()
+        super(SignalEncoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=output_dim, num_layers=1, batch_first=True)
         
         self.alphabet_size = self.symbol_embeddings.num_embeddings
 
-    def forward(self, message, length):
+    def forward(self, signal, length):
         """
         Forward propagation.
         Input:
-            `message`, of shape [args.batch_size, <=MSG_LEN], signal produced by sender
+            `signal`, of shape [args.batch_size, <=SIGNAL_LEN], signal produced by sender
             `length`, of shape [args.batch_size, 1], length of signal produced by sender
         Output:
-            encoded message, of shape [args.batch_size, output_dim]
+            encoded signal, of shape [args.batch_size, output_dim]
         """
-        embeddings = self.symbol_embeddings(message) # Shape: (batch size, message length, embedding_dim)
+        embeddings = self.symbol_embeddings(signal) # Shape: (batch size, signal length, embedding_dim)
         embeddings = torch.nn.utils.rnn.pack_padded_sequence(embeddings, length.squeeze(1).cpu(), batch_first=True, enforce_sorted=False)
         _, (hidden, _) = self.lstm(embeddings) # Shape: (num_layers, batch size, output_dim)
         
@@ -76,7 +76,7 @@ class MessageEncoder(nn.Module):
         if(symbol_embeddings is None): symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=False)
         return cls(args.base_alphabet_size, args.hidden_size, args.hidden_size, symbol_embeddings=symbol_embeddings)
 
-class MessageDecoder(nn.Module):
+class SignalDecoder(nn.Module):
     '''
     This is a 1-layer LSTM that generates tokens autoregressively.
     The predicate embedding is projected into initial LSTM cell and hidden state.
@@ -87,19 +87,19 @@ class MessageDecoder(nn.Module):
       samples a token (training) or argmax (eval),
       stops after producing EOS and pad rest.
     '''
-    def __init__(self, base_alphabet_size, embedding_dim, output_dim, max_msg_len, symbol_embeddings):
-        super(MessageDecoder, self).__init__()
+    def __init__(self, base_alphabet_size, embedding_dim, output_dim, max_signal_len, symbol_embeddings):
+        super(SignalDecoder, self).__init__()
 
         self.symbol_embeddings = symbol_embeddings
         self.lstm = nn.LSTM(embedding_dim, output_dim, 1)
-        # project encoded message onto cell
+        # project encoded signal onto cell
         self.cell_proj = nn.Linear(embedding_dim, embedding_dim)
-        # project encoded message onto hidden
+        # project encoded signal onto hidden
         self.hidden_proj = nn.Linear(embedding_dim, embedding_dim)
         # project lstm output onto action space
         self.action_space_proj = nn.Linear(embedding_dim, base_alphabet_size + 1)
 
-        self.max_msg_len = max_msg_len
+        self.max_signal_len = max_signal_len
         
         self.alphabet_size = self.symbol_embeddings.num_embeddings
         assert self.alphabet_size == (base_alphabet_size + 3) # +3: EOS symbol, padding symbol, BOS symbol
@@ -117,19 +117,19 @@ class MessageDecoder(nn.Module):
         state = (hidden, cell)
 
         # outputs
-        message = []
+        signal = []
         log_probs = []
         entropy = []
 
         # Used in the stopping mechanism (False·s become True·s when EOS is produced)
         has_stopped = torch.zeros(encoded.size(0), device=encoded.device, dtype=torch.bool)
 
-        # Produces the messages.
-        for step in range(self.max_msg_len):
+        # Produces the signals.
+        for step in range(self.max_signal_len):
             # Forces a final EOS for signals reaching the maximum length.
-            if(step == (self.max_msg_len - 1)):
-                forced_symbol = torch.full_like(message[-1], self.padding_idx).masked_fill(~has_stopped, self.eos_index)
-                message.append(forced_symbol)
+            if(step == (self.max_signal_len - 1)):
+                forced_symbol = torch.full_like(signal[-1], self.padding_idx).masked_fill(~has_stopped, self.eos_index)
+                signal.append(forced_symbol)
                 log_probs.append(torch.zeros_like(has_stopped, dtype=torch.float))
                 entropy.append(torch.zeros_like(has_stopped, dtype=torch.float))
                 
@@ -144,7 +144,7 @@ class MessageDecoder(nn.Module):
             dist = Categorical(logits=output)
             action = dist.sample() if(self.training) else output.argmax(dim=-1) # Shape: (batch size)
 
-            # Ignores prediction for completed messages.
+            # Ignores prediction for completed signals.
             active = (~has_stopped).float()
             log_p = dist.log_prob(action) * active
             ent = dist.entropy() * active
@@ -152,9 +152,9 @@ class MessageDecoder(nn.Module):
             entropy.append(ent)
 
             action = action.masked_fill(has_stopped, self.padding_idx)
-            message.append(action)
+            signal.append(action)
 
-            # Stops if all messages are complete.
+            # Stops if all signals are complete.
             has_stopped = has_stopped | (action == self.eos_index)
             if(has_stopped.all()):
                 break
@@ -162,20 +162,20 @@ class MessageDecoder(nn.Module):
             last_symbol = action
 
         # Converts output to tensor.
-        message = torch.stack(message, dim=1) # Shape: (batch size, max msg length)
-        message_len = (message != self.padding_idx).sum(dim=1)[:, None] # Shape: (batch size, 1)
-        log_probs = torch.stack(log_probs, dim=1) # Shape: (batch size, max msg length)
+        signal = torch.stack(signal, dim=1) # Shape: (batch size, max signal length)
+        signal_len = (signal != self.padding_idx).sum(dim=1)[:, None] # Shape: (batch size, 1)
+        log_probs = torch.stack(log_probs, dim=1) # Shape: (batch size, max signal length)
 
         # Averages entropy (over timesteps).
-        entropy = torch.stack(entropy, dim=1) # Shape: (batch size, max msg length)
+        entropy = torch.stack(entropy, dim=1) # Shape: (batch size, max signal length)
         entropy = entropy.sum(dim=1, keepdim=True) # Shape: (batch size, 1)
-        entropy = entropy / message_len.float() # The average symbol distribution entropy over the message. Shape: (batch size, 1)
+        entropy = entropy / signal_len.float() # The average symbol distribution entropy over the signal. Shape: (batch size, 1)
 
         outputs = {
             "entropy": entropy,
             "log_probs": log_probs,
-            "message": message,
-            "message_len": message_len}
+            "signal": signal,
+            "signal_len": signal_len}
 
         return outputs
 
@@ -186,7 +186,7 @@ class MessageDecoder(nn.Module):
             base_alphabet_size=args.base_alphabet_size,
             embedding_dim=args.hidden_size,
             output_dim=args.hidden_size,
-            max_msg_len=args.max_len,
+            max_signal_len=args.max_len,
             symbol_embeddings=symbol_embeddings,)
 
 # Adds noise to vectors.

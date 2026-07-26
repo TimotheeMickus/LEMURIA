@@ -6,57 +6,57 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .agent import Agent
-from ..utils.modules import MessageEncoder, CandidateNodeAverager, CandidateGraphEncoder
+from ..utils.modules import SignalEncoder, CandidateNodeAverager, CandidateGraphEncoder
 from ..utils import misc
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["scores", "msg_spigot"])
+Outcome = namedtuple("Outcome", ["scores", "signal_spigot"])
 
-# Determines candidate truth-value according to a message.
+# Determines candidate truth-value according to a signal.
 class Retriever(Agent):
     """
     Defines a retriever policy.
     Based on a set of candidates and a given signal, determines the candidate truth values.
     """
-    def __init__(self, candidate_encoder, message_encoder, args, has_shared_param):
+    def __init__(self, candidate_encoder, signal_encoder, args, has_shared_param):
         super().__init__()
 
         self.candidate_encoder = candidate_encoder # currently embedding-based averaging encoder 
-        self.message_encoder = message_encoder # RNN (LSTM) encoder
+        self.signal_encoder = signal_encoder # RNN (LSTM) encoder
         self.blind_candidates = getattr(args, "blind_candidates", False)
-        self.blind_message = getattr(args, "blind_message", False)
+        self.blind_signal = getattr(args, "blind_signal", False)
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
         
-        self.alphabet_size = self.message_encoder.alphabet_size
+        self.alphabet_size = self.signal_encoder.alphabet_size
 
-    def encode_message(self, message, length):
-        return self.message_encoder(message, length).unsqueeze(-1)
+    def encode_signal(self, signal, length):
+        return self.signal_encoder(signal, length).unsqueeze(-1)
 
     # candidates: dict with 
     #   - node_idx: (batch, n_candidates, max_nodes)
     #   - edge_idx: (batch, n_candidates, max_nodes, max_nodes)
     #   - graph_size: (batch, n_candidates)
-    # message: (batch, max_msg_len) token IDs
-    # length: (batch, 1) message lengths
-    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
-    def forward(self, candidate_tensors, message, length, use_spigot=False):
-        encoded_message = self.encode_message(message, length) # Shape (batch size, hidden size)
-        return self.aux_forward(candidate_tensors, encoded_message, use_spigot)
+    # signal: (batch, max_signal_len) token IDs
+    # length: (batch, 1) signal lengths
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the signal)
+    def forward(self, candidate_tensors, signal, length, use_spigot=False):
+        encoded_signal = self.encode_signal(signal, length) # Shape (batch size, hidden size)
+        return self.aux_forward(candidate_tensors, encoded_signal, use_spigot)
 
     # candidate_tensors: dict with 
     #   - node_idx: (batch, n_candidates, max_nodes)
     #   - edge_idx: (batch, n_candidates, max_nodes, max_nodes)
     #   - graph_size: (batch, n_candidates)
-    # encoded_messages: tensor of shape (batch, hidden size)
-    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
-    def aux_forward(self, candidate_tensors, encoded_message, use_spigot):
+    # encoded_signals: tensor of shape (batch, hidden size)
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the signal)
+    def aux_forward(self, candidate_tensors, encoded_signal, use_spigot):
         """
         Forward propagation.
         Outputs Outcome with:
             - scores: (batch, n_candidates) logits for each candidate
-            - msg_spigot: GradSpigot or None
+            - signal_spigot: GradSpigot or None
         """
         # Encodes the candidates.
         # TODO explicitate
@@ -65,16 +65,16 @@ class Retriever(Agent):
             encoded_candidates = torch.zeros_like(encoded_candidates)
 
         if(use_spigot):
-            msg_spigot = misc.GradSpigot(encoded_message)
-            encoded_message = msg_spigot.tensor # Shape: (batch size, hidden size)
+            signal_spigot = misc.GradSpigot(encoded_signal)
+            encoded_signal = signal_spigot.tensor # Shape: (batch size, hidden size)
         else:
-            msg_spigot = None
-        if self.blind_message:
-            encoded_message = torch.zeros_like(encoded_message)
+            signal_spigot = None
+        if self.blind_signal:
+            encoded_signal = torch.zeros_like(encoded_signal)
 
         # Scores (logits) the targets.
-        scores = torch.bmm(encoded_candidates, encoded_message).squeeze(-1) # Shape: (batch size, num_candidates)
-        outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
+        scores = torch.bmm(encoded_candidates, encoded_signal).squeeze(-1) # Shape: (batch size, num_candidates)
+        outcome = Outcome(scores=scores, signal_spigot=signal_spigot)
 
         return outcome
     
@@ -117,7 +117,7 @@ class Retriever(Agent):
                 )
         #candidate_encoder = torch.compile(candidate_encoder)
                 
-        message_encoder = MessageEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
-        #message_encoder = torch.compile(message_encoder)
+        signal_encoder = SignalEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        #signal_encoder = torch.compile(signal_encoder)
         
-        return cls(candidate_encoder, message_encoder, args, has_shared_param)
+        return cls(candidate_encoder, signal_encoder, args, has_shared_param)

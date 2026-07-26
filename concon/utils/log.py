@@ -445,15 +445,15 @@ class AutoLogger(object):
             metrics = external_output[0]
             rewards = metrics["rewards"]
             successes = metrics["successes"]
-            msg_length = metrics["msg_length"]
+            signal_length = metrics["signal_length"]
             sender_entropy = metrics["sender_entropy"]
             receiver_entropy = metrics["receiver_entropy"]
         else:
-            rewards, successes, msg_length, sender_entropy, receiver_entropy, *external_output = external_output
+            rewards, successes, signal_length, sender_entropy, receiver_entropy, *external_output = external_output
 
-        # Computes the minimum length the messages can have in order to get perfect accuracy (approximation when the size of the alphabet >> 1)
+        # Computes the minimum length the signals can have in order to get perfect accuracy (approximation when the size of the alphabet >> 1)
         minimal_compression_len = np.log(self.data_loader.nb_categories) / np.log(self.base_alphabet_size + 1) # + 1 because EoM is taken into account
-        length_ratio = (msg_length / minimal_compression_len).item()
+        length_ratio = (signal_length / minimal_compression_len).item()
 
         # updates running average reward
         self._state['total_reward'] += rewards.sum().item()
@@ -474,21 +474,21 @@ class AutoLogger(object):
             self._write('train/sender_entropy', sender_entropy.item(), number_ex_seen)
             self._write('train/receiver_entropy', receiver_entropy.item(), number_ex_seen)
 
-            self._write('llp/msg_length', msg_length.item(), number_ex_seen)
+            self._write('llp/signal_length', signal_length.item(), number_ex_seen)
             self._write('llp/length_ratio', length_ratio, number_ex_seen)
 
             if self.log_lang_progress:
                 for batch in supplementary_info['batches']:
-                    batch_msg_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(self.device) # size of embeddings + EOS + PAD
-                    # message -> many-hot
-                    many_hots = batch_msg_manyhot.scatter_(1, sender_outcome.action[0].detach(), 1).narrow(1,1,self.base_alphabet_size).float()
+                    batch_signal_manyhot = torch.zeros((batch.size, self.base_alphabet_size + 2), dtype=torch.float).to(self.device) # size of embeddings + EOS + PAD
+                    # signal -> many-hot
+                    many_hots = batch_signal_manyhot.scatter_(1, sender_outcome.action[0].detach(), 1).narrow(1,1,self.base_alphabet_size).float()
                     # summation along batch dimension, and add to counts
                     self._state['current_dist'] += torch.einsum('bi,bj->ij', many_hots, batch.original_category.float().to(self.device)).detach().float()
 
             if self.log_entropy:
-                new_messages = sender_outcome.action[0].view(-1)
-                valid_indices = torch.arange(self.base_alphabet_size).expand(new_messages.size(0), self.base_alphabet_size).to(self.device)
-                selected_symbols = valid_indices == new_messages.unsqueeze(1).float()
+                new_signals = sender_outcome.action[0].view(-1)
+                valid_indices = torch.arange(self.base_alphabet_size).expand(new_signals.size(0), self.base_alphabet_size).to(self.device)
+                selected_symbols = valid_indices == new_signals.unsqueeze(1).float()
                 self._state['symbol_counts'] += selected_symbols.sum(dim=0)
 
             if self.log_lang_progress and index % 100 == 0:

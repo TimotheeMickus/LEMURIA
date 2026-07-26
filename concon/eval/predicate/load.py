@@ -9,7 +9,7 @@ def get_datapoints(directory_name: str = None, latest_only: bool = False, load_l
     Input:
     - directory_name (string): folder found in 'concon/runs'
     - latest_only (bool): if True, load only the highest-epoch language dump per run
-    - load_languages (bool): if False, skip loading any language/msgs files entirely
+    - load_languages (bool): if False, skip loading any language/signals files entirely
     Output:
     - datapoints (list[dict]) of runs with keys:
         - config (dict),
@@ -25,7 +25,7 @@ def iter_datapoints(directory_name: str = None, latest_only: bool = False, load_
     Input:
     - directory_name (string): folder found in 'concon/runs'
     - latest_only (bool): if True, load only the highest-epoch language dump per run
-    - load_languages (bool): if False, skip loading any language/msgs files entirely
+    - load_languages (bool): if False, skip loading any language/signals files entirely
     Output:
     - yields datapoints (dict) with keys:
         - config (dict),
@@ -45,20 +45,20 @@ def iter_datapoints(directory_name: str = None, latest_only: bool = False, load_
                 directory = subdirectories[0]
             else:
                 print(f"Found weird directory in {super_directory}/{directory}.\n{subdirectories}.")
-        messages_paths = []
+        signals_paths = []
         eval_path = None
         pred_path = None
 
         for filename in os.listdir(directory):
-            if load_languages and filename.startswith('msgs') and not filename.endswith('.bak'):
-                messages_paths.append((os.path.join(directory, filename), filename))
+            if load_languages and filename.startswith('signals') and not filename.endswith('.bak'):
+                signals_paths.append((os.path.join(directory, filename), filename))
             if filename.startswith('eval'):
                 eval_path = os.path.join(directory, filename)
             if load_languages and filename.startswith('predicate'):
                 pred_path = os.path.join(directory, filename)
 
-        if latest_only and messages_paths:
-            messages_paths = [max(messages_paths, key=lambda x: int(x[1].split('.')[1].split('e')[1]))]
+        if latest_only and signals_paths:
+            signals_paths = [max(signals_paths, key=lambda x: int(x[1].split('.')[1].split('e')[1]))]
 
         datapoint = {}
         with open(os.path.join(directory, 'hparams.json')) as f:
@@ -69,8 +69,8 @@ def iter_datapoints(directory_name: str = None, latest_only: bool = False, load_
         datapoint['evaluation'] = pd.read_csv(eval_path) if eval_path is not None else None
         datapoint['predicates'] = pd.read_csv(pred_path) if pred_path is not None else None
         datapoint['languages'] = []
-        for msg_path, fname in messages_paths:
+        for signal_path, fname in signals_paths:
             datapoint['languages'].append({'epoch_number': int(fname.split('.')[1].split('e')[1]),
-                                        'language': pd.read_csv(msg_path)})
+                                        'language': pd.read_csv(signal_path)})
 
         yield datapoint

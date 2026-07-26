@@ -21,29 +21,29 @@ from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
 from ..utils.image_data import get_data_loader
 
-# The output values `messages` and `categories` are both lists of tuples of integers.
-# If `string_msgs` is set to True, then the messages in the file are considered string and then converted to tuples of integers.
-def read_csv(csv_filename, string_msgs=False):
+# The output values `signals` and `categories` are both lists of tuples of integers.
+# If `string_signals` is set to True, then the signals in the file are considered string and then converted to tuples of integers.
+def read_csv(csv_filename, string_signals=False):
     """
-    Open a message TSV file, and return messages paired with categories
+    Open a signal TSV file, and return signals paired with categories
     """
     with open(csv_filename) as istr:
         data = list(csv.reader(istr, delimiter="\t"))
 
-    _, categories, messages = zip(*data)
+    _, categories, signals = zip(*data)
 
-    if string_msgs:
+    if string_signals:
         c2i = collections.defaultdict(it.count().__next__)
-        messages = map(str.strip, messages)
-        messages = [tuple(map(c2i.__getitem__, msg)) for msg in messages]
+        signals = map(str.strip, signals)
+        signals = [tuple(map(c2i.__getitem__, signal)) for signal in signals]
 
         alphabet_size = len(c2i)
     else:
-        messages = map(str.strip, messages)
-        messages = map(str.split, messages)
-        messages = [tuple(map(int, msg)) for msg in messages]
+        signals = map(str.strip, signals)
+        signals = map(str.split, signals)
+        signals = [tuple(map(int, signal)) for signal in signals]
 
-        alphabet_size = (1 + max([max(msg, default=0) for msg in messages]))
+        alphabet_size = (1 + max([max(signal, default=0) for signal in signals]))
 
     categories = map(str.strip, categories)
     categories = map(str.split, categories)
@@ -57,7 +57,7 @@ def read_csv(csv_filename, string_msgs=False):
         concept_values = dict([(('d%i.v%i' % (i, v)), v) for v in range(max_value + 1)])
         concepts.append(concept_values)
 
-    return messages, categories, alphabet_size, concepts
+    return signals, categories, alphabet_size, concepts
 
 def l2(v1, v2): return np.linalg.norm(v1 - v2)
 
@@ -205,26 +205,26 @@ def jaccard2(seq1, seq2):
     return 1 - (intersection / (proto_union - intersection))
 """
 
-def compute_correlation(messages, categories, message_distance=levenshtein, meaning_distance=hamming, map_msg_to_str=True, map_ctg_to_str=True):
+def compute_correlation(signals, categories, signal_distance=levenshtein, meaning_distance=hamming, map_signal_to_str=True, map_ctg_to_str=True):
     """
-    Compute correlation of message distance and meaning distance.
+    Compute correlation of signal distance and meaning distance.
     """
 
     # Some distance functions are defined over strings only
-    if map_msg_to_str:
-        messages = [''.join(map(chr, msg)) for msg in messages]
+    if map_signal_to_str:
+        signals = [''.join(map(chr, signal)) for signal in signals]
     if map_ctg_to_str:
         categories = [''.join(map(chr, ctg)) for ctg in categories]
 
     # Compute pairwise distances
-    dm = list(it.starmap(message_distance, it.combinations(messages, 2)))
+    dm = list(it.starmap(signal_distance, it.combinations(signals, 2)))
     dc = list(it.starmap(meaning_distance, it.combinations(categories, 2)))
 
     return spearman(dc, dm)
 
-def compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs):
+def compute_correlation_baseline(signals, categories, scrambling_pool_size, **kwargs):
     """
-    Compute baseline for correlation of message distance and meaning distance.
+    Compute baseline for correlation of signal distance and meaning distance.
     """
     uniq_cats = list(set(map(tuple, categories)))
     num_cats = len(uniq_cats)
@@ -232,7 +232,7 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
     for _ in range(scrambling_pool_size):
         mapping = dict(zip(uniq_cats, random.sample(uniq_cats, num_cats)))
         remapped_categories = list(map(mapping.__getitem__, map(tuple, categories)))
-        results.append(compute_correlation(messages, remapped_categories, **kwargs)[0])
+        results.append(compute_correlation(signals, remapped_categories, **kwargs)[0])
     results = np.array(results)
 
     return results.mean(), results.std()
@@ -241,24 +241,24 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
 def score(x, mean, stdev):
     return ((x - mean) / stdev)
 
-def analyze_correlation(messages, categories, scrambling_pool_size=1000, **kwargs):
-    cor = compute_correlation(messages, categories, **kwargs)[0]
-    μ, σ = compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs)
+def analyze_correlation(signals, categories, scrambling_pool_size=1000, **kwargs):
+    cor = compute_correlation(signals, categories, **kwargs)[0]
+    μ, σ = compute_correlation_baseline(signals, categories, scrambling_pool_size, **kwargs)
     impr = score(cor, μ, σ)
 
     return cor, μ, σ, impr
 
-def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True):
-    assert len(messages) == len(categories)
+def mantel(signals, categories, signal_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_signal_to_str=True, map_ctg_to_str=True):
+    assert len(signals) == len(categories)
 
-    if map_msg_to_str:
-        messages = [''.join(map(chr, msg)) for msg in messages] # Each integer is mapped to the corresponding unicode character
+    if map_signal_to_str:
+        signals = [''.join(map(chr, signal)) for signal in signals] # Each integer is mapped to the corresponding unicode character
 
     if map_ctg_to_str:
         categories = [''.join(map(chr, ctg)) for ctg in categories] # Each integer is mapped to the corresponding unicode character
 
-    #tM = np.array(list(it.starmap(message_distance, it.combinations(messages, 2))))
-    tM = np.array([message_distance(msg_1, msg_2) for msg_1, msg_2 in it.combinations(messages, 2)])
+    #tM = np.array(list(it.starmap(signal_distance, it.combinations(signals, 2))))
+    tM = np.array([signal_distance(signal_1, signal_2) for signal_1, signal_2 in it.combinations(signals, 2)])
     #sM = np.array(list(it.starmap(meaning_distance, it.combinations(categories, 2))))
     sM = np.array([meaning_distance(ctg_1, ctg_2) for ctg_1, ctg_2 in it.combinations(categories, 2)])
 
@@ -284,8 +284,8 @@ def main(args):
     nb_batch = int(np.ceil(n / batch_size))
     print('%i datapoints (%i batches)' % (n, nb_batch))
 
-    print("Generating the messages…")
-    messages = []
+    print("Generating the signals…")
+    signals = []
     categories = []
     images = []
     batch_numbers = range(nb_batch)
@@ -299,18 +299,18 @@ def main(args):
             sender_outcome, receiver_outcome = model(batch)
             image = sender.image_encoder(batch.original_img(stack=True))
 
-            messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
+            signals.extend([signal.tolist()[:l] for signal, l in zip(*sender_outcome.action)])
             categories.extend([x.category for x in batch.original])
             images.extend([vector for vector in image.numpy()])
 
-    mc_ln = mantel(messages, categories, message_distance=levenshtein_normalised)
-    mc_j = mantel(messages, categories, message_distance=jaccard, map_msg_to_str=False)
+    mc_ln = mantel(signals, categories, signal_distance=levenshtein_normalised)
+    mc_j = mantel(signals, categories, signal_distance=jaccard, map_signal_to_str=False)
 
-    ic_ln = mantel(images, categories, message_distance=l2, map_msg_to_str=False)
-    ic_j = mantel(images, categories, message_distance=l2, map_msg_to_str=False)
+    ic_ln = mantel(images, categories, signal_distance=l2, map_signal_to_str=False)
+    ic_j = mantel(images, categories, signal_distance=l2, map_signal_to_str=False)
 
-    mi_ln = mantel(messages, images, message_distance=levenshtein_normalised, meaning_distance=l2, map_ctg_to_str=False)
-    mi_j = mantel(messages, images, message_distance=jaccard, map_msg_to_str=False, meaning_distance=l2, map_ctg_to_str=False)
+    mi_ln = mantel(signals, images, signal_distance=levenshtein_normalised, meaning_distance=l2, map_ctg_to_str=False)
+    mi_j = mantel(signals, images, signal_distance=jaccard, map_signal_to_str=False, meaning_distance=l2, map_ctg_to_str=False)
 
-    print('levenshtein normalized\n\tmsg/ctg:', *mc_ln, '\n\timg/ctg:',  *ic_ln, '\n\tmsg/img:',  *mi_ln)
-    print('jaccard\n\tmsg/ctg:', *mc_j, '\n\timg/ctg:',  *ic_j, '\n\tmsg/img:',  *mi_j)
+    print('levenshtein normalized\n\tsignal/ctg:', *mc_ln, '\n\timg/ctg:',  *ic_ln, '\n\tsignal/img:',  *mi_ln)
+    print('jaccard\n\tsignal/ctg:', *mc_j, '\n\timg/ctg:',  *ic_j, '\n\tsignal/img:',  *mi_j)

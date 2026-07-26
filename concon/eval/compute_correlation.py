@@ -15,29 +15,29 @@ import Levenshtein
 from ..utils.Mantel import test as mantel_test
 from .decision_tree import decision_tree
 
-# The output values `messages` and `categories` are both lists of tuples of integers.
-# If `string_msgs` is set to True, then the messages in the file are considered string and then converted to tuples of integers.
-def read_csv(csv_filename, string_msgs=False):
+# The output values `signals` and `categories` are both lists of tuples of integers.
+# If `string_signals` is set to True, then the signals in the file are considered string and then converted to tuples of integers.
+def read_csv(csv_filename, string_signals=False):
     """
-    Open a message TSV file, and return messages paired with categories
+    Open a signal TSV file, and return signals paired with categories
     """
     with open(csv_filename) as istr:
         data = list(csv.reader(istr, delimiter="\t"))
 
-    _, categories, messages = zip(*data)
+    _, categories, signals = zip(*data)
 
-    if string_msgs:
+    if string_signals:
         c2i = collections.defaultdict(it.count().__next__)
-        messages = map(str.strip, messages)
-        messages = [tuple(map(c2i.__getitem__, msg)) for msg in messages]
+        signals = map(str.strip, signals)
+        signals = [tuple(map(c2i.__getitem__, signal)) for signal in signals]
 
         alphabet_size = len(c2i)
     else:
-        messages = map(str.strip, messages)
-        messages = map(str.split, messages)
-        messages = [tuple(map(int, msg)) for msg in messages]
+        signals = map(str.strip, signals)
+        signals = map(str.split, signals)
+        signals = [tuple(map(int, signal)) for signal in signals]
 
-        alphabet_size = (1 + max([max(msg, default=0) for msg in messages]))
+        alphabet_size = (1 + max([max(signal, default=0) for signal in signals]))
 
     categories = map(str.strip, categories)
     categories = map(str.split, categories)
@@ -51,7 +51,7 @@ def read_csv(csv_filename, string_msgs=False):
         concept_values = dict([(('d%i.v%i' % (i, v)), v) for v in range(max_value + 1)])
         concepts.append(concept_values)
 
-    return messages, categories, alphabet_size, concepts
+    return signals, categories, alphabet_size, concepts
 
 # Computes a value between 0 and 1
 class CosineDissimilarity:
@@ -181,47 +181,47 @@ def jaccard(seq1, seq2):
             union += 1
     return 1 - (intersection / union)
 
-def pairwise_multiset_jaccard_distances(messages):
+def pairwise_multiset_jaccard_distances(signals):
     """
     Vectorized pairwise multiset Jaccard distances for a list of token sequences.
     Returns the condensed upper-triangle distance vector.
     """
-    n = len(messages)
+    n = len(signals)
     pair_count = (n * (n - 1)) // 2
     if pair_count == 0:
         return np.empty(0, dtype=float)
 
-    msg_tuples = [tuple(msg) for msg in messages]
-    unique_msgs = []
+    signal_tuples = [tuple(signal) for signal in signals]
+    unique_signals = []
     unique_idx = np.empty(n, dtype=np.int32)
-    msg_to_idx = {}
-    for i, msg in enumerate(msg_tuples):
-        idx = msg_to_idx.get(msg)
+    signal_to_idx = {}
+    for i, signal in enumerate(signal_tuples):
+        idx = signal_to_idx.get(signal)
         if idx is None:
-            idx = len(unique_msgs)
-            msg_to_idx[msg] = idx
-            unique_msgs.append(msg)
+            idx = len(unique_signals)
+            signal_to_idx[signal] = idx
+            unique_signals.append(signal)
         unique_idx[i] = idx
 
-    m = len(unique_msgs)
+    m = len(unique_signals)
     if m <= 1:
         return np.zeros(pair_count, dtype=float)
 
     # Remap tokens to a compact alphabet for exact, faster counts.
     token_set = set()
     lengths = np.empty(m, dtype=np.float32)
-    for i, msg in enumerate(unique_msgs):
-        lengths[i] = len(msg)
-        token_set.update(msg)
+    for i, signal in enumerate(unique_signals):
+        lengths[i] = len(signal)
+        token_set.update(signal)
     if not token_set:
         return np.zeros(pair_count, dtype=float)
 
     token_to_idx = {t: i for i, t in enumerate(token_set)}
     vocab = len(token_to_idx)
     counts = np.zeros((m, vocab), dtype=np.float32)
-    for i, msg in enumerate(unique_msgs):
-        if len(msg) > 0:
-            idxs = [token_to_idx[t] for t in msg]
+    for i, signal in enumerate(unique_signals):
+        if len(signal) > 0:
+            idxs = [token_to_idx[t] for t in signal]
             counts[i] = np.bincount(idxs, minlength=vocab)
 
     # For nonnegative count vectors:
@@ -262,26 +262,26 @@ def jaccard2(seq1, seq2):
     return 1 - (intersection / (proto_union - intersection))
 """
 
-def compute_correlation(messages, categories, message_distance=levenshtein, meaning_distance=hamming, map_msg_to_str=True, map_ctg_to_str=True):
+def compute_correlation(signals, categories, signal_distance=levenshtein, meaning_distance=hamming, map_signal_to_str=True, map_ctg_to_str=True):
     """
-    Compute correlation of message distance and meaning distance.
+    Compute correlation of signal distance and meaning distance.
     """
 
     # Some distance functions are defined over strings only
-    if map_msg_to_str:
-        messages = [''.join(map(chr, msg)) for msg in messages]
+    if map_signal_to_str:
+        signals = [''.join(map(chr, signal)) for signal in signals]
     if map_ctg_to_str:
         categories = [''.join(map(chr, ctg)) for ctg in categories]
 
     # Compute pairwise distances
-    dm = list(it.starmap(message_distance, it.combinations(messages, 2)))
+    dm = list(it.starmap(signal_distance, it.combinations(signals, 2)))
     dc = list(it.starmap(meaning_distance, it.combinations(categories, 2)))
 
     return spearman(dc, dm)
 
-def compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs):
+def compute_correlation_baseline(signals, categories, scrambling_pool_size, **kwargs):
     """
-    Compute baseline for correlation of message distance and meaning distance.
+    Compute baseline for correlation of signal distance and meaning distance.
     """
     uniq_cats = list(set(map(tuple, categories)))
     num_cats = len(uniq_cats)
@@ -289,7 +289,7 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
     for _ in range(scrambling_pool_size):
         mapping = dict(zip(uniq_cats, random.sample(uniq_cats, num_cats)))
         remapped_categories = list(map(mapping.__getitem__, map(tuple, categories)))
-        results.append(compute_correlation(messages, remapped_categories, **kwargs)[0])
+        results.append(compute_correlation(signals, remapped_categories, **kwargs)[0])
     results = np.array(results)
 
     return results.mean(), results.std()
@@ -298,56 +298,56 @@ def compute_correlation_baseline(messages, categories, scrambling_pool_size, **k
 def score(x, mean, stdev):
     return ((x - mean) / stdev)
 
-def analyze_correlation(messages, categories, scrambling_pool_size=1000, **kwargs):
-    cor = compute_correlation(messages, categories, **kwargs)[0]
-    μ, σ = compute_correlation_baseline(messages, categories, scrambling_pool_size, **kwargs)
+def analyze_correlation(signals, categories, scrambling_pool_size=1000, **kwargs):
+    cor = compute_correlation(signals, categories, **kwargs)[0]
+    μ, σ = compute_correlation_baseline(signals, categories, scrambling_pool_size, **kwargs)
     impr = score(cor, μ, σ)
 
     return cor, μ, σ, impr
 
-def mantel(messages, categories, message_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_msg_to_str=True, map_ctg_to_str=True, correl_only=False):
-    assert len(messages) == len(categories)
+def mantel(signals, categories, signal_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_signal_to_str=True, map_ctg_to_str=True, correl_only=False):
+    assert len(signals) == len(categories)
 
-    if map_msg_to_str:
-        messages = [''.join(map(chr, msg)) for msg in messages] # Each integer is mapped to the corresponding unicode character
+    if map_signal_to_str:
+        signals = [''.join(map(chr, signal)) for signal in signals] # Each integer is mapped to the corresponding unicode character
 
     if map_ctg_to_str:
         categories = [''.join(map(chr, ctg)) for ctg in categories] # Each integer is mapped to the corresponding unicode character
 
-    tM = np.array(list(it.starmap(message_distance, it.combinations(messages, 2))))
+    tM = np.array(list(it.starmap(signal_distance, it.combinations(signals, 2))))
     sM = np.array(list(it.starmap(meaning_distance, it.combinations(categories, 2))))
 
     return mantel_test(tM, sM, method=method, perms=perms, correl_only=correl_only)
 
 def main(args):
-    assert args.message_dump_file is not None, "'message_dump_file' is required."
+    assert args.signal_dump_file is not None, "'signal_dump_file' is required."
 
-    messages, categories, alphabet_size, concepts = read_csv(args.message_dump_file, string_msgs=args.string_msgs)
+    signals, categories, alphabet_size, concepts = read_csv(args.signal_dump_file, string_signals=args.string_signals)
 
     # Logs some information
-    print('Number of messages: %i' % len(messages))
+    print('Number of signals: %i' % len(signals))
     print('Alphabet size: %i' % alphabet_size)
     print('Concepts: %s' % concepts)
 
     # Correlation tests
     with torch.no_grad():
-        """l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(messages, categories)
-        l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(messages, categories, message_distance=levenshtein_normalised)
-        j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(messages, categories, message_distance=jaccard, map_msg_to_str=False)
+        """l_cor, l_bμ, l_bσ, l_bi = analyze_correlation(signals, categories)
+        l_n_cor, l_n_bμ, l_n_bσ, l_n_bi = analyze_correlation(signals, categories, signal_distance=levenshtein_normalised)
+        j_cor, j_bμ, j_bσ, j_bi = analyze_correlation(signals, categories, signal_distance=jaccard, map_signal_to_str=False)
 
         print(
-            'file: %s' % args.message_dump_file,
+            'file: %s' % args.signal_dump_file,
             'Levenshtein: %f (μ=%f, σ=%f, impr=%f)' % (l_cor, l_bμ, l_bσ, l_bi),
             'Levenshtein (normalized): %f (μ=%f, σ=%f, impr=%f)' % (l_n_cor, l_n_bμ, l_n_bσ, l_n_bi),
             'Jaccard: %f (μ=%f, σ=%f, impr=%f)' % (j_cor, j_bμ, j_bσ, j_bi),
             sep='\t')
         """
-        m_l = mantel(messages, categories)
-        m_ln = mantel(messages, categories, message_distance=levenshtein_normalised)
-        m_j = mantel(messages, categories, message_distance=jaccard, map_msg_to_str=False)
+        m_l = mantel(signals, categories)
+        m_ln = mantel(signals, categories, signal_distance=levenshtein_normalised)
+        m_j = mantel(signals, categories, signal_distance=jaccard, map_signal_to_str=False)
 
-        print(args.message_dump_file, 'levenshtein', *m_l, 'levenshtein normalized', *m_ln, 'jaccard', *m_j)
+        print(args.signal_dump_file, 'levenshtein', *m_l, 'levenshtein normalized', *m_ln, 'jaccard', *m_j)
 
     # Decision tree stuff
     print('\nDecision tree stuff')
-    decision_tree(messages=messages, categories=categories, alphabet_size=alphabet_size, concepts=concepts)
+    decision_tree(signals=signals, categories=categories, alphabet_size=alphabet_size, concepts=concepts)

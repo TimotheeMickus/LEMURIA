@@ -619,12 +619,12 @@ class ExperimentPlots:
                     topsim = pd.to_numeric(best_row.get(c), errors="coerce")
                     break
 
-            msg_eff = np.nan
-            if "eval/msg_length" in eval_work.columns:
-                msg_len = pd.to_numeric(best_row.get("eval/msg_length"), errors="coerce")
+            signal_eff = np.nan
+            if "eval/signal_length" in eval_work.columns:
+                signal_len = pd.to_numeric(best_row.get("eval/signal_length"), errors="coerce")
                 N = cfg.get("num_predicates")
                 A = cfg.get("base_alphabet_size")
-                if pd.notna(msg_len) and N is not None and A is not None:
+                if pd.notna(signal_len) and N is not None and A is not None:
                     Nf = float(N)
                     Af = float(A)
                     # num_predicates already stores the real predicate count M for all
@@ -633,7 +633,7 @@ class ExperimentPlots:
                     if Mf > 1.0 and Af > 1.0:
                         theo_min = math.log(Mf, Af)
                         if theo_min > 0.0:
-                            msg_eff = float(msg_len) / theo_min
+                            signal_eff = float(signal_len) / theo_min
 
             rows.append({
                 "run_name": str(dp.get("run_name", "")),
@@ -644,13 +644,13 @@ class ExperimentPlots:
                 "topsim": float(topsim) if pd.notna(topsim) else np.nan,
                 "max_acc": max_acc,
                 "epochs_to_max_acc": epochs_to_max,
-                "msg_eff": msg_eff,
+                "signal_eff": signal_eff,
             })
 
         if not rows:
             return None
         df = pd.DataFrame(rows)
-        for c in ["complexity", "hidden_size", "topsim", "max_acc", "epochs_to_max_acc", "msg_eff"]:
+        for c in ["complexity", "hidden_size", "topsim", "max_acc", "epochs_to_max_acc", "signal_eff"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         return df
@@ -665,7 +665,7 @@ class ExperimentPlots:
         _, p = ttest_ind(a, b, equal_var=False, nan_policy="omit")
         return float(p) if np.isfinite(p) else np.nan
 
-    def _build_msg_eff_over_epochs_df(self):
+    def _build_signal_eff_over_epochs_df(self):
         """Per-epoch inverse compression ratio for n+neg and n-neg conditions."""
         rows = []
         for dp in self.datapoints:
@@ -673,7 +673,7 @@ class ExperimentPlots:
             eval_df = dp.get("evaluation")
             if eval_df is None or eval_df.empty:
                 continue
-            if "eval/msg_length" not in eval_df.columns or "epoch" not in eval_df.columns:
+            if "eval/signal_length" not in eval_df.columns or "epoch" not in eval_df.columns:
                 continue
             cond = self._condition_label(cfg)
             if cond not in ("n+neg", "n-neg"):
@@ -693,7 +693,7 @@ class ExperimentPlots:
                 continue
             for _, row in eval_df.iterrows():
                 ep = row.get("epoch")
-                ml = row.get("eval/msg_length")
+                ml = row.get("eval/signal_length")
                 if pd.isna(ep) or pd.isna(ml):
                     continue
                 rows.append({
@@ -2012,18 +2012,18 @@ class ExperimentPlots:
                                        else 1 + min(prev, dp[j], dp[j-1]))
         return dp[n]
 
-    def _message_agreement(self, lang_a, lang_b):
-        """Mean normalised Levenshtein similarity of modal messages across predicates.
+    def _signal_agreement(self, lang_a, lang_b):
+        """Mean normalised Levenshtein similarity of modal signals across predicates.
         Similarity = 1 - edit_distance / max(len_a, len_b), averaged over predicates.
         Tokens are the discrete signal units; pad token '0' is stripped first."""
         for df in (lang_a, lang_b):
             if df is None or not isinstance(df, pd.DataFrame) or df.empty:
                 return np.nan
-            if "pred_str" not in df.columns or "msg" not in df.columns:
+            if "pred_str" not in df.columns or "signal" not in df.columns:
                 return np.nan
 
         def _modal(df):
-            return (df.groupby("pred_str")["msg"]
+            return (df.groupby("pred_str")["signal"]
                     .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else "")
                     .reset_index())
 
@@ -2038,7 +2038,7 @@ class ExperimentPlots:
 
         sims = []
         for _, row in merged.iterrows():
-            ta, tb = _tok(row["msg_a"]), _tok(row["msg_b"])
+            ta, tb = _tok(row["signal_a"]), _tok(row["signal_b"])
             denom = max(len(ta), len(tb))
             if denom == 0:
                 sims.append(1.0)
@@ -2192,10 +2192,10 @@ class MayPlots(ExperimentPlots):
     def export_may_homonymy(self, *, out_dir="plots_may"):
         """Homonymy statistics vs complexity, streaming language files one run at a time.
 
-        Homonymy: a message type is homonymous when it is the modal message for more than
-        one predicate.  homonymy_rate = fraction of predicates whose modal message is shared
+        Homonymy: a signal type is homonymous when it is the modal signal for more than
+        one predicate.  homonymy_rate = fraction of predicates whose modal signal is shared
         with at least one other predicate (0 = none, 1 = all share).
-        unique_msg_ratio = unique modal messages / predicates (1 = no sharing).
+        unique_signal_ratio = unique modal signals / predicates (1 = no sharing).
 
         Reads language CSV files directly from dp["run_path"] so language data is never
         held in memory for more than one run at a time.
@@ -2226,7 +2226,7 @@ class MayPlots(ExperimentPlots):
             elif run_path and _os.path.isdir(run_path):
                 best_file = None
                 for fname in _os.listdir(run_path):
-                    if fname.startswith("msgs") and fname.endswith(".csv") and ".bak" not in fname:
+                    if fname.startswith("signals") and fname.endswith(".csv") and ".bak" not in fname:
                         try:
                             ep = int(fname.split(".")[1].split("e")[1])
                         except (IndexError, ValueError):
@@ -2240,17 +2240,17 @@ class MayPlots(ExperimentPlots):
                     except Exception:
                         pass
 
-            if lang_df is None or "msg" not in lang_df.columns or "pred_str" not in lang_df.columns:
+            if lang_df is None or "signal" not in lang_df.columns or "pred_str" not in lang_df.columns:
                 n_skipped += 1
                 continue
 
             def _norm(m):
                 return " ".join(t for t in str(m).split() if t != "0")
 
-            lang_df["_msg"] = lang_df["msg"].apply(_norm)
-            modal = (lang_df.groupby("pred_str")["_msg"]
+            lang_df["_signal"] = lang_df["signal"].apply(_norm)
+            modal = (lang_df.groupby("pred_str")["_signal"]
                      .agg(lambda x: x.mode().iloc[0] if len(x) > 0 else "")
-                     .reset_index().rename(columns={"_msg": "modal_msg"}))
+                     .reset_index().rename(columns={"_signal": "modal_signal"}))
             del lang_df
 
             n_preds = len(modal)
@@ -2258,8 +2258,8 @@ class MayPlots(ExperimentPlots):
                 n_skipped += 1
                 continue
 
-            msg_counts = modal["modal_msg"].value_counts()
-            shared = msg_counts[modal["modal_msg"]].values > 1
+            signal_counts = modal["modal_signal"].value_counts()
+            shared = signal_counts[modal["modal_signal"]].values > 1
             rows.append({
                 "run_name": str(dp.get("run_name", "")),
                 "condition": cond,
@@ -2267,8 +2267,8 @@ class MayPlots(ExperimentPlots):
                 "hidden_size": hidden,
                 "epoch": best_epoch,
                 "n_predicates": n_preds,
-                "n_unique_messages": len(msg_counts),
-                "unique_msg_ratio": len(msg_counts) / n_preds,
+                "n_unique_signals": len(signal_counts),
+                "unique_signal_ratio": len(signal_counts) / n_preds,
                 "homonymy_rate": int(shared.sum()) / n_preds,
             })
             del modal
@@ -2278,8 +2278,8 @@ class MayPlots(ExperimentPlots):
             return
 
         hom_df = pd.DataFrame(rows)
-        for c in ["complexity", "hidden_size", "n_predicates", "n_unique_messages",
-                  "unique_msg_ratio", "homonymy_rate"]:
+        for c in ["complexity", "hidden_size", "n_predicates", "n_unique_signals",
+                  "unique_signal_ratio", "homonymy_rate"]:
             hom_df[c] = pd.to_numeric(hom_df[c], errors="coerce")
 
         hom_df.to_csv(out_dir / f"may_homonymy_raw_{self.name}.csv", index=False)
@@ -2290,7 +2290,7 @@ class MayPlots(ExperimentPlots):
             .agg(hom_median=("homonymy_rate", "median"),
                  hom_min=("homonymy_rate", "min"),
                  hom_max=("homonymy_rate", "max"),
-                 umr_median=("unique_msg_ratio", "median"),
+                 umr_median=("unique_signal_ratio", "median"),
                  n=("homonymy_rate", "count"))
             .reset_index()
         )
@@ -2350,7 +2350,7 @@ class MayPlots(ExperimentPlots):
 
         fig.suptitle(
             "Homonymy rate vs predicate space size\n"
-            "(fraction of predicates whose modal message is shared with ≥1 other predicate)",
+            "(fraction of predicates whose modal signal is shared with ≥1 other predicate)",
             fontsize=10, fontweight="bold")
         fig.tight_layout()
         fig.savefig(out_dir / f"may_homonymy_{self.name}.png", dpi=150)
@@ -2400,7 +2400,7 @@ class MayPlots(ExperimentPlots):
                 elif run_path and _os.path.isdir(run_path):
                     best_file = None
                     for fname in _os.listdir(run_path):
-                        if fname.startswith("msgs") and fname.endswith(".csv") and ".bak" not in fname:
+                        if fname.startswith("signals") and fname.endswith(".csv") and ".bak" not in fname:
                             try:
                                 ep = int(fname.split(".")[1].split("e")[1])
                             except (IndexError, ValueError):
@@ -2413,21 +2413,21 @@ class MayPlots(ExperimentPlots):
                             lang_df = pd.read_csv(best_file)
                         except Exception:
                             pass
-                if lang_df is None or "msg" not in lang_df.columns or "pred_str" not in lang_df.columns:
+                if lang_df is None or "signal" not in lang_df.columns or "pred_str" not in lang_df.columns:
                     continue
-                lang_df["_msg"] = lang_df["msg"].apply(
+                lang_df["_signal"] = lang_df["signal"].apply(
                     lambda m: " ".join(t for t in str(m).split() if t != "0"))
-                modal = (lang_df.groupby("pred_str")["_msg"]
+                modal = (lang_df.groupby("pred_str")["_signal"]
                          .agg(lambda x: x.mode().iloc[0] if len(x) > 0 else "")
                          .reset_index())
                 del lang_df
                 n_preds = len(modal)
                 if n_preds == 0:
                     continue
-                mc = modal["_msg"].value_counts()
+                mc = modal["_signal"].value_counts()
                 hom_rows.append({"run_name": run_name,
-                                 "homonymy_rate": (mc[modal["_msg"]].values > 1).sum() / n_preds,
-                                 "unique_msg_ratio": len(mc) / n_preds})
+                                 "homonymy_rate": (mc[modal["_signal"]].values > 1).sum() / n_preds,
+                                 "unique_signal_ratio": len(mc) / n_preds})
                 del modal
             if not hom_rows:
                 print("[INFO] Homonymy-topsim analysis skipped (no language files).")
@@ -2559,7 +2559,7 @@ class MayPlots(ExperimentPlots):
             "training efficiency (hidden=48 plot)",
             "training efficiency (summary table by hidden size)",
             "negation helps learning (hidden=48, delta)",
-            "message efficiency by negation",
+            "signal efficiency by negation",
         ]
         _n = len(_steps)
         def _progress(i, label):
@@ -2832,24 +2832,24 @@ class MayPlots(ExperimentPlots):
         # 2. INVERSE COMPRESSION RATIO OVER EPOCHS — aggregated plot + per-hidden table
         # ----------------------------------------------------------------
         _progress(3, _steps[2])
-        msg_ep_df = self._build_msg_eff_over_epochs_df()
+        signal_ep_df = self._build_signal_eff_over_epochs_df()
 
-        if msg_ep_df is not None and not msg_ep_df.empty:
-            msg_ep_df.sort_values(["condition", "hidden_size", "epoch"]).to_csv(
+        if signal_ep_df is not None and not signal_ep_df.empty:
+            signal_ep_df.sort_values(["condition", "hidden_size", "epoch"]).to_csv(
                 out_dir / f"may_inv_compression_over_epochs_{self.name}.csv", index=False)
-            hidden_in_msg = sorted(
-                pd.to_numeric(msg_ep_df["hidden_size"], errors="coerce").dropna().unique())
+            hidden_in_signal = sorted(
+                pd.to_numeric(signal_ep_df["hidden_size"], errors="coerce").dropna().unique())
 
             # 3 panels: one per hidden size, n+neg vs n-neg
-            n_ic = len(hidden_in_msg)
+            n_ic = len(hidden_in_signal)
             fig_ic, axes_ic = plt.subplots(
                 1, n_ic, figsize=(5.5 * n_ic, 4.5), sharey=True, squeeze=False)
-            for i_ic, h_ic in enumerate(hidden_in_msg):
+            for i_ic, h_ic in enumerate(hidden_in_signal):
                 ax_ic = axes_ic[0][i_ic]
                 for cond_ic, color_ic in [("n+neg", "#1f77b4"), ("n-neg", "#e07a2d")]:
                     g_ic = (
-                        msg_ep_df[(msg_ep_df["hidden_size"] == h_ic) &
-                                  (msg_ep_df["condition"] == cond_ic)]
+                        signal_ep_df[(signal_ep_df["hidden_size"] == h_ic) &
+                                  (signal_ep_df["condition"] == cond_ic)]
                         .groupby("epoch")["inv_compression"]
                         .agg(median="median",
                              q25=lambda x: np.nanquantile(x, 0.25),
@@ -2885,12 +2885,12 @@ class MayPlots(ExperimentPlots):
 
             # Summary table: one row per hidden size, gap trend = (+neg) − (−neg)
             tbl_rows = []
-            for h_t in hidden_in_msg:
+            for h_t in hidden_in_signal:
                 trends_t = {}
                 for cond_t in ["n+neg", "n-neg"]:
                     gh_t = (
-                        msg_ep_df[(msg_ep_df["hidden_size"] == h_t) &
-                                  (msg_ep_df["condition"] == cond_t)]
+                        signal_ep_df[(signal_ep_df["hidden_size"] == h_t) &
+                                  (signal_ep_df["condition"] == cond_t)]
                         .groupby("epoch")["inv_compression"].median()
                         .reset_index().sort_values("epoch")
                     )
@@ -2933,7 +2933,7 @@ class MayPlots(ExperimentPlots):
                 col_fmt="crr",
             )
         else:
-            print("[INFO] Inverse compression skipped (no eval/msg\_length epoch data).")
+            print("[INFO] Inverse compression skipped (no eval/signal\_length epoch data).")
 
         # ----------------------------------------------------------------
         # 3. TRAINING EFFICIENCY — hidden=48, real predicate count x-axis
@@ -3118,7 +3118,7 @@ class MayPlots(ExperimentPlots):
             caption=(
                 r"Median epochs to maximum accuracy. "
                 r"Rows: condition $\times$ hidden size. "
-                r"Columns: real message-space size $M$ "
+                r"Columns: real signal-space size $M$ "
                 r"($n$ for $n^-$, $2n$ for $n^+$, base $n$ extracted from $n^2+2n$ for $n$-$n$). "
                 r"Dashes indicate no data."
             ),
@@ -3336,62 +3336,62 @@ class MayPlots(ExperimentPlots):
                 )
 
         # ----------------------------------------------------------------
-        # 6. MESSAGE EFFICIENCY — snapshot at best epoch, by negation
+        # 6. SIGNAL EFFICIENCY — snapshot at best epoch, by negation
         # ----------------------------------------------------------------
         _progress(7, _steps[6])
         mdf = df[df["condition"].isin(["n+neg", "n-neg"])].dropna(
-            subset=["msg_eff", "complexity"]).copy()
-        msg_sig_rows = []
+            subset=["signal_eff", "complexity"]).copy()
+        signal_sig_rows = []
         for c in sorted(pd.to_numeric(mdf["complexity"], errors="coerce").dropna().unique()):
             sub = mdf[mdf["complexity"] == c]
-            a = sub.loc[sub["condition"] == "n+neg", "msg_eff"].to_numpy(dtype=float)
-            b = sub.loc[sub["condition"] == "n-neg", "msg_eff"].to_numpy(dtype=float)
-            msg_sig_rows.append({
+            a = sub.loc[sub["condition"] == "n+neg", "signal_eff"].to_numpy(dtype=float)
+            b = sub.loc[sub["condition"] == "n-neg", "signal_eff"].to_numpy(dtype=float)
+            signal_sig_rows.append({
                 "complexity": c,
                 "n_plus_neg": int(np.isfinite(a).sum()),
                 "n_minus_neg": int(np.isfinite(b).sum()),
                 "p_welch": self._ttest_p(a, b),
             })
-        pd.DataFrame(msg_sig_rows).to_csv(
-            out_dir / f"may_message_efficiency_significance_{self.name}.csv", index=False)
+        pd.DataFrame(signal_sig_rows).to_csv(
+            out_dir / f"may_signal_efficiency_significance_{self.name}.csv", index=False)
         mdf.sort_values(["condition", "hidden_size", "complexity", "run_name"]).to_csv(
-            out_dir / f"may_message_efficiency_points_{self.name}.csv", index=False)
+            out_dir / f"may_signal_efficiency_points_{self.name}.csv", index=False)
 
         if not mdf.empty:
             overall_p = self._ttest_p(
-                mdf.loc[mdf["condition"] == "n+neg", "msg_eff"].to_numpy(dtype=float),
-                mdf.loc[mdf["condition"] == "n-neg", "msg_eff"].to_numpy(dtype=float),
+                mdf.loc[mdf["condition"] == "n+neg", "signal_eff"].to_numpy(dtype=float),
+                mdf.loc[mdf["condition"] == "n-neg", "signal_eff"].to_numpy(dtype=float),
             )
-            msg_agg = (
-                mdf.groupby(["condition", "complexity"])["msg_eff"]
-                .agg(msg_eff_median="median", msg_eff_std="std", msg_eff_n="count")
+            signal_agg = (
+                mdf.groupby(["condition", "complexity"])["signal_eff"]
+                .agg(signal_eff_median="median", signal_eff_std="std", signal_eff_n="count")
                 .reset_index()
             )
-            msg_agg.to_csv(
-                out_dir / f"may_message_efficiency_by_condition_complexity_{self.name}.csv",
+            signal_agg.to_csv(
+                out_dir / f"may_signal_efficiency_by_condition_complexity_{self.name}.csv",
                 index=False)
             fig, ax = plt.subplots(figsize=(10, 5.5))
             for cond, color in [("n+neg", "#1f77b4"), ("n-neg", "#e07a2d")]:
-                g = msg_agg[msg_agg["condition"] == cond].sort_values("complexity")
+                g = signal_agg[signal_agg["condition"] == cond].sort_values("complexity")
                 if g.empty:
                     continue
-                lo = (g["msg_eff_median"] - g["msg_eff_std"].fillna(0)).clip(lower=0)
-                hi = g["msg_eff_median"] + g["msg_eff_std"].fillna(0)
+                lo = (g["signal_eff_median"] - g["signal_eff_std"].fillna(0)).clip(lower=0)
+                hi = g["signal_eff_median"] + g["signal_eff_std"].fillna(0)
                 ax.fill_between(g["complexity"], lo, hi, alpha=0.13, color=color)
-                ax.plot(g["complexity"], g["msg_eff_median"], marker="o", linewidth=2.2,
+                ax.plot(g["complexity"], g["signal_eff_median"], marker="o", linewidth=2.2,
                         markersize=6, color=color, label=cond_labels.get(cond, cond))
             ax.axhline(1.0, color="#555555", linestyle="--", linewidth=1.3, label="optimal (1.0)")
-            ticks = sorted(msg_agg["complexity"].dropna().unique())
+            ticks = sorted(signal_agg["complexity"].dropna().unique())
             _set_log2_xticks(ax, ticks)
             ax.set_xlabel("predicate space size", fontsize=10)
             ax.set_ylabel("inverse compression ratio", fontsize=10)
             ax.set_title(
-                f"Message efficiency by negation  ({self._format_p_value(overall_p)} overall)",
+                f"Signal efficiency by negation  ({self._format_p_value(overall_p)} overall)",
                 fontsize=12, fontweight="bold")
             ax.legend(fontsize=9)
             ax.grid(True, alpha=0.25)
             fig.tight_layout()
-            fig.savefig(out_dir / f"may_message_efficiency_by_negation_{self.name}.png", dpi=150)
+            fig.savefig(out_dir / f"may_signal_efficiency_by_negation_{self.name}.png", dpi=150)
             plt.close(fig)
 
 
@@ -3940,7 +3940,7 @@ class JunePlots(ExperimentPlots):
                 d_next = sorted_langs[idx + 1]
                 if d_next["_gen"] <= d_curr["_gen"]:
                     continue
-                agr = self._message_agreement(d_curr["language"], d_next["language"])
+                agr = self._signal_agreement(d_curr["language"], d_next["language"])
                 if np.isfinite(agr):
                     rows.append({
                         "run_name": str(dp.get("run_name", "")),
@@ -4877,7 +4877,7 @@ class JunePlots(ExperimentPlots):
                     d_curr, d_next = sorted_langs[idx], sorted_langs[idx + 1]
                     if d_next["_gen"] <= d_curr["_gen"]:
                         continue
-                    agr = self._message_agreement(d_curr["language"], d_next["language"])
+                    agr = self._signal_agreement(d_curr["language"], d_next["language"])
                     if np.isfinite(agr):
                         rows.append({
                             "complexity": complexity,

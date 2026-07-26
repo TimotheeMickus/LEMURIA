@@ -6,42 +6,42 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .agent import Agent
-from ..utils.modules import MessageEncoder, build_cnn_encoder_from_args
+from ..utils.modules import SignalEncoder, build_cnn_encoder_from_args
 from ..utils import misc
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["scores", "msg_spigot"])
+Outcome = namedtuple("Outcome", ["scores", "signal_spigot"])
 
-# Scores images according to a message.
+# Scores images according to a signal.
 class Receiver(Agent):
     """
     Defines a receiver policy.
-    Based on K presented images and a given message, chooses which image the message refers to.
+    Based on K presented images and a given signal, chooses which image the signal refers to.
     """
-    def __init__(self, image_encoder, message_encoder, args, has_shared_param):
+    def __init__(self, image_encoder, signal_encoder, args, has_shared_param):
         super(Agent, self).__init__()
 
         self.image_encoder = image_encoder
-        self.message_encoder = message_encoder
+        self.signal_encoder = signal_encoder
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
 
-    def encode_message(self, message, length):
-        return self.message_encoder(message, length).unsqueeze(-1)
+    def encode_signal(self, signal, length):
+        return self.signal_encoder(signal, length).unsqueeze(-1)
 
     # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
-    # message: 
-    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
-    def forward(self, images, message, length, use_spigot=False):
-        encoded_message = self.encode_message(message, length) # Shape (batch size, hidden size)
+    # signal: 
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the signal)
+    def forward(self, images, signal, length, use_spigot=False):
+        encoded_signal = self.encode_signal(signal, length) # Shape (batch size, hidden size)
 
-        return self.aux_forward(images, encoded_message, use_spigot)
+        return self.aux_forward(images, encoded_signal, use_spigot)
 
     # images: tensor of shape (batch size, nb img, *IMG_SHAPE)
-    # encoded_messages: tensor of shape (batch size, hidden size)
-    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the message)
-    def aux_forward(self, images, encoded_message, use_spigot):
+    # encoded_signals: tensor of shape (batch size, hidden size)
+    # use_spigot: boolean that indicates whether to use a GradSpigot (after the encoding of the signal)
+    def aux_forward(self, images, encoded_signal, use_spigot):
         """
             Forward propagation.
             Input:
@@ -55,15 +55,15 @@ class Receiver(Agent):
         encoded_images = encoded_images.view(images.shape[0], images.shape[1], -1) # Shape: (batch size, nb img, hidden size)
 
         if(use_spigot):
-           msg_spigot = misc.GradSpigot(encoded_message)
-           encoded_message = msg_spigot.tensor # Shape: (batch size, hidden size)
+           signal_spigot = misc.GradSpigot(encoded_signal)
+           encoded_signal = signal_spigot.tensor # Shape: (batch size, hidden size)
         else:
-            msg_spigot = None
+            signal_spigot = None
 
         # Scores the targets.
-        scores = torch.bmm(encoded_images, encoded_message).squeeze(-1) # Shape: (batch size, nb img)
+        scores = torch.bmm(encoded_images, encoded_signal).squeeze(-1) # Shape: (batch size, nb img)
 
-        outcome = Outcome(scores=scores, msg_spigot=msg_spigot)
+        outcome = Outcome(scores=scores, signal_spigot=signal_spigot)
 
         return outcome
     
@@ -87,6 +87,6 @@ class Receiver(Agent):
         has_shared_param = (image_encoder is not None) or (symbol_embeddings is not None)
         
         if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)
-        message_encoder = MessageEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        signal_encoder = SignalEncoder.from_args(args, symbol_embeddings=symbol_embeddings)
         
-        return cls(image_encoder, message_encoder, args, has_shared_param)
+        return cls(image_encoder, signal_encoder, args, has_shared_param)

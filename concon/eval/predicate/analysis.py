@@ -300,7 +300,7 @@ if __name__ == "__main__":
                         cm_static.export_may_homonymy_topsim_analysis(out_dir=out_dir_may)
                         cm_static.export_may_best_epoch_table(out_dir=out_dir_may)
                     else:
-                        print(f"[INFO] Skipping message-efficiency plots for family={plot_family}.")
+                        print(f"[INFO] Skipping signal-efficiency plots for family={plot_family}.")
                 elif is_primary_mode and same_runs_as_unfiltered:
                     print("[INFO] Skipping eval/convergence plots for thresholded variant (identical run set as unfiltered).")
                 else:
@@ -388,4 +388,4 @@ if __name__ == "__main__":
                                 cm_neg_src.plot_topsim_vs_n_f1(source_df, control_col="voc_penalty", profile_tag=args.feat_operator, out_dir=out_dir)
                             else:
                                 cm_neg_src.plot_negation_metrics_over_epochs(source_df, profile_tag=args.feat_operator, out_dir=out_dir)
-    # cm.plot_message_compression(group_by=("negation","properties"))
+    # cm.plot_signal_compression(group_by=("negation","properties"))

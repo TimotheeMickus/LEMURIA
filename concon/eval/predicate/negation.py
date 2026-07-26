@@ -9,16 +9,16 @@ import numpy as np
 from collections import Counter
 from tqdm import tqdm
 
-def _tokenize_messages(language: pd.DataFrame):
-    assert "msg" in language.columns, "language must have a 'msg' column"
-    tokenized = [[t for t in str(msg).split() if t != "0"] for msg in language["msg"]]
+def _tokenize_signals(language: pd.DataFrame):
+    assert "signal" in language.columns, "language must have a 'signal' column"
+    tokenized = [[t for t in str(signal).split() if t != "0"] for signal in language["signal"]]
     vocab = sorted({t for toks in tokenized for t in toks})
     assert vocab, "vocab cannot be empty"
     return tokenized, vocab
 
 def _build_presence_matrix(tokenized, vocab):
-    '''Build binary matrix M of (|messages|, |vocab|).
-    Set M[i,j]=1 if vocab[j] appears in message #i.'''
+    '''Build binary matrix M of (|signals|, |vocab|).
+    Set M[i,j]=1 if vocab[j] appears in signal #i.'''
     M = np.zeros((len(tokenized), len(vocab)), dtype=np.uint8)
     tok2idx = {t: i for i, t in enumerate(vocab)}
     for i, toks in enumerate(tokenized):
@@ -33,7 +33,7 @@ def _parse_predicate(s):
     return s, False
 
 def _build_features(vocab, M):
-    '''For each token t, define a binary feature vector over messages: X_t(S) = 1[t in s].'''
+    '''For each token t, define a binary feature vector over signals: X_t(S) = 1[t in s].'''
     features = {}
     for j, tok in enumerate(vocab):
         features[("tok", frozenset({tok}))] = M[:, j].astype(bool)
@@ -274,13 +274,13 @@ def _build_T(key, features):
     # key = (op, frozenset(atoms))
     _, atoms = key
     cols = [features[a] for a in sorted(atoms)]
-    B = np.column_stack(cols) # shape: (n_msgs, |atoms|)
+    B = np.column_stack(cols) # shape: (n_signals, |atoms|)
     return [tuple(row) for row in B]
 
 def _build_R(key, tok_sets):
     # key = (op, frozenset(atoms))
     _, atoms = key
-    return [msg_tokens.difference(atoms) for msg_tokens in tok_sets]
+    return [signal_tokens.difference(atoms) for signal_tokens in tok_sets]
 
 def _negation_strength(X, N, V):
     '''I(X;N|V) / H(N|V).
@@ -337,17 +337,17 @@ def _prefilter_size(n_features, top_rows, profile):
 def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fast",
     operator: str = "or"):
     assert operator in ["or", "and"], "operator must be 'or' or 'and'"
-    # language: pd.DataFrame with "msg" and "pred_str" columns
-    # V: np.ndarray shape (n_msgs,), predicate values (str/object)
-    # N: np.ndarray shape (n_msgs,), negation flags (bool)
+    # language: pd.DataFrame with "signal" and "pred_str" columns
+    # V: np.ndarray shape (n_signals,), predicate values (str/object)
+    # N: np.ndarray shape (n_signals,), negation flags (bool)
     V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
-    # tok: list[list[str]], length n_msgs
+    # tok: list[list[str]], length n_signals
     # voc: list[str], length n_vocab
-    tok, voc = _tokenize_messages(language)
+    tok, voc = _tokenize_signals(language)
     # Precompute token-sets used by _build_R.
-    tok_sets = [frozenset(msg) for msg in tok]
+    tok_sets = [frozenset(signal) for signal in tok]
     pred_labels = language["pred_str"].astype(str).to_numpy()
-    # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
+    # M: np.ndarray shape (n_signals, n_vocab), binary token presence over signals
     M = _build_presence_matrix(tok, voc)
     # Entropy denominators do not depend on candidate feature X.
     h_n_given_v = _conditional_entropy(N, V)
@@ -361,17 +361,17 @@ def analysis(language, sort_order: list = None, top_rows=10, profile: str = "fas
     count_n = np.bincount(N_codes, minlength=2)
     count_vn = np.bincount(VN_codes, minlength=max(1, 2 * len(count_v)))
     n_total = len(V_codes)
-    # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
+    # score_fn input: X -> np.ndarray shape (n_signals,), bool/int
     # score_fn output: float
     score_fn = lambda X: _safe_normalize(_cmi_binary_xn_given_v(X, V_codes, VN_codes, count_v, count_vn, n_total), h_n_given_v)
     max_size, top_k, max_active_round, max_candidates = _search_limits_from_vocab(len(voc), profile=profile)
     score_cache = {}
-    # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
-    # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
+    # _grow_features input: voc (n_vocab), M (n_signals x n_vocab), ...
+    # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_signals,)]
     features = _grow_features(voc, M, score_fn, operator=operator, top_k=top_k, 
         max_size=max_size, max_active_round=max_active_round, max_candidates=max_candidates,
         score_cache=score_cache)
-    # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
+    # unary_features: dict[str -> np.ndarray shape (n_signals,)]
     unary_features = {
         a: features[("tok", frozenset({a}))].astype(np.uint8) 
         for _, atoms in features.keys() if len(atoms) == 1 
@@ -592,7 +592,7 @@ if __name__ == "__main__":
     import pathlib
     import sys
     # for quick single-datapoint analysis; choose existing directory
-    # language: pd.DataFrame with "msg" and "pred_str" columns
+    # language: pd.DataFrame with "signal" and "pred_str" columns
     arg2 = sys.argv[2] if len(sys.argv) > 2 else None
     arg3 = sys.argv[3] if len(sys.argv) > 3 else None
     op = "or"
@@ -628,11 +628,11 @@ if __name__ == "__main__":
         atoms_set = set(atoms_f)
         if op_name == "tok":
             atom = next(iter(atoms_set))
-            return np.asarray([atom in msg_tokens for msg_tokens in tok_sets], dtype=np.uint8)
+            return np.asarray([atom in signal_tokens for signal_tokens in tok_sets], dtype=np.uint8)
         if op_name == "or":
-            return np.asarray([len(msg_tokens & atoms_set) > 0 for msg_tokens in tok_sets], dtype=np.uint8)
+            return np.asarray([len(signal_tokens & atoms_set) > 0 for signal_tokens in tok_sets], dtype=np.uint8)
         if op_name == "and":
-            return np.asarray([atoms_set.issubset(msg_tokens) for msg_tokens in tok_sets], dtype=np.uint8)
+            return np.asarray([atoms_set.issubset(signal_tokens) for signal_tokens in tok_sets], dtype=np.uint8)
         raise ValueError(f"unknown operator: {op_name}")
 
     def _feature_label(key):
@@ -666,29 +666,29 @@ if __name__ == "__main__":
     # display
     parsed = language["pred_str"].map(_parse_predicate)
     language_display = (language.assign(predicate=parsed.str[0], pol=np.where(parsed.str[1], "neg", "pos"))
-        .pivot_table(index="predicate", columns="pol", values="msg", aggfunc=lambda s: " | ".join(pd.unique(s.astype(str))), fill_value="")
+        .pivot_table(index="predicate", columns="pol", values="signal", aggfunc=lambda s: " | ".join(pd.unique(s.astype(str))), fill_value="")
         .rename_axis(None, axis=1).reset_index().reindex(columns=["predicate", "pos", "neg"], fill_value=""))
     print(language_display.sort_values("predicate").to_string(index=False))
-    # V: np.ndarray shape (n_msgs,), predicate values (str/object)
-    # N: np.ndarray shape (n_msgs,), negation flags (bool)
+    # V: np.ndarray shape (n_signals,), predicate values (str/object)
+    # N: np.ndarray shape (n_signals,), negation flags (bool)
     V, N = map(np.array, zip(*language["pred_str"].apply(lambda s: _parse_predicate(s))))
     V_codes = pd.factorize(V, sort=False)[0].astype(np.int64, copy=False)
-    # tok: list[list[str]], length n_msgs
+    # tok: list[list[str]], length n_signals
     # voc: list[str], length n_vocab
-    tok, voc = _tokenize_messages(language)
-    tok_sets = [frozenset(msg) for msg in tok]
-    # M: np.ndarray shape (n_msgs, n_vocab), binary token presence over messages
+    tok, voc = _tokenize_signals(language)
+    tok_sets = [frozenset(signal) for signal in tok]
+    # M: np.ndarray shape (n_signals, n_vocab), binary token presence over signals
     M = _build_presence_matrix(tok, voc)
-    # score_fn input: X -> np.ndarray shape (n_msgs,), bool/int
+    # score_fn input: X -> np.ndarray shape (n_signals,), bool/int
     # score_fn output: float
     score_fn = lambda X: _negation_strength(X, N, V)
-    # _grow_features input: voc (n_vocab), M (n_msgs x n_vocab), ...
-    # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_msgs,)]
+    # _grow_features input: voc (n_vocab), M (n_signals x n_vocab), ...
+    # _grow_features output: dict[(op: str, atoms: frozenset[str]) -> X: np.ndarray shape (n_signals,)]
     features = None
     if feature_query is None:
         features = _grow_features(voc, M, score_fn, operator=op, top_k=None,
             max_size=len(voc), max_active_round=None, max_candidates=None)
-    # unary_features: dict[str -> np.ndarray shape (n_msgs,)]
+    # unary_features: dict[str -> np.ndarray shape (n_signals,)]
     unary_features = {voc[j]: M[:, j].astype(np.uint8) for j in range(len(voc))}
 
     def _row_for_feature(key, X):

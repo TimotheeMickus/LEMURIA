@@ -11,8 +11,8 @@ from collections import defaultdict
 
 from ..utils import misc
 
-# `data` should either be a pair (dataset, messages) or None. If None, then messages will be generated
-# Except for generating the messages,
+# `data` should either be a pair (dataset, signals) or None. If None, then signals will be generated
+# Except for generating the signals,
 #   we need model for _.base_alphabet_size
 #   and data_iterator for _.concepts
 def decision_tree_standalone(model, data_iterator):
@@ -25,9 +25,9 @@ def decision_tree_standalone(model, data_iterator):
     nb_batch = int(np.ceil(n / batch_size))
     print('%i datapoints (%i batches)' % (n, nb_batch))
     
-    messages = []
+    signals = []
     categories = []
-    print("Generating the messages…")
+    print("Generating the signals…")
     batch_numbers = range(nb_batch)
     with torch.no_grad():
         for _ in batch_numbers:
@@ -36,12 +36,12 @@ def decision_tree_standalone(model, data_iterator):
             batch = data_iterator.get_batch(batch_size, data_type='test', no_evaluation=False, sampling_strategies=['different'], keep_category=True) # Standard evaluation batch
             sender_outcome, receiver_outcome = model(batch)
 
-            messages.extend([msg.tolist()[:l] for msg, l in zip(*sender_outcome.action)])
+            signals.extend([signal.tolist()[:l] for signal, l in zip(*sender_outcome.action)])
             categories.extend([x.category for x in batch.original])
     
-    categories = np.array(categories) # Numpyfies the categories (but not the messages, as there are list of various length)
+    categories = np.array(categories) # Numpyfies the categories (but not the signals, as there are list of various length)
 
-    return decision_tree(messages=messages, categories=categories, alphabet_size=(1 + model.base_alphabet_size), concepts=data_iterator.concepts)
+    return decision_tree(signals=signals, categories=categories, alphabet_size=(1 + model.base_alphabet_size), concepts=data_iterator.concepts)
 
 # For a sequence of symbols `l`, yields all tuples of strictly increasing tuples of size between 1 and `max_disj`, with values between 0 and `max_val`, and containing the corresponding element in `l` (i.e., the ith tuple will contain l[i])
 def apply_disj(l, max_disj, max_val):
@@ -196,43 +196,43 @@ class SeqTerm():
     def __hash__(self):
         return hash(self.t)
 
-# The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
+# The signals must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
 # `gram_size` is the k max of k-grams to consider
 # `concepts` is a list of dictionaries {value name -> value idx}
-def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=1, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
+def analyse(signals, categories, alphabet_size, concepts, gram_size, disj_size=1, feature_vectors=None, full_max_depth=128, conceptual_max_depth=64):
     result = {}
 
-    # Returns all the k-grams for 0 < k <= `max_length` in the message with an out-of-message symbol at the beginning and the end
-    def get_ngrams(message, max_length):
+    # Returns all the k-grams for 0 < k <= `max_length` in the signal with an out-of-signal symbol at the beginning and the end
+    def get_ngrams(signal, max_length):
         assert (max_length > 0)
-        for s in message: yield SeqTerm((s,)) # I separate unigrams so that we don't return the unigram composed of the out-of-message symbol
+        for s in signal: yield SeqTerm((s,)) # I separate unigrams so that we don't return the unigram composed of the out-of-signal symbol
 
-        message_tmp = [alphabet_size] + list(message) + [alphabet_size] # I add an out-of-message symbol at the beginning and at the end # TODO May I could use -1
-        for k in range(2, (min(max_length, len(message_tmp)) + 1)): # Length of the n-gram
-            for i in range(len(message_tmp) - k + 1):
-                yield SeqTerm(tuple(message_tmp[i:(i + k)]))
+        signal_tmp = [alphabet_size] + list(signal) + [alphabet_size] # I add an out-of-signal symbol at the beginning and at the end # TODO May I could use -1
+        for k in range(2, (min(max_length, len(signal_tmp)) + 1)): # Length of the n-gram
+            for i in range(len(signal_tmp) - k + 1):
+                yield SeqTerm(tuple(signal_tmp[i:(i + k)]))
 
     # Can be used to have disjunctions directly in the n-grams, but we will not do that
-    def get_disj_ngrams(message, max_length):
+    def get_disj_ngrams(signal, max_length):
         if(disj_size == 1):
-            for ngram in get_ngrams(message, max_length): yield ngram
+            for ngram in get_ngrams(signal, max_length): yield ngram
         else:
-            for ngram in get_ngrams(message, max_length):
+            for ngram in get_ngrams(signal, max_length):
                 for disj in apply_disj(ngram, disj_size, (alphabet_size + 1)): yield disj
 
     if(feature_vectors is None):
         # Determines the set of n-grams
         ngrams_idx = defaultdict(itertools.count().__next__) # From ngrams (tuples) to indices
-        for message in messages:
-            for ngram in get_ngrams(message, gram_size):
+        for signal in signals:
+            for ngram in get_ngrams(signal, gram_size):
                 _ = ngrams_idx[ngram]
         ngrams = np.array(sorted(ngrams_idx.keys(), key=len)) # From indices to ngrams (SeqTerm)
         ngrams_idx = {ngram: i for (i, ngram) in enumerate(ngrams)}
 
         # Generates the (n-gram) feature vectors
-        ngram_vectors = np.zeros((len(messages), len(ngrams)), dtype=np.int32)
-        for i, message in enumerate(messages):
-            for ngram in get_ngrams(message, gram_size):
+        ngram_vectors = np.zeros((len(signals), len(ngrams)), dtype=np.int32)
+        for i, signal in enumerate(signals):
+            for ngram in get_ngrams(signal, gram_size):
                 idx = ngrams_idx[ngram]
                 ngram_vectors[i, idx] += 1
 
@@ -254,7 +254,7 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
             features_idx = {ngram: i for (i, ngram) in enumerate(features)}
 
             # Feature vectors
-            feature_vectors = np.zeros((len(messages), len(features)), dtype=np.int32)
+            feature_vectors = np.zeros((len(signals), len(features)), dtype=np.int32)
             feature_vectors[:, :len(ngrams)] = ngram_vectors
             for i in range(len(ngrams), len(features)): # For all disjunctive terms (by index)
                 disjunction = features[i]
@@ -298,19 +298,19 @@ def analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=
 
     return result
 
-# The messages must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
+# The signals must be iterables of integers between 0 (included) and `alphabet_size` (excluded)
 # `gram_size` corresponds to the size of the n-grams to consider
 # `disj_size` corresponds to 
-def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, disj_size=1):
-    print('First, some messages and categories:')
-    for i in range(min(30, len(messages))):
-        print('message', messages[i], '; category', categories[i])
+def decision_tree(signals, categories, alphabet_size, concepts, gram_size=1, disj_size=1):
+    print('First, some signals and categories:')
+    for i in range(min(30, len(signals))):
+        print('signal', signals[i], '; category', categories[i])
     print()
 
     # As features, we will use the presence of n-grams
     print('We will consider %i-grams and disjunctions up to size %i' % (gram_size, disj_size))
 
-    tmp = analyse(messages, categories, alphabet_size, concepts, gram_size, disj_size=disj_size)
+    tmp = analyse(signals, categories, alphabet_size, concepts, gram_size, disj_size=disj_size)
     features = tmp['features']
     features_idx = tmp['features_idx']
     feature_vectors = tmp['feature_vectors']
@@ -511,18 +511,18 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
 
     # Prints the language
     print()
-    messages = [tuple(m) for m in messages]
+    signals = [tuple(m) for m in signals]
     categories = [tuple(c) for c in categories]
-    sorted_messages = {} # Categories to list of messages with count, sorted by count
-    for category, l in misc.group_by(messages, categories).items():
+    sorted_signals = {} # Categories to list of signals with count, sorted by count
+    for category, l in misc.group_by(signals, categories).items():
         print('Category %s:' % (category,))
-        sorted_l = sorted(misc.count(l).items(), key=(lambda x: x[1]), reverse=True) # Add the number of occurrences for each unique message and then sort
-        sorted_l = [(message, (count/len(l))) for (message, count) in sorted_l] # Converts counts into percentages
+        sorted_l = sorted(misc.count(l).items(), key=(lambda x: x[1]), reverse=True) # Add the number of occurrences for each unique signal and then sort
+        sorted_l = [(signal, (count/len(l))) for (signal, count) in sorted_l] # Converts counts into percentages
         
-        sorted_messages[category] = sorted_l
+        sorted_signals[category] = sorted_l
 
-        for message, ratio in sorted_l: print('\t%s\t%i%%' % (message, (ratio*100)))
-        #for message, count in sorted_l: print('\t%s\tx %i' % (message, count))
+        for signal, ratio in sorted_l: print('\t%s\t%i%%' % (signal, (ratio*100)))
+        #for signal, count in sorted_l: print('\t%s\tx %i' % (signal, count))
 
     value_names = [] # List of dictionaries {value idx -> value name}
     for concept in concepts: value_names.append({idx: name for (name, idx) in concept.items()})
@@ -533,14 +533,14 @@ def decision_tree(messages, categories, alphabet_size, concepts, gram_size=1, di
     for dim_idx, concept in enumerate(concepts):
         for value_name, value_idx in concept.items():
             print('Translation to %s:' % value_name)
-            for category, l in sorted_messages.items():
+            for category, l in sorted_signals.items():
                 if(category[dim_idx] == value_idx): continue
                 other_cat = list(category)
                 other_cat[dim_idx] = value_idx
                 other_cat = tuple(other_cat)
 
-                msg, msg_ratio = sorted_messages[category][0]
-                trans, trans_ratio = sorted_messages[other_cat][0]
+                signal, signal_ratio = sorted_signals[category][0]
+                trans, trans_ratio = sorted_signals[other_cat][0]
                 print('from %s to %s:' % (category_name(category), category_name(other_cat)))
-                print('\t%s ==> %s' % (msg, trans))
-                #print('%s (%i%% of %s) ==> %s (%i%% of %s)' % (msg, (msg_ratio*100), category, trans, (trans_ratio*100), other_cat))
+                print('\t%s ==> %s' % (signal, trans))
+                #print('%s (%i%% of %s) ==> %s (%i%% of %s)' % (signal, (signal_ratio*100), category, trans, (trans_ratio*100), other_cat))

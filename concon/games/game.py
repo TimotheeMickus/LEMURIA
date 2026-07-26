@@ -63,7 +63,7 @@ class Game(metaclass=ABCMeta):
         Input:
             batches as required, agents
         Output:
-            rewards, successes, avg_msg_length, losses
+            rewards, successes, avg_signal_length, losses
         """
         # TODO: change return signature to loss, {dict of things to log}
         pass
@@ -208,7 +208,7 @@ class Game(metaclass=ABCMeta):
         acc_tag = 'pretrain/acc_%s_%s' % (agent_name, pretrain_CNN_mode)
 
         concept_sizes = [len(concept) for concept in data_iterator.concepts]
-        xcoder = agent.message_decoder if hasattr(agent, 'message_decoder') else agent.message_encoder
+        xcoder = agent.signal_decoder if hasattr(agent, 'signal_decoder') else agent.signal_encoder
         hidden_size = xcoder.symbol_embeddings.weight.size(1)
         device = next(agent.parameters()).device
 

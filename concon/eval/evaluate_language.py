@@ -32,7 +32,7 @@ def main(args):
 
     #model.eval()
    
-    # We try to visit each category on average 32 times
+    # We try to visit each category on average 32 times.
     batch_size = 256
     max_datapoints = 32768 # (2^15)
     n = (32 * data_iterator.nb_categories)
@@ -41,8 +41,8 @@ def main(args):
     nb_batch = int(np.ceil(n / batch_size))
     print('%i datapoints (%i batches)' % (n, nb_batch))
     
-    print("Generating the messages…")
-    messages = []
+    print("Generating the signals…")
+    signals = []
     categories = []
     batch_numbers = range(nb_batch)
     if(args.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers)
@@ -59,21 +59,21 @@ def main(args):
             receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
             success.append(receiver_pointing['dist'].probs[:, 0])
             
-            scrambled_messages = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original messages
+            scrambled_signals = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original signals.
             for i, datapoint in enumerate(batch.original):
-                msg = sender_outcome.action[0][i]
-                msg_len = sender_outcome.action[1][i]
+                signal = sender_outcome.action[0][i]
+                signal_len = sender_outcome.action[1][i]
                 cat = datapoint.category
 
                 if((not args.correct_only) or (receiver_pointing['action'][i] == 0)):
-                    messages.append(msg.tolist()[:msg_len])
+                    signals.append(signal.tolist()[:signal_len])
                     categories.append(cat)
 
-                # Here, I am scrambling the whole message, including the EOS (but not the padding symbols, of course)
-                l = msg_len.item()
-                scrambled_messages[i, :l] = scrambled_messages[i][torch.randperm(l)]
+                # Here, I am scrambling the whole signal, including the EOS (but not the padding symbols, of course).
+                l = signal_len.item()
+                scrambled_signals[i, :l] = scrambled_signals[i][torch.randperm(l)]
 
-            scrambled_receiver_outcome = model.receiver(model._bob_input(batch), message=scrambled_messages, length=sender_outcome.action[1])
+            scrambled_receiver_outcome = model.receiver(model._bob_input(batch), signal=scrambled_signals, length=sender_outcome.action[1])
             scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
             scrambled_success.append(scrambled_receiver_pointing['dist'].probs[:, 0])
 
@@ -85,11 +85,11 @@ def main(args):
         scrambled_success_rate = scrambled_success.mean().item()
         print('Scrambled success: %f' % scrambled_success_rate)
 
-        scrambling_resistance = (torch.stack([success, scrambled_success]).min(0).values.mean().item() / success_rate) # Between 0 and 1. We take the min in order to not count messages that become accidentaly better after scrambling
+        scrambling_resistance = (torch.stack([success, scrambled_success]).min(0).values.mean().item() / success_rate) # Between 0 and 1. We take the min in order to not count signals that become accidentaly better after scrambling.
         print('Scrambling resistance: %f' % scrambling_resistance)
 
-        # Here, we try to see how much the messages describe the categories and not the praticular images
-        # To do so, we use the original image as target, and an image of the same category as distractor
+        # Here, we try to see how much the signals describe the categories and not the praticular images.
+        # To do so, we use the original image as target, and an image of the same category as distractor.
         abstractness = []
         for _ in batch_numbers:
             model.start_episode(train_episode=False) # Selects agents at random if necessary
@@ -104,7 +104,7 @@ def main(args):
         print('Abstractness: %f' % abstractness_rate)
    
     '''
-    messages = []
+    signals = []
     categories = []
     with torch.no_grad():
         batch_numbers = range(nb_batch)
@@ -113,22 +113,22 @@ def main(args):
         
         for datapoint in tqdm.tqdm(dataset):
             sender_outcome = model.sender(datapoint.img.unsqueeze(0).to(args.device))
-            message = sender_outcome.action[0].view(-1)
+            signal = sender_outcome.action[0].view(-1)
             
-            messages.append(message.tolist())
+            signals.append(signal.tolist())
             
-            message_str = ' '.join(map(str, message.tolist()))
+            signal_str = ' '.join(map(str, signal.tolist()))
             category_str = ' '.join(map(str, datapoint.category))
-            counts += (torch.arange(args.base_alphabet_size).expand(message.size(0), args.base_alphabet_size) == message.unsqueeze(1)).float().sum(dim=0)
+            counts += (torch.arange(args.base_alphabet_size).expand(signal.size(0), args.base_alphabet_size) == signal.unsqueeze(1)).float().sum(dim=0)
             
             if args.load_other_model is not None:
                 other_sender_outcome = other_model.sender(datapoint.img.unsqueeze(0).to(args.device))
-                other_message = other_sender_outcome.action[0].view(-1)
-                counts_other_model += (torch.arange(args.base_alphabet_size).expand(other_message.size(0), args.base_alphabet_size) == other_message.unsqueeze(1)).float().sum(dim=0)
+                other_signal = other_sender_outcome.action[0].view(-1)
+                counts_other_model += (torch.arange(args.base_alphabet_size).expand(other_signal.size(0), args.base_alphabet_size) == other_signal.unsqueeze(1)).float().sum(dim=0)
 
-            if(ostr is not None): print(datapoint.idx, category_str, message_str, sep='\t', file=ostr)
+            if(ostr is not None): print(datapoint.idx, category_str, signal_str, sep='\t', file=ostr)
     '''
-    categories = np.array(categories) # Numpyfies the categories (but not the messages, as there are list of various length)
+    categories = np.array(categories) # Numpyfies the categories (but not the signals, as there are list of various length).
 
     '''
     if(ostr is not None): ostr.close()
@@ -143,4 +143,4 @@ def main(args):
     '''
 
     # Decision tree stuff
-    decision_tree(messages=messages, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_iterator.concepts, gram_size=args.analysis_gram_size, disj_size=args.analysis_disj_size)
+    decision_tree(signals=signals, categories=categories, alphabet_size=(model.base_alphabet_size + 1), concepts=data_iterator.concepts, gram_size=args.analysis_gram_size, disj_size=args.analysis_disj_size)

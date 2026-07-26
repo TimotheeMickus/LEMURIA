@@ -4,18 +4,18 @@ import torch
 import torch.nn as nn
 
 from .agent import Agent
-from ..utils.modules import MessageDecoder, build_cnn_encoder_from_args
+from ..utils.modules import SignalDecoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
 
-# Produces a message based on an image.
+# Produces a signal based on an image.
 class Sender(Agent):
-    def __init__(self, image_encoder, message_decoder, args, has_shared_param):
+    def __init__(self, image_encoder, signal_decoder, args, has_shared_param):
         super(Agent, self).__init__()
         
         self.image_encoder = image_encoder
-        self.message_decoder = message_decoder
+        self.signal_decoder = signal_decoder
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
@@ -26,15 +26,15 @@ class Sender(Agent):
             Input:
                 `image`, of shape [args.batch_size x *IMG_SHAPE]
             Output:
-                `Outcome`, where `action` is the produced message
+                `Outcome`, where `action` is the produced signal
         """
         encoded_image = self.image_encoder(image) # Shape: (batch size, encoding size)
-        outputs = self.message_decoder(encoded_image)
+        outputs = self.signal_decoder(encoded_image)
 
         outcome = Outcome(
             entropy=outputs["entropy"], # Shape: (batch size, 1)
-            log_prob=outputs["log_probs"], # Shape: (batch, max msg length)
-            action=(outputs["message"], outputs["message_len"]) # A list[list[Int]] and a tensor of shape (batch size, 1)
+            log_prob=outputs["log_probs"], # Shape: (batch, max signal length)
+            action=(outputs["signal"], outputs["signal_len"]) # A list[list[Int]] and a tensor of shape (batch size, 1)
         )
 
         return outcome
@@ -59,6 +59,6 @@ class Sender(Agent):
         has_shared_param = (image_encoder is not None) or (symbol_embeddings is not None)
         
         if(image_encoder is None): image_encoder = build_cnn_encoder_from_args(args)
-        message_decoder = MessageDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
+        signal_decoder = SignalDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
         
-        return cls(image_encoder, message_decoder, args, has_shared_param)
+        return cls(image_encoder, signal_decoder, args, has_shared_param)

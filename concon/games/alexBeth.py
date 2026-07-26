@@ -26,7 +26,7 @@ from .game import Game
 # Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
 class AlexBeth(Game):
-    def __init__(self, args, logger, dataset, message_dump_dir):
+    def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
 
         self._logger = logger
@@ -64,7 +64,7 @@ class AlexBeth(Game):
         self.full_alphabet_size = self._asker.alphabet_size - 1 # Number of symbols that can be found in the signals; this includes padding and EOS but excludes BOS.
         assert (self.full_alphabet_size == (self.base_alphabet_size + 2))
         
-        self.max_len_msg = args.max_len
+        self.max_len_signal = args.max_len
 
         self._optim = build_optimizer(parameters, args.learning_rate)
         
@@ -74,12 +74,12 @@ class AlexBeth(Game):
             self._asker_avg_reward = misc.Averager(size=12800)
             self._retriever_avg_reward = misc.Averager(size=12800)
 
-        self.dump_message_mode = getattr(args, "dump_messages", None)
+        self.dump_signal_mode = getattr(args, "dump_signals", None)
         self.dump_predicate_perf = getattr(args, "dump_predicate_perf", False)
         self.dump_eval_metrics_enabled = getattr(args, "dump_eval_metrics", False)
         # Fancy language eval is only needed for eval metrics.
         self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self.use_jaccard_eval = getattr(args, "jaccard", False)
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
@@ -90,13 +90,13 @@ class AlexBeth(Game):
         self._curriculum_unlock_epoch = None
         self._beth_reaper_step = getattr(args, "beth_reaper_step", None)
         self._current_epoch = 0
-        if (self.curriculum_negation_acc is not None) and (not self.no_negation):
+        if((self.curriculum_negation_acc is not None) and (not self.no_negation)):
             self._dataset.use_positive_predicates_only()
             print(
                 f"[curriculum] positive-only phase enabled "
                 f"(unlock_acc={self.curriculum_negation_acc})"
             )
-        # Used to decide whether to dump messages during a hike in performance
+        # Used to decide whether to dump signals during a hike in performance
         self._prev_eval_perf = None
         self._best_eval_perf = None
         self._predicate_negation_idx = self._build_negation_correspondence()
@@ -108,11 +108,11 @@ class AlexBeth(Game):
         # One row per evaluate() call (epoch-level aggregate metrics).
         self._eval_metrics_rows = []
 
-        if self.dump_eval_metrics_enabled and (not self.run_fancy_lang_eval):
-            raise ValueError("--dump_eval_metrics requires fancy eval metrics; enable --dump_messages.")
+        if(self.dump_eval_metrics_enabled and (not self.run_fancy_lang_eval)):
+            raise ValueError("--dump_eval_metrics requires fancy eval metrics; enable --dump_signals.")
         
         self.debug = args.debug
-        self.message_dump_dir = message_dump_dir # str|None
+        self.signal_dump_dir = signal_dump_dir # str|None
 
     @property
     def asker(self):
@@ -165,17 +165,17 @@ class AlexBeth(Game):
 
         while stack:
             p, sign = stack.pop()
-            if isinstance(p, predicate_data.Conjunction):
+            if(isinstance(p, predicate_data.Conjunction)):
                 stack.append((p.pred2, sign))
                 stack.append((p.pred1, sign))
-            elif isinstance(p, predicate_data.Negation):
+            elif(isinstance(p, predicate_data.Negation)):
                 stack.append((p.predicate, -sign))
             else:
-                if isinstance(p, predicate_data.Value):
+                if(isinstance(p, predicate_data.Value)):
                     atom_name = p.prop.name
                 else:
                     atom_name = str(p)
-                signed_literals.append(("+" if sign > 0 else "-", atom_name))
+                signed_literals.append(("+" if(sign > 0) else "-", atom_name))
 
         return frozenset(signed_literals)
 
@@ -194,7 +194,7 @@ class AlexBeth(Game):
         pred2idx = {pred: i for i, pred in enumerate(self._dataset.predicates)}
         # For each negative predicate and its index, Negation stores its positive "base"
         for i, pred in enumerate(self._dataset.predicates):
-            if isinstance(pred, predicate_data.Negation):
+            if(isinstance(pred, predicate_data.Negation)):
                 # Map the negation and the base to each other
                 j = pred2idx[pred.predicate]
                 partner[i] = j
@@ -204,7 +204,7 @@ class AlexBeth(Game):
 
     def dump_predicate_performance(self, output_dir, wandb_run=None, artifact_name=None):
         # Save one raw row-level table at the end of the run.
-        if (not self.dump_predicate_perf) or (len(self._predicate_perf_rows) == 0):
+        if((not self.dump_predicate_perf) or (len(self._predicate_perf_rows) == 0)):
             return
 
         os.makedirs(output_dir, exist_ok=True)
@@ -216,7 +216,7 @@ class AlexBeth(Game):
             for epoch, pred_idx, row_perf, row_acc in self._predicate_perf_rows:
                 writer.writerow([epoch, pred_idx, self._predicate_text_by_idx.get(pred_idx, ""), row_perf, row_acc])
 
-        if wandb_run is not None:
+        if(wandb_run is not None):
             import wandb
             artifact = wandb.Artifact(name=f"predicate-performance-{wandb_run.id}", type="analysis")
             artifact.add_file(rows_path)
@@ -224,7 +224,7 @@ class AlexBeth(Game):
 
     def dump_eval_metrics(self, output_dir, wandb_run=None):
         # Save one epoch-level table at the end of the run.
-        if (not self.dump_eval_metrics_enabled) or (len(self._eval_metrics_rows) == 0):
+        if((not self.dump_eval_metrics_enabled) or (len(self._eval_metrics_rows) == 0)):
             return
 
         os.makedirs(output_dir, exist_ok=True)
@@ -235,7 +235,7 @@ class AlexBeth(Game):
             "eval/perf",
             "eval/accuracy",
             "eval/retriever_entropy",
-            "eval/msg_length",
+            "eval/signal_length",
             "eval/vocab_used",
             "eval/c.e._verify",
             "eval/c.e._falsify",
@@ -254,7 +254,7 @@ class AlexBeth(Game):
             writer.writeheader()
             writer.writerows(self._eval_metrics_rows)
 
-        if wandb_run is not None:
+        if(wandb_run is not None):
             import wandb
             artifact = wandb.Artifact(name=f"eval-metrics-{wandb_run.id}", type="analysis")
             artifact.add_file(rows_path)
@@ -316,16 +316,16 @@ class AlexBeth(Game):
         (retriever_loss, _, retriever_entropy) = self.compute_retriever_loss(retriever_outcome.scores, truth_targets, return_entropy=True)
 
         loss = asker_loss + retriever_loss
-        if torch.isnan(loss): # DEBUG
+        if(torch.isnan(loss)): # DEBUG
             print(f"[warn] loss is {loss}")
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
-        msg_length = asker_outcome.action[1].float().mean()
+        signal_length = asker_outcome.action[1].float().mean()
 
         metrics = {
             "rewards": asker_rewards,
             "successes": asker_perf,
-            "msg_length": msg_length,
+            "signal_length": signal_length,
             "sender_entropy": asker_entropy,
             "receiver_entropy": retriever_entropy,
         }
@@ -333,7 +333,7 @@ class AlexBeth(Game):
         return optimization, metrics
 
     # Returns two tensors of shape (batch size).
-    # asker_action: pair (message, length) where message is a tensor of shape (batch size, max message length) and length a tensor of shape (batch size)
+    # asker_action: pair (signal, length) where signal is a tensor of shape (batch size, max signal length) and length a tensor of shape (batch size)
     # retriever_scores: logits pair (batch, num_candidates)
     # truth_targets: (batch, num_candidates)
     def compute_asker_rewards(self, asker_action, retriever_scores, truth_targets):
@@ -363,19 +363,19 @@ class AlexBeth(Game):
         #else:
         #    rewards = torch.isclose(retriever_selecting["actions"], truth_targets).float().mean(dim=1) # Shape: (batch,)
 
-        msg_lengths = asker_action[1].view(-1).float() # Shape: (batch,), includes the EOS symbol (usualy 0).
+        signal_lengths = asker_action[1].view(-1).float() # Shape: (batch,), includes the EOS symbol (usualy 0).
 
-        rewards += -1 * (msg_lengths >= self.max_len_msg) # Penalty related to messages exceeding the length limit.
+        rewards += -1 * (signal_lengths >= self.max_len_signal) # Penalty related to signals exceeding the length limit.
 
         if(self.len_penalty > 0.0):
-            # The penalty equals 0 when `len_penalty` is set to 0, and increases (the faster the higher `len_penalty` is) to 1 with the length of the message otherwise.
+            # The penalty equals 0 when `len_penalty` is set to 0, and increases (the faster the higher `len_penalty` is) to 1 with the length of the signal otherwise.
             # RMK: We could imagine a non-uniform penalty (that depends on the position of the token for symbols ≠ EOS).
-            length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * msg_lengths)) # Shape: (batch,)
+            length_penalties = 1.0 - (1.0 / (1.0 + self.len_penalty * signal_lengths)) # Shape: (batch,)
 
             rewards = (rewards - length_penalties) # Shape: (batch,)
 
         if(self.voc_penalty > 0.0):
-            # Each symbol of the base alphabet is associated with a total penalty equal to `batch_size` * `voc_penalty`, distributed over all messages in proportion of their use of the symbol (as if the total penalty were distributed equally over all occurrences of the symbol).
+            # Each symbol of the base alphabet is associated with a total penalty equal to `batch_size` * `voc_penalty`, distributed over all signals in proportion of their use of the symbol (as if the total penalty were distributed equally over all occurrences of the symbol).
             # Ex: If each signal uses a single symbol and at least once, and all signals use different symbols, each signal gets a penalty equal to `voc_penalty`.
             # Ex: If all signal uses a single symbol overall, each signal gets a penalty equal to `voc_penalty` * its length * `batch_size` / sum of lengths, which is `voc_penalty` when the signals are of the same length ≥ 1.
             # RMK: We could imagine a non-uniform penalty (that depends on the position of the token).
@@ -402,7 +402,7 @@ class AlexBeth(Game):
         return (rewards, perf)
 
     # Returns (loss, perf, rewards) where loss is a scalar and perf and rewards are of shape (batch,)
-    # asker_outcome: (log_prob tensor of shape (batch, max msg len), entropy tensor of shape (batch, 1))
+    # asker_outcome: (log_prob tensor of shape (batch, max signal len), entropy tensor of shape (batch, 1))
     # retriever_scores: tensor of shape (batch size, number of candidates)
     # truth_targets: tensor of shape (batch size, number of candidates)
     def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
@@ -452,7 +452,7 @@ class AlexBeth(Game):
             entropy_loss = -(self.beta_retriever * entropy)
             loss += entropy_loss
 
-        if return_entropy: return (loss, perf, entropy)
+        if(return_entropy): return (loss, perf, entropy)
         return (loss, perf)
 
     # Called at the end of each training epoch.
@@ -477,7 +477,7 @@ class AlexBeth(Game):
         total_perf = 0.0 # average probability of the retriever selecting correctly
         total_accuracy = 0.0 # average accuracy of the retriever argmax selection
         total_entropy = 0.0
-        total_msg_length = 0.0
+        total_signal_length = 0.0
         # Communication-efficiency split by truth label (model can be ex. good at positives and bad at negatives).
         total_verify_ce = 0.0 # verify: predicate true for candidate
         total_falsify_ce = 0.0 # falsify: predicate false for candidate.
@@ -492,20 +492,20 @@ class AlexBeth(Game):
         # Count symbol usage across eval batches.
         total_vocab_counts = None
 
-        # Cache for message dumps.
+        # Cache for signal dumps.
         dump_cache = None
-        if self.dump_message_mode:
+        if(self.dump_signal_mode):
             dump_cache = {
-                "messages": [],
+                "signals": [],
                 "predicate_ids": [],
                 "predicate_texts": [],
             }
 
         # Cache for language-level eval metrics.
         eval_cache = None
-        if self.run_fancy_lang_eval:
-            eval_cache = dump_cache if dump_cache is not None else {
-                "messages": [],
+        if(self.run_fancy_lang_eval):
+            eval_cache = dump_cache if(dump_cache is not None) else {
+                "signals": [],
                 "predicate_ids": [],
                 "predicate_texts": [],
             }
@@ -540,31 +540,31 @@ class AlexBeth(Game):
             failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch * num_candidates)
             data_loader.failure_based_distribution.update(predicate_idx, failure, new_epoch=(batch_index == 0))
 
-            # `msg_length`: average length (including EOS) of the signals in this batch.
-            msg_length = asker_outcome.action[1].float().mean().item()
+            # `signal_length`: average length (including EOS) of the signals in this batch.
+            signal_length = asker_outcome.action[1].float().mean().item()
             # `total_vocab_counts`: count symbols used in signals (excluding EOS and padding).
-            msg_tokens = asker_outcome.action[0]
-            max_len = msg_tokens.size(1)
-            positions = torch.arange(max_len, device=msg_tokens.device).unsqueeze(0) # int tensor of shape TODO
-            msg_lens = asker_outcome.action[1].int().view(-1)
-            in_message = positions < (msg_lens.unsqueeze(1) - 1) # boolean tensor of shape TODO, True for positions strictly before EOS in each signal.
-            if in_message.any():
-                used_tokens = msg_tokens[in_message]
+            signal_tokens = asker_outcome.action[0]
+            max_len = signal_tokens.size(1)
+            positions = torch.arange(max_len, device=signal_tokens.device).unsqueeze(0) # int tensor of shape TODO
+            signal_lens = asker_outcome.action[1].int().view(-1)
+            in_signal = positions < (signal_lens.unsqueeze(1) - 1) # boolean tensor of shape TODO, True for positions strictly before EOS in each signal.
+            if in_signal.any():
+                used_tokens = signal_tokens[in_signal]
                 vocab_counts = torch.bincount(used_tokens, minlength=self.full_alphabet_size).to("cpu")
                 vocab_counts[self.asker.eos_index] = 0
                 vocab_counts[self.asker.padding_idx] = 0
-                if total_vocab_counts is None: # TODO Instead of doing this, initialise `total_vocab_counts` correctly.
+                if(total_vocab_counts is None): # TODO Instead of doing this, initialise `total_vocab_counts` correctly.
                     total_vocab_counts = vocab_counts
                 else:
                     total_vocab_counts += vocab_counts
 
             # Stores row-level performance for predicate diagnostics only when requested.
-            if self.dump_predicate_perf:
+            if(self.dump_predicate_perf):
                 row_perf = correct_prob.mean(dim=1).cpu().tolist()
                 row_acc = correct_pred.mean(dim=1).cpu().tolist()
                 for i, pred_idx in enumerate(batch.predicate_idx):
                     pred_idx = int(pred_idx)
-                    if pred_idx not in self._predicate_text_by_idx:
+                    if(pred_idx not in self._predicate_text_by_idx):
                         self._predicate_text_by_idx[pred_idx] = str(batch.predicate[i])
                     self._predicate_perf_rows.append((epoch_index, pred_idx, float(row_perf[i]), float(row_acc[i])))
 
@@ -574,16 +574,16 @@ class AlexBeth(Game):
             total_perf += perf * batch_items
             total_accuracy += accuracy * batch_items
             total_entropy += entropy * batch_items
-            total_msg_length += msg_length * batch_items
+            total_signal_length += signal_length * batch_items
 
             # Split candidate decisions into verify/falsify subsets.
             verify_mask = (truth_targets > 0.5)
             falsify_mask = ~verify_mask
-            if verify_mask.any():
+            if(verify_mask.any()):
                 # c.e._verify: average P(true) on true instances.
                 total_verify_ce += dist.probs[verify_mask].sum().item()
                 total_verify_items += int(verify_mask.sum().item())
-            if falsify_mask.any():
+            if(falsify_mask.any()):
                 # c.e._falsify: average P(false)=1-P(true) on false instances.
                 total_falsify_ce += (1.0 - dist.probs[falsify_mask]).sum().item()
                 total_falsify_items += int(falsify_mask.sum().item())
@@ -591,16 +591,16 @@ class AlexBeth(Game):
             # Scramble the symbol order inside signals and recompute correctness probs on these.
             # Then we check how much original performance is kept.
             # If retention is high, semantics likely rely less on order/composition.
-            if self.run_fancy_lang_eval:
-                batch_messages = asker_outcome.action[0].detach().clone()
+            if(self.run_fancy_lang_eval):
+                batch_signals = asker_outcome.action[0].detach().clone()
                 batch_lens = asker_outcome.action[1].detach().clone()
-                scrambled_messages = batch_messages
-                for i in range(scrambled_messages.size(0)):
-                    msg_len = int(batch_lens[i].item())
-                    if msg_len > 1:
-                        scrambled_messages[i, :msg_len] = scrambled_messages[i, :msg_len][torch.randperm(msg_len)]
+                scrambled_signals = batch_signals
+                for i in range(scrambled_signals.size(0)):
+                    signal_len = int(batch_lens[i].item())
+                    if(signal_len > 1):
+                        scrambled_signals[i, :signal_len] = scrambled_signals[i, :signal_len][torch.randperm(signal_len)]
 
-                scrambled_outcome = self.retriever(self._beth_input(batch), message=scrambled_messages, length=batch_lens)
+                scrambled_outcome = self.retriever(self._beth_input(batch), signal=scrambled_signals, length=batch_lens)
                 scrambled_probs = torch.sigmoid(scrambled_outcome.scores)
 
                 scrambled_correct_prob = torch.where(truth_targets > 0.5, scrambled_probs, 1.0 - scrambled_probs)
@@ -612,16 +612,16 @@ class AlexBeth(Game):
             # Negation consistency: Is it the case that for any predicate p and candidate c, P(p true | c) + P(¬p true | c) = 1?
             # Consistency for (p, c): cons(p, c) = 1 - |P(p true | c ) + P(¬p true | c) - 1|
             # Per batch: avg of cons(p, c) over all (p, c)
-            if self.run_fancy_lang_eval and (not self.no_negation):
+            if(self.run_fancy_lang_eval and (not self.no_negation)):
                 paired_rows = [] # list[int], row indices (of rows in the batch about a predicate that has or is a negation)
                 neg_pred_indices = [] # list[int], predicate indices
                 for row_i, pred_i in enumerate(batch.predicate_idx):
                     neg_i = self._predicate_negation_idx.get(int(pred_i))
-                    if neg_i is not None:
+                    if(neg_i is not None):
                         paired_rows.append(row_i)
                         neg_pred_indices.append(neg_i)
 
-                if len(paired_rows) > 0:
+                if(len(paired_rows) > 0):
                     paired_rows = torch.tensor(paired_rows, device=dist.probs.device, dtype=torch.long)
                     
                     p_prob = dist.probs.index_select(dim=0, index=paired_rows) # Shape: (batch size, num candidates)
@@ -646,24 +646,24 @@ class AlexBeth(Game):
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
-            cache = dump_cache if dump_cache is not None else eval_cache
-            if cache is not None:
-                batch_messages = asker_outcome.action[0].detach().clone()
+            cache = dump_cache if(dump_cache is not None) else eval_cache
+            if(cache is not None):
+                batch_signals = asker_outcome.action[0].detach().clone()
                 batch_lens = asker_outcome.action[1].detach().clone()
                 accuracy_per_item = correct_pred.mean(dim=1) # (batch,) mean across candidates
-                for i in range(batch_messages.size(0)):
-                    if self.correct_only and not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)):
+                for i in range(batch_signals.size(0)):
+                    if(self.correct_only and (not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)))):
                         # not: (accuracy_per_item[i].item() < 0.5):
                         continue # skip low accuracy items
                     # truncate padding away from signals
-                    message = batch_messages[i].tolist()[:batch_lens[i].item()]
-                    cache["messages"].append(message)
+                    signal = batch_signals[i].tolist()[:batch_lens[i].item()]
+                    cache["signals"].append(signal)
                     cache["predicate_ids"].append(int(batch.predicate_idx[i]))
                     # TODO This was crashing
                     # eval_cache["predicate_texts"].append(str(batch.predicate[i]))
                     # ---- and with this it works now:
                     pred_list = getattr(batch, "predicate", None)
-                    if pred_list is not None: 
+                    if(pred_list is not None): 
                         cache["predicate_texts"].append(str(pred_list[i]))
                     else: 
                         cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
@@ -676,15 +676,15 @@ class AlexBeth(Game):
         eval_perf = total_perf / total_items
         eval_accuracy = total_accuracy / total_items
         eval_retriever_entropy = total_entropy / total_items
-        eval_msg_length = total_msg_length / total_items
-        if total_vocab_counts is None: eval_vocab_used = 0
+        eval_signal_length = total_signal_length / total_items
+        if(total_vocab_counts is None): eval_vocab_used = 0
         else: eval_vocab_used = int((total_vocab_counts > 0).sum().item())
         
         log('eval/retriever_loss', eval_retriever_loss)
         log('eval/perf', eval_perf)
         log('eval/accuracy', eval_accuracy)
         log('eval/retriever_entropy', eval_retriever_entropy)
-        log('eval/msg_length', eval_msg_length)  # Average number of symbols Alex produced.
+        log('eval/signal_length', eval_signal_length)  # Average number of symbols Alex produced.
         log('eval/vocab_used', eval_vocab_used)
         
         avg_accuracy = eval_accuracy
@@ -692,8 +692,8 @@ class AlexBeth(Game):
 
         is_perf_hike = False
         # Curriculum: start with positive-only predicates, unlock all once eval accuracy reaches threshold.
-        if (self.curriculum_negation_acc is not None) and (not self._curriculum_unlocked):
-            if eval_accuracy >= self.curriculum_negation_acc:
+        if((self.curriculum_negation_acc is not None) and (not self._curriculum_unlocked)):
+            if(eval_accuracy >= self.curriculum_negation_acc):
                 data_loader.use_all_predicates()
                 self._curriculum_unlocked = True
                 self._curriculum_unlock_epoch = epoch_index
@@ -709,53 +709,53 @@ class AlexBeth(Game):
         verify_ratio = None
         falsify_ratio = None
         scrambling_ratio = None
-        neg_consistency_ratio = (float("nan") if self.no_negation else None)
+        neg_consistency_ratio = (float("nan") if(self.no_negation) else None)
         topsim_ext_levenshtein = float("nan")
         topsim_ext_jaccard = float("nan")
         topsim_int_levenshtein = float("nan")
         topsim_int_jaccard = float("nan")
         topsim_polarity_norm_levenshtein = float("nan")
-        if self.run_fancy_lang_eval:
+        if(self.run_fancy_lang_eval):
             verify_ratio = 0
             falsify_ratio = 0
-            if total_verify_items > 0: verify_ratio = total_verify_ce / total_verify_items
-            if total_falsify_items > 0: falsify_ratio = total_falsify_ce / total_falsify_items
+            if(total_verify_items > 0): verify_ratio = total_verify_ce / total_verify_items
+            if(total_falsify_items > 0): falsify_ratio = total_falsify_ce / total_falsify_items
             log('eval/c.e._verify', verify_ratio)
             log('eval/c.e._falsify', falsify_ratio)
 
             scrambling_ratio = 0
-            if perf_baseline > 0.0: scrambling_ratio = perf_scrambled / perf_baseline
+            if(perf_baseline > 0.0): scrambling_ratio = perf_scrambled / perf_baseline
             log('eval/scrambling-resistance', scrambling_ratio)
             # Only meaningful when negation predicates exist.
-            if not self.no_negation: 
+            if(not self.no_negation): 
                 neg_consistency_ratio = 0
-                if neg_consistency_count > 0: 
+                if(neg_consistency_count > 0): 
                     neg_consistency_ratio = neg_consistency_total / neg_consistency_count
                 log('eval/neg_consistency', neg_consistency_ratio)
 
             # Topographic similarity
-            if eval_cache is not None and len(eval_cache["messages"]) > 1:
+            if((eval_cache is not None) and (len(eval_cache["signals"]) > 1)):
                 num_predicates = len(self._dataset.predicates)
                 sample_size = int(min(1024, max(128, 12 * np.sqrt(max(1, num_predicates)))))
                 # sample = [([s0, s1], id0), ([s2], id1), ...]
-                sample = list(zip(eval_cache["messages"], eval_cache["predicate_ids"]))
+                sample = list(zip(eval_cache["signals"], eval_cache["predicate_ids"]))
                 random.shuffle(sample)
                 sample = sample[:sample_size]
                 # Consider only unique (predicate, signal) pairs.
                 sample_type = []
                 seen_pairs = set()
-                for msg, pid in sample:
-                    key = (int(pid), tuple(msg))
-                    if key in seen_pairs:
+                for signal, pid in sample:
+                    key = (int(pid), tuple(signal))
+                    if(key in seen_pairs):
                         continue
                     seen_pairs.add(key)
-                    sample_type.append((msg, int(pid)))
+                    sample_type.append((signal, int(pid)))
                 sample = sample_type
                 # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
                 sample_signals = [tuple(s) for (s, _) in sample]
                 sample_pred_ids = [int(pid) for (_, pid) in sample]
                 # signed-literal representation (polarity topsim)
-                if not self.no_negation:
+                if(not self.no_negation):
                     sample_signed_literals = [self._polarity_repr(self._dataset.predicates[pid]) for pid in sample_pred_ids]
 
                 # Extensional meaning is expressed as a binary vector over candidate IDs
@@ -765,7 +765,7 @@ class AlexBeth(Game):
                 for _, pid in sample:
                     pred = self._dataset.predicates[int(pid)]
                     # candidate_vec[k] = 1 if predicate verifies candidate_k, 0 otherwise
-                    candidate_vec = tuple(1 if pred.check(cand) == 1 else 0 for cand in self._topsim_candidates)
+                    candidate_vec = tuple(1 if(pred.check(cand) == 1) else 0 for cand in self._topsim_candidates)
                     sample_cand_vecs.append(candidate_vec)
 
                 # Topographic similarity:
@@ -775,22 +775,22 @@ class AlexBeth(Game):
                 # report 2 x 2
                 # Polarity (Levenshtein): topsim over signed literals
                 # Levenshtein is normalised to account for varying signal length
-                if len(set(sample_signals)) > 1 and len(set(sample_cand_vecs)) > 1:
+                if((len(set(sample_signals)) > 1) and (len(set(sample_cand_vecs)) > 1)):
                     # Intensional topsim: meaning distance is cosine distance between predicate embeddings.
                     asker_device = next(self.asker.parameters()).device
                     pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=asker_device)
                     # sender_vecs: (n, d) predicate embeddings for intensional distance.
                     sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()
                     # Compute one condensed pairwise vector per distance notion.
-                    # signal_strings: length-n list of message strings for Levenshtein.
-                    signal_strings = [''.join(map(chr, msg)) for msg in sample_signals]
+                    # signal_strings: length-n list of signal strings for Levenshtein.
+                    signal_strings = [''.join(map(chr, signal)) for signal in sample_signals]
                     n = len(sample_signals)
                     # Pairwise distance vectors built only on non-identical (predicate, signal) pairs.
-                    msg_lev_d = []
+                    signal_lev_d = []
                     ext_d = []
                     int_d = []
-                    pol_d = [] if (not self.no_negation) else None
-                    msg_jac_d = [] if self.use_jaccard_eval else None
+                    pol_d = [] if(not self.no_negation) else None
+                    signal_jac_d = [] if(self.use_jaccard_eval) else None
 
                     for i in range(n - 1):
                         sig_i_str = signal_strings[i]
@@ -800,74 +800,74 @@ class AlexBeth(Game):
                         vec_i = sender_vecs[i]
                         for j in range(i + 1, n):
                             # Keep one of each pair type.
-                            if (pid_i == sample_pred_ids[j]) and (sig_i == sample_signals[j]):
+                            if((pid_i == sample_pred_ids[j]) and (sig_i == sample_signals[j])):
                                 continue
-                            # msg_lev_d: normalized Levenshtein (order-sensitive, normalize by length).
-                            msg_lev_d.append(compute_correlation.levenshtein_normalised(sig_i_str, signal_strings[j]))
+                            # signal_lev_d: normalized Levenshtein (order-sensitive, normalize by length).
+                            signal_lev_d.append(compute_correlation.levenshtein_normalised(sig_i_str, signal_strings[j]))
                             # ext_d: Hamming distance over candidate truth vectors
                             # Hamming is equally sensitive to verify and falsify.
                             ext_d.append(sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j])))
                             # int_d: cosine distance between predicate embeddings (intensional meaning).
                             int_d.append(float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j])))
                             # pol_d: symmetric difference over signed literals (equiv. Hamming over binary).
-                            if not self.no_negation:
+                            if(not self.no_negation):
                                 pol_d.append(float(len(sample_signed_literals[i] ^ sample_signed_literals[j])))
-                            if self.use_jaccard_eval:
+                            if(self.use_jaccard_eval):
                                 # multiset Jaccard over token sequences (order-invariant).
-                                msg_jac_d.append(compute_correlation.jaccard(sig_i, sample_signals[j]))
+                                signal_jac_d.append(compute_correlation.jaccard(sig_i, sample_signals[j]))
 
-                    msg_lev_d = np.asarray(msg_lev_d, dtype=float)
+                    signal_lev_d = np.asarray(signal_lev_d, dtype=float)
                     ext_d = np.asarray(ext_d, dtype=float)
                     int_d = np.asarray(int_d, dtype=float)
-                    if not self.no_negation:
+                    if(not self.no_negation):
                         pol_d = np.asarray(pol_d, dtype=float)
-                    if self.use_jaccard_eval:
-                        msg_jac_d = np.asarray(msg_jac_d, dtype=float)
+                    if(self.use_jaccard_eval):
+                        signal_jac_d = np.asarray(signal_jac_d, dtype=float)
 
                     def _safe_spearman(x, y):
                         # Spearman correlation on pairwise distance vectors; NaN if degenerate.
-                        if x.size == 0 or y.size == 0:
+                        if((x.size == 0) or (y.size == 0)):
                             return float("nan")
-                        if np.all(x == x[0]) or np.all(y == y[0]):
+                        if(np.all(x == x[0]) or np.all(y == y[0])):
                             return float("nan")
                         return float(scipy.stats.spearmanr(x, y).correlation)
 
-                    topsim_ext_levenshtein = _safe_spearman(msg_lev_d, ext_d)
-                    topsim_int_levenshtein = _safe_spearman(msg_lev_d, int_d)
-                    if not self.no_negation:
-                        topsim_polarity_norm_levenshtein = _safe_spearman(msg_lev_d, pol_d)
-                    if self.use_jaccard_eval:
-                        topsim_ext_jaccard = _safe_spearman(msg_jac_d, ext_d)
-                        topsim_int_jaccard = _safe_spearman(msg_jac_d, int_d)
+                    topsim_ext_levenshtein = _safe_spearman(signal_lev_d, ext_d)
+                    topsim_int_levenshtein = _safe_spearman(signal_lev_d, int_d)
+                    if(not self.no_negation):
+                        topsim_polarity_norm_levenshtein = _safe_spearman(signal_lev_d, pol_d)
+                    if(self.use_jaccard_eval):
+                        topsim_ext_jaccard = _safe_spearman(signal_jac_d, ext_d)
+                        topsim_int_jaccard = _safe_spearman(signal_jac_d, int_d)
 
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
-                    if not self.no_negation:
+                    if(not self.no_negation):
                         log('eval/topsim_polarity_norm_levenshtein', topsim_polarity_norm_levenshtein)
-                    if self.use_jaccard_eval:
+                    if(self.use_jaccard_eval):
                         log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
                 else:
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
-                    if not self.no_negation:
+                    if(not self.no_negation):
                         log('eval/topsim_polarity_norm_levenshtein', topsim_polarity_norm_levenshtein)
-                    if self.use_jaccard_eval:
+                    if(self.use_jaccard_eval):
                         log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
-                    if self.autologger.display != 'minimal':
-                        print('eval/topsim\tnot enough variation in sampled messages/meanings')
+                    if(self.autologger.display != 'minimal'):
+                        print('eval/topsim\tnot enough variation in sampled signals/meanings')
 
-                # Decision tree TODO: how easily predicate identity can be recovered from messages.
+                # Decision tree TODO: how easily predicate identity can be recovered from signals.
 
-        if self.dump_eval_metrics_enabled:
+        if(self.dump_eval_metrics_enabled):
             row = {
                 "epoch": epoch_index,
                 "eval/retriever_loss": float(eval_retriever_loss),
                 "eval/perf": float(eval_perf),
                 "eval/accuracy": float(eval_accuracy),
                 "eval/retriever_entropy": float(eval_retriever_entropy),
-                "eval/msg_length": float(eval_msg_length),
+                "eval/signal_length": float(eval_signal_length),
                 "eval/vocab_used": eval_vocab_used,
                 "eval/c.e._verify": verify_ratio,
                 "eval/c.e._falsify": falsify_ratio,
@@ -880,8 +880,8 @@ class AlexBeth(Game):
                 "eval/topsim_intensional_multi_jaccard": topsim_int_jaccard,
                 "eval/topsim_polarity_norm_levenshtein": topsim_polarity_norm_levenshtein,
             }
-            missing = [k for k, v in row.items() if (k != "epoch" and v is None)]
-            if missing:
+            missing = [k for k, v in row.items() if(k != "epoch" and v is None)]
+            if(missing):
                 raise RuntimeError(
                     "Missing eval metrics for epoch "
                     f"{epoch_index}: {', '.join(missing)}. "
@@ -891,54 +891,54 @@ class AlexBeth(Game):
 
         # Decide if there is a performance hike.
         def _min_jump(best):
-            if best < 0.50: return 0.10
-            if best < 0.70: return 0.05
-            if best < 0.90: return 0.01
-            if best < 0.95: return 0.005
+            if(best < 0.50): return 0.10
+            if(best < 0.70): return 0.05
+            if(best < 0.90): return 0.01
+            if(best < 0.95): return 0.005
             return 0.001
         
-        if self.dump_message_mode in ('when_hike', 'when_hike_strict'):
-            if (self._curriculum_unlock_epoch is not None and epoch_index == (self._curriculum_unlock_epoch + 1)):
+        if(self.dump_signal_mode in ('when_hike', 'when_hike_strict')):
+            if((self._curriculum_unlock_epoch is not None) and (epoch_index == (self._curriculum_unlock_epoch + 1))):
                 # Reset performance baseline.
                 self._best_eval_perf = eval_perf
                 self._prev_eval_perf = eval_perf
                 is_perf_hike = False
             else:
-                if self._best_eval_perf is None:
+                if(self._best_eval_perf is None):
                     self._best_eval_perf = eval_perf
-                if not is_perf_hike:
-                    if eval_perf >= 1.0 and eval_perf > self._best_eval_perf:
+                if(not is_perf_hike):
+                    if((eval_perf >= 1.0) and (eval_perf > self._best_eval_perf)):
                         is_perf_hike = True
                     else:
                         delta_min = _min_jump(self._best_eval_perf)
-                        if self.dump_message_mode == 'when_hike_strict':
+                        if(self.dump_signal_mode == 'when_hike_strict'):
                             is_perf_hike = (eval_perf > self._best_eval_perf + delta_min) and (eval_perf > 0.95)
                         else:
                             is_perf_hike = (eval_perf > self._best_eval_perf + delta_min)
 
-                if is_perf_hike and eval_perf > self._best_eval_perf:
+                if(is_perf_hike and (eval_perf > self._best_eval_perf)):
                     self._best_eval_perf = eval_perf
                 self._prev_eval_perf = eval_perf
-        # Dumps signals into file every epoch or on the last epoch, depending on the flag
-        if self.message_dump_dir and dump_cache is not None and (
-            self.dump_message_mode == 'all' or 
-            (self.dump_message_mode == 'last' and epoch_index == (self.epochs - 1)) or
-            (self.dump_message_mode in ('when_hike', 'when_hike_strict')
-                and (is_perf_hike 
-                     or (self._curriculum_unlock_epoch is not None and epoch_index == (self._curriculum_unlock_epoch + 1))
-                     or epoch_index == (self.epochs - 1)))
-            ):
-            filename = os.path.join(self.message_dump_dir, f"msgs.e{epoch_index}.csv")
+        # Dumps signals into file every epoch or on the last epoch, depending on the flag.
+        if(self.signal_dump_dir and (dump_cache is not None) and (
+            (self.dump_signal_mode == 'all') or 
+            ((self.dump_signal_mode == 'last') and (epoch_index == (self.epochs - 1))) or
+            ((self.dump_signal_mode in ('when_hike', 'when_hike_strict')) and (
+                 is_perf_hike 
+                 or ((self._curriculum_unlock_epoch is not None) and (epoch_index == (self._curriculum_unlock_epoch + 1)))
+                 or (epoch_index == (self.epochs - 1))))
+            )):
+            filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")
             with open(filename, 'w') as ostr:
                 writer = csv.writer(ostr)
-                _ = writer.writerow(['msg', 'pred_idx', 'pred_str'])
-                for msg, pred_idx, pred_text in zip(
-                    dump_cache["messages"],
+                _ = writer.writerow(['signal', 'pred_idx', 'pred_str'])
+                for signal, pred_idx, pred_text in zip(
+                    dump_cache["signals"],
                     dump_cache["predicate_ids"],
                     dump_cache["predicate_texts"],
                 ):
-                    msg = ' '.join(map(str, msg))
-                    row = [msg, pred_idx, pred_text]
+                    signal = ' '.join(map(str, signal))
+                    row = [signal, pred_idx, pred_text]
                     _ = writer.writerow(row)
         
         return

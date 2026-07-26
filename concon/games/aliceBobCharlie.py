@@ -11,18 +11,18 @@ from ..utils import misc
 from ..utils.misc import build_optimizer
 
 # In this game, there is one sender (Alice), one receiver (Bob) and one drawer (Charlie).
-# Alice is shown an "original image" and produces a message, Charlie sees the message and produces a "forged image", Bob sees the message and then a "target image", the forged image and a "distractor image".
+# Alice is shown an "original image" and produces a signal, Charlie sees the signal and produces a "forged image", Bob sees the signal and then a "target image", the forged image and a "distractor image".
 # Alice is trained to maximize the probability that Bob assigns to the target image when comparing the target image and the distractor image.
 # Bob is trained to maximize the probability that he assigns to the target image when comparing the three images.
 # Charlie is trained to maximize the probability that Bob assigns to the fake image when comparing the target image and the fake image.
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization; Charlie is trained by log-likelihood maximization.
 class AliceBobCharlie(AliceBob):
-    def __init__(self, args, logger, dataset, message_dump_dir):
+    def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
 
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size
-        self.max_len_msg = args.max_len
+        self.max_len_signal = args.max_len
 
         self.use_expectation = args.use_expectation
         self.grad_scaling = args.grad_scaling or 0
@@ -41,7 +41,7 @@ class AliceBobCharlie(AliceBob):
 
         self._init_receiver_preprocessor(args, dataset)
 
-        self.use_spigot = (not args.no_spigot) # A boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message). GradSpigot·s are meant for use during training only.
+        self.use_spigot = (not args.no_spigot) # A boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's signal). GradSpigot·s are meant for use during training only.
         self.loss_weight_temp = args.loss_weight_temp
 
         # TODO Using different learning rates would probably prove beneficial.
@@ -63,13 +63,13 @@ class AliceBobCharlie(AliceBob):
         if(self.use_baseline): # In that case, the sender loss will take into account the "baseline term" into the average recent reward.
             self._sender_avg_reward = misc.Averager(size=12800)
 
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct messages (i.e., the one that leads to successful communication).
+        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
 
         self.debug = args.debug
         self.log_charlie_sample_imgs = not (args.no_summary or args.no_log_imgs)
         self.log_img_every = args.log_img_every
         self._batch_for_img_gen = None
-        self.message_dump_dir = message_dump_dir # str|None
+        self.signal_dump_dir = signal_dump_dir # str|None
 
     @property
     def drawer(self):
@@ -102,7 +102,7 @@ class AliceBobCharlie(AliceBob):
         return ipts
 
     # Overrides AliceBob.__call__.
-    # use_spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's message); GradSpigot·s are meant for use during training only
+    # use_spigot: boolean that indicates whether to use GradSpigot·s (one after Charlie's image and one after Bob's encoding of Alice's signal); GradSpigot·s are meant for use during training only
     def __call__(self, batch, use_spigot=False):
         """
         Input:
@@ -185,7 +185,7 @@ class AliceBobCharlie(AliceBob):
         optim = self._optim_receiver
         loss = weighted_losses[1]
         agent = self.receiver
-        spigot = receiver_outcome.msg_spigot # None or a GradSpigot.
+        spigot = receiver_outcome.signal_spigot # None or a GradSpigot.
 
         optimization.append((optim, loss.detach(), misc.get_backward_f(loss, agent, spigot)))
 
@@ -209,9 +209,9 @@ class AliceBobCharlie(AliceBob):
         drawer_score = (2 * drawer_perf) # Values usually in [0, 1] (otherwise, there might be a problem). Shape: (batch size)
         self.score_trackers["drawer"].update_batch(drawer_score.detach())
 
-        msg_length = sender_outcome.action[1].float().mean()
+        signal_length = sender_outcome.action[1].float().mean()
 
-        return optimization, sender_rewards, sender_perf, msg_length, sender_entropy, receiver_entropy
+        return optimization, sender_rewards, sender_perf, signal_length, sender_entropy, receiver_entropy
 
     # receiver_scores: tensor of shape (batch size, nb img)
     # contending_imgs: None or a list[int] containing the indices of the contending images
