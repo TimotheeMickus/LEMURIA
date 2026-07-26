@@ -107,6 +107,7 @@ class AliceBobPopulation(AliceBob):
             if((self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0)):
                 reborn_agent = next(self._death_row)
                 reborn_agent.reinitialize()
+                for p in reborn_agent.parameters(): self._optim.state.pop(p, None)
 
                 if(self._pretrain_args['pretrain_CNN_mode'] is not None):
                     agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)

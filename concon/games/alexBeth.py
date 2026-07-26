@@ -142,15 +142,11 @@ class AlexBeth(Game):
     def start_epoch(self, data_iterator, summary_writer):
         super().start_epoch(data_iterator, summary_writer)
 
-        if (self._beth_reaper_step is not None and self._current_epoch != 0
-            and (self._current_epoch % self._beth_reaper_step == 0)):
+        if((self._beth_reaper_step is not None) and (self._current_epoch != 0) and ((self._current_epoch % self._beth_reaper_step) == 0)):
             self.retriever.reinitialize()
-            for p in self.retriever.parameters():
-                self._optim.state.pop(p, None)
-            print(
-                f"[beth-reaper] epoch {self._current_epoch}: "
-                f"retriever reinitialized."
-            )
+            for p in self.retriever.parameters(): self._optim.state.pop(p, None)
+
+            print(f"[beth-reaper] epoch {self._current_epoch}: retriever reinitialized.")
 
         self._current_epoch += 1
     
