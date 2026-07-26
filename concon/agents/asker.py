@@ -49,8 +49,8 @@ class Asker(Agent):
         if(self.has_shared_param):
             raise ValueError("Modules with shared parameters cannot be reinitialized.")
         
-        other_sender = Asker.from_args(self.args)
-        other_parameters = dict(other_sender.named_parameters())
+        other_asker = Asker.from_args(self.args)
+        other_parameters = dict(other_asker.named_parameters())
         
         for name, parameters in dict(self.named_parameters()).items():
             parameters.data.copy_(other_parameters[name].data.to(device=parameters.device, dtype=parameters.dtype))

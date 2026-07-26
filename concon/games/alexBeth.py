@@ -315,8 +315,7 @@ class AlexBeth(Game):
         (retriever_loss, _, retriever_entropy) = self.compute_retriever_loss(retriever_outcome.scores, truth_targets, return_entropy=True)
 
         loss = asker_loss + retriever_loss
-        if(torch.isnan(loss)): # DEBUG
-            print(f"[warn] loss is {loss}")
+        if(torch.isnan(loss)): print(f"[warn] loss is {loss}")
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
 
         signal_length = asker_outcome.action[1].float().mean()
@@ -593,7 +592,7 @@ class AlexBeth(Game):
             if(self.run_fancy_lang_eval):
                 batch_signals = asker_outcome.action[0].detach().clone()
                 batch_lens = asker_outcome.action[1].detach().clone()
-                scrambled_signals = batch_signals
+                scrambled_signals = batch_signals.clone()
                 for i in range(scrambled_signals.size(0)):
                     signal_len = int(batch_lens[i].item())
                     if(signal_len > 1):
