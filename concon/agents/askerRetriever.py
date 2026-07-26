@@ -1,17 +1,14 @@
-import torch
-import torch.nn as nn
-
 from .asker import Asker
 from .retriever import Retriever
 from .agent import Agent
-from ..utils.modules import build_cnn_encoder_from_args, build_embeddings
+from ..utils.modules import build_embeddings
 
 class AskerRetriever(Agent):
     def __init__(self, asker, retriever, check_shared_params=True):
-        super(Agent, self).__init__()
+        super().__init__()
 
         if(check_shared_params):
-            assert asker.predicate_encoder is retriever.predicate_encoder, 'parameters are not shared'
+            # The asker (via its signal decoder) and the retriever (via its signal encoder) share the symbol embeddings.
             assert retriever.signal_encoder.symbol_embeddings is asker.signal_decoder.symbol_embeddings, 'parameters are not shared'
 
         self.asker = asker
@@ -19,11 +16,10 @@ class AskerRetriever(Agent):
 
     @classmethod
     def from_args(cls, args):
-        num_predicates = getattr(args, "num_predicates") # TODO Why this weird instruction?
-        predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
-        symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # +2: padding symbol, BOS symbol
-        
-        asker = Asker.from_args(args, predicate_encoder=predicate_encoder, symbol_embeddings=symbol_embeddings)
-        retriever = Retriever.from_args(args, predicate_encoder=predicate_encoder, symbol_embeddings=symbol_embeddings)
-        
+        # Only the symbol embeddings are shared.
+        symbol_embeddings = build_embeddings(args.base_alphabet_size, args.hidden_size, use_bos=True) # The vocabulary size is base_alphabet_size + 3 (EOS, padding, BOS). BOS is required by the asker's signal decoder; the retriever's signal encoder does not use it.
+
+        asker = Asker.from_args(args, symbol_embeddings=symbol_embeddings)
+        retriever = Retriever.from_args(args, symbol_embeddings=symbol_embeddings)
+
         return cls(asker, retriever)
