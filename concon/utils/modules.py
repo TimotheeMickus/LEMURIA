@@ -114,7 +114,7 @@ class MessageDecoder(nn.Module):
         last_symbol = torch.full(size=(encoded.size(0),), fill_value=self.bos_index, device=encoded.device, dtype=torch.long)
         cell = self.cell_proj(encoded).unsqueeze(0)
         hidden = self.hidden_proj(encoded).unsqueeze(0)
-        state = (cell, hidden)
+        state = (hidden, cell)
 
         # outputs
         message = []
