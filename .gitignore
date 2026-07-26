@@ -20,4 +20,5 @@ concon/eval/predicate/verify_n-n_cm.txt
 concon/eval/predicate/backup
 concon/eval/predicate/negation.py
 scripts/cluster
+scripts/gridsearch_figs
 thesis
