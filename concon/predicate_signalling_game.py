@@ -23,6 +23,12 @@ def do(args):
     # Tag used in run folder names to avoid collisions across launches.
     args.run_tag = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{uuid.uuid4().hex[:6]}"
 
+    # Snapshot of the arguments for run naming, taken before the loop injects
+    # derived values (num_predicates, graph_d_model, ...) into `args`, so every
+    # run gets a consistent name.
+    name_defaults = getattr(args, "_arg_defaults", None)
+    name_args = dict(vars(args))
+
     for run in range(args.runs):
         print(f'Run {run}', flush=True)
         if args.seed is not None:
@@ -34,7 +40,7 @@ def do(args):
                 torch.cuda.manual_seed_all(run_seed)
             print(f"[seed] run={run} seed={run_seed}", flush=True)
 
-        run_name = build_run_name(args, run)
+        run_name = build_run_name(name_args, run, name_with=args.name_with, defaults=name_defaults)
         run_summary_dir = summary_dir / run_name
         run_models_dir = models_dir / run_name
         message_dump_dir = run_summary_dir if(args.dump_messages is not None) else None
@@ -155,7 +161,7 @@ def get_args(remaining_args=None):
 
     default_data_set = pathlib.Path('data') / 'concon'
     default_models = pathlib.Path('[summary]') / 'models'
-    default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + socket.gethostname())
+    default_summary = pathlib.Path('runs') / 'psg' / ('[now]_' + socket.gethostname())
 
     group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
     group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
@@ -176,6 +182,7 @@ def get_args(remaining_args=None):
     group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
     group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
     group.add_argument('--dump_messages', help='dump messages: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
+    group.add_argument('--name_with', help="build the run folder/W&B name from these argument names, e.g. --name_with [min_depth, max_depth]  ->  'mind=1__maxd=3__t=<timestamp>__run=0'. Accepts brackets/commas/spaces (quote it if it contains spaces, e.g. '[min_depth, max_depth]'). A launch timestamp and the run index are always appended. If unset, the name is generated automatically from the non-default arguments.", nargs='+', default=None)
 
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --display tqdm should be inferred from the env
@@ -250,6 +257,9 @@ def get_args(remaining_args=None):
     group.add_argument('--wandb_project', help='W&B project name', default='lemuria', type=str)
 
     args = arg_parser.parse_args(remaining_args)
+    # Snapshot of the parser defaults, used by `build_run_name` so that a run
+    # name only advertises the arguments that were actually changed.
+    args._arg_defaults = vars(arg_parser.parse_args([]))
     if args.debug and not args.log_debug:
         args.log_debug = True
     if (args.curriculum_negation is not None) and (not (0.0 <= args.curriculum_negation <= 1.0)):

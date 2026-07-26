@@ -1,5 +1,8 @@
 from abc import ABCMeta, abstractmethod
 
+import hashlib
+import pathlib
+
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -9,45 +12,203 @@ import tqdm
 from .misc import compute_entropy
 
 
+_ALLOWED_NAME_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.="
+)
+
+# Arguments left out of the run name by default: paths, environment-specific
+# settings, pure IO/logging switches, and the run *count* (the per-run index is
+# appended separately as `run=`). Set this to an empty collection to include
+# every (declared) argument.
+DEFAULT_EXCLUDED_ARGS = frozenset({
+    "summary", "models",        # paths (contain '[now]', a hostname and slashes)
+    "device",                   # environment-specific
+    "wandb", "wandb_project",   # logging destination
+    "runs",                     # run count; the per-run index is appended as run=
+    "name_with",                # the naming selector itself
+    "quiet", "display",         # console verbosity
+})
+
+# Hand-picked short names. These pin the abbreviations of the important knobs so
+# they stay readable and *stable* no matter what other arguments exist, and they
+# resolve every real initials-collision in the current argument set
+# (properties/population, max_depth/min_depth, num_candidates/no_conjunction,
+# no_summary/no_spigot, ...). Anything not listed here falls back to automatic,
+# collision-free initials (see `_auto_abbreviations`).
+DEFAULT_ABBREVIATIONS = {
+    "properties": "props",        "population": "pop",
+    "max_depth": "maxd",          "min_depth": "mind",
+    "num_candidates": "cand",     "no_conjunction": "noconj",
+    "no_summary": "nosum",        "no_spigot": "nospig",
+    "nontrivial_only": "ntriv",   "overfit": "ofit",
+    "len_penalty": "lenpen",      "voc_penalty": "vocpen",
+    "logging_period": "logper",   "base_alphabet_size": "asize",
+    "max_len": "mlen",            "learning_rate": "lr",
+    "candidate_encoder": "enc",   "batch_size": "bs",
+    "steps_per_epoch": "spe",     "epochs": "ep",
+    "reaper_step": "reap",        "beth_reaper_step": "breap",
+    "jaccard": "jac",
+}
+
+
 def _sanitize_run_part(value):
     text = str(value).strip().replace(" ", "")
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.="
-    return "".join((c if(c in allowed) else "-") for c in text)
+    return "".join((c if (c in _ALLOWED_NAME_CHARS) else "-") for c in text)
 
 
-def build_run_name(args, run_index):
-    parts = [
-        f"props={_sanitize_run_part(args.properties)}",
-        f"d={args.min_depth}-{args.max_depth}",
-        f"cand={args.num_candidates}",
-        f"ps={_sanitize_run_part(args.predicate_sampling)}",
-        f"cs={_sanitize_run_part(args.candidate_sampling)}",
-        f"enc={_sanitize_run_part(args.candidate_encoder)}",
-        f"asize={args.base_alphabet_size}",
-        f"mlen={args.max_len}",
-        f"lr={args.learning_rate}",
-        f"ba={args.beta_asker}",
-        f"br={args.beta_retriever}",
-        f"lenpen={args.len_penalty}",
-        f"vocpen={args.voc_penalty}",
-        f"spe={args.steps_per_epoch}",
-        f"bs={args.batch_size}",
-        f"gc={args.grad_clipping}",
-    ]
-    if args.candidate_encoder == "graph_transformer":
-        parts.extend(
-            [
-                f"gdm={args.graph_d_model}",
-                f"gh={args.graph_num_heads}",
-                f"gdh={args.graph_d_hidden}",
-                f"gl={args.graph_num_layers}",
-            ]
-        )
-    run_tag = getattr(args, "run_tag", None)
+def _initials(name):
+    return "".join(word[0] for word in name.split("_") if word)
+
+
+def _auto_abbreviations(names, reserved=()):
+    """Maps each name to a short, deterministic, globally-unique abbreviation.
+
+    The preferred abbreviation is the initials of the underscore-separated words
+    (e.g. `steps_per_epoch` -> `spe`). If that token is already taken (by another
+    argument or by a `reserved` value), the name is lengthened one letter per
+    word at a time (e.g. `max_depth`/`min_depth` -> `maxd`/`mind`), falling back
+    to a numeric suffix only in the pathological case of identical names.
+
+    Names are processed in sorted order so the result is deterministic; the
+    `reserved` set (the pinned override abbreviations) is never produced here, so
+    auto and override tokens can't collide.
+    """
+    def candidate(name, k):
+        return "".join(word[:k] for word in name.split("_") if word)
+
+    used = set(reserved)
+    result = {}
+    for name in sorted(names):
+        squished = name.replace("_", "")
+        k, token = 1, candidate(name, 1)
+        while token in used and k < len(squished):
+            k += 1
+            token = candidate(name, k)
+        if token in used:  # exhausted the letters: disambiguate with a suffix
+            base, i = token, 0
+            while token in used:
+                i += 1
+                token = f"{base}{i}"
+        result[name] = token
+        used.add(token)
+    return result
+
+
+def _format_run_value(value):
+    if isinstance(value, bool): return "1" if value else "0"      # store_true flags
+    if value is None: return "none"
+    if isinstance(value, float): return ("%g" % value)            # trims trailing zeros
+    if isinstance(value, (list, tuple)):
+        return "-".join(_sanitize_run_part(v) for v in value)
+    if isinstance(value, pathlib.Path): return _sanitize_run_part(value.name)
+    return _sanitize_run_part(value)
+
+
+def _truncate_with_hash(name, run_index, max_length):
+    """Keeps `name` within `max_length` (the filesystem path-component / W&B
+    limit) by replacing the overflow with a short, stable hash."""
+    if len(name) <= max_length:
+        return name
+    digest = hashlib.sha1(name.encode()).hexdigest()[:8]
+    suffix = f"__h={digest}__run={run_index}"
+    return name[: max(0, max_length - len(suffix))].rstrip("_") + suffix
+
+
+def _normalize_name_with(name_with):
+    """Normalizes the `--name_with` value into a de-duplicated, ordered list of
+    argument names. Accepts a list of names, or a single string using brackets,
+    commas and/or spaces (e.g. "[min_depth, max_depth]") -- all equivalent."""
+    if name_with is None:
+        return None
+    if isinstance(name_with, str):
+        name_with = [name_with]
+    seen, names = set(), []
+    for item in name_with:
+        for part in str(item).replace("[", " ").replace("]", " ").replace(",", " ").split():
+            if part and part not in seen:
+                seen.add(part)
+                names.append(part)
+    return names
+
+
+def build_run_name(args, run_index, name_with=None, defaults=None,
+                   excluded=DEFAULT_EXCLUDED_ARGS, overrides=DEFAULT_ABBREVIATIONS,
+                   max_length=200):
+    """Builds a run name from the arguments.
+
+    If `name_with` is given (a list of argument names, or a bracket/comma/space
+    string like "[min_depth, max_depth]"), the name lists exactly those
+    arguments, in the given order, as `abbrev=value` tokens joined by `__`,
+    followed by the per-launch `t=<run_tag>` timestamp and `run=<run_index>`
+    -- e.g. `mind=1__maxd=3__t=2026-07-24_12-00-00_ab12cd__run=0`. Abbreviations
+    come from the same scheme as the automatic namer (see `_auto_abbreviations`
+    and `overrides`). This mode is explicit, so the listed arguments are always
+    included regardless of their default value.
+
+    Otherwise the name is generated automatically: each argument is abbreviated
+    to a short token and formatted as `abbrev=value`; tokens are joined by `__`,
+    and `run=<run_index>` is appended last. `args` may be an argparse.Namespace
+    or a plain dict.
+
+    If `defaults` (a name -> default-value mapping, e.g. the argument parser's
+    defaults) is provided, only arguments that (a) are declared in `defaults`
+    and (b) differ from their default are included. This is the recommended
+    automatic mode: a run advertises only what it actually changed, so names
+    stay short and legible. When `defaults` is None, every non-excluded declared
+    argument is included, and the result is hash-truncated if it would exceed
+    `max_length` (which also keeps it a legal filesystem path component).
+
+    `excluded` names to drop entirely; `overrides` pins chosen abbreviations.
+    `run_tag`, private (`_`-prefixed) attributes, and anything absent from
+    `defaults` (e.g. values injected into `args` after parsing) are never swept
+    into the automatic name; `run_tag`, if present and truthy, is appended as a
+    `t=` suffix there.
+    """
+    values = args if isinstance(args, dict) else vars(args)
+
+    selected = _normalize_name_with(name_with)
+    if selected:
+        unknown = [n for n in selected if n not in values]
+        if unknown:
+            available = ", ".join(sorted(k for k in values if not k.startswith("_")))
+            raise KeyError(
+                f"--name_with references unknown argument(s): {', '.join(unknown)}. "
+                f"Available names: {available}."
+            )
+        reserved = {overrides[n] for n in selected if n in overrides}
+        auto = _auto_abbreviations([n for n in selected if n not in overrides], reserved=reserved)
+        abbr = {n: overrides.get(n, auto.get(n)) for n in selected}
+        parts = [f"{abbr[n]}={_format_run_value(values[n])}" for n in selected]
+        run_tag = values.get("run_tag")
+        if run_tag and "run_tag" not in selected:  # per-launch timestamp
+            parts.append(f"t={_sanitize_run_part(run_tag)}")
+        parts.append(f"run={run_index}")
+        return _truncate_with_hash("__".join(parts), run_index, max_length)
+
+    def _keep(key, value):
+        if key.startswith("_") or key == "run_tag" or key in excluded:
+            return False
+        if defaults is None:
+            return True
+        if key not in defaults:  # e.g. attributes injected after parsing
+            return False
+        return value != defaults[key]
+
+    items = sorted((k, v) for k, v in values.items() if _keep(k, v))
+    names = [k for k, _ in items]
+    reserved = {overrides[n] for n in names if n in overrides}
+    auto = _auto_abbreviations([n for n in names if n not in overrides], reserved=reserved)
+    abbr = {n: overrides.get(n, auto.get(n)) for n in names}
+
+    parts = [f"{abbr[k]}={_format_run_value(v)}" for k, v in items]
+
+    run_tag = values.get("run_tag")
     if run_tag:
         parts.append(f"t={_sanitize_run_part(run_tag)}")
     parts.append(f"run={run_index}")
-    return "__".join(parts)
+
+    name = "__".join(parts)
+    return _truncate_with_hash(name, run_index, max_length)
 
 
 def _wandb_config_from_args(args):
