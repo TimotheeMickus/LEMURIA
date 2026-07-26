@@ -33,7 +33,7 @@ class AliceBobPopulation(AliceBob):
 
         self.shared = args.shared
         if(self.shared):
-            NotImplementedError
+            raise NotImplementedError
         else:
             senders = [Sender.from_args(args) for _ in range(size)]
             receivers = [Receiver.from_args(args) for _ in range(size)]
