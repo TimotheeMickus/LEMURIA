@@ -2,12 +2,12 @@
 Compositionality probe for the predicate signalling game.
 
 Given (predicate, signal) pairs, we train a small sequence-to-sequence model
-(bidirectional-LSTM encoder + LSTM decoder) to reconstruct the predicate --
-written in Polish (prefix) notation -- from the signal, and we measure the
+(bidirectional-LSTM encoder + LSTM decoder) to reconstruct the predicate
+written in Polish (prefix) notation from the signal, and we measure the
 fraction of held-out predicates that are reconstructed *exactly*. This is a
-standard "can a learner recover the meaning from the message?" probe: a language
+standard "can a learner recover the meaning from the signal?" probe: a language
 is compositional to the extent that a generic learner generalises the
-signal->meaning mapping to unseen meanings.
+signal->meaning mapping to unseen signals.
 
 Public entry points
 --------------------

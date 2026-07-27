@@ -263,7 +263,7 @@ def get_args(remaining_args=None):
     group.add_argument('--comp_num_layers', help='probe: number of LSTM layers (encoder and decoder)', type=int, default=1)
     group.add_argument('--comp_dropout', help='probe: dropout', type=float, default=0.1)
     group.add_argument('--comp_lr', help='probe: learning rate (Adam)', type=float, default=1e-3)
-    group.add_argument('--comp_batch_size', help='probe: batch size', type=int, default=64)
+    group.add_argument('--comp_batch_size', help='probe: batch size', type=int, default=512)
     group.add_argument('--comp_max_epochs', help='probe: maximum training epochs per fold (early stopping usually stops earlier)', type=int, default=512)
     group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
     group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
