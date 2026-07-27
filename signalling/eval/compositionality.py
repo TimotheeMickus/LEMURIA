@@ -322,21 +322,21 @@ def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=Fa
     """
     Single-shuffle `n_folds`-fold cross-validation of the exact-match probe.
 
-    pairs:   list[(src_ids: list[int], tgt_ids: list[int])]; tgt_ids are the Polish
-             predicate tokens (without BOS/EOS).
+    pairs:   list[(src_ids: list[int], tgt_ids: list[int])]; tgt_ids are the predicate tokens (Polish notation; without any BOS/EOS).
     spec:    Spec with vocab sizes and special-token ids.
     hparams: HParams.
-    Returns the mean over folds of each fold's best held-out exact-match accuracy,
-    a float in [0, 1] (NaN if there are fewer pairs than folds). If `return_epochs`,
-    returns (mean_score, per_fold_stopping_epochs) instead.
+    Returns the mean over folds of each fold's best held-out exact-match accuracy, a float in [0, 1] (NaN if there are fewer pairs than folds). If `return_epochs`, returns (mean_score, per_fold_stopping_epochs) instead.
     """
+    print(f"[comp] hparams={hparams}; n_folds={n_folds}")
+    
     n = len(pairs)
-    if n < n_folds:
+    if(n < n_folds):
+        print(f"[comp] Aborted (n < n_folds; {n} < {n_folds}).")
         return (float("nan"), []) if return_epochs else float("nan")
 
     data = _Data(pairs, spec, device)
 
-    # One shuffle, then a partition into n_folds (near-)equal parts; each part is test once.
+    # Shuffles the pairs, then partitions them into `n_folds` (near-)equal parts; each part is test once.
     perm = np.random.default_rng(seed).permutation(n)
     folds = np.array_split(perm, n_folds)
 
@@ -347,7 +347,7 @@ def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=Fa
         score, stopped_epoch = _run_one_fold(data, train_idx, test_idx, spec, hparams, device, seed=(seed + f))
         scores.append(score)
         epochs.append(stopped_epoch)
-        if verbose:
+        if(verbose):
             print(f"    [comp] fold {f}: best test exact-match = {score:.4f} (stopped at epoch {stopped_epoch})", flush=True)
 
     mean_score = float(np.mean(scores))
