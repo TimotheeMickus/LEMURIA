@@ -1,117 +1,51 @@
-import torch
-import torch.nn as nn
-import random
-import itertools
-from datetime import datetime
-
-from .game import Game
 from .aliceBob import AliceBob
-from ..agents import Sender, Receiver, SenderReceiver
-from ..utils.misc import build_optimizer, get_default_fn
-from ..utils import misc
+from .population import PopulationMixin
+from ..agents import Sender, Receiver
+from ..utils.misc import get_default_fn
 from ..utils.modules import build_cnn_decoder_from_args
 
-# In this game, there is a population of senders (Alice·s) and of receivers (Bob·s).
-# For each training batch, a pair of (Alice, Bob) is randomly selected and trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
-# If required, the agents are regularly reinitialized.
-class AliceBobPopulation(AliceBob):
-    def __init__(self, args, logger, signal_dump_dir): # TODO We could consider calling super().__init__(args)
-        self.max_perf = 0.0
 
-        self._logger = logger
-        self.base_alphabet_size = args.base_alphabet_size
-        self.max_len_signal = args.max_len
+# Population variant of AliceBob: `n` senders (Alice·s) and `m` receivers (Bob·s), set by
+# `pop_size` ("n-m"), reinitialized on a staggered schedule set by `pop_reset_period` ("a-b").
+# For backward compatibility, `--population N` (when `--pop_size` is not given) means N-N.
+# All the population machinery lives in PopulationMixin; here we only supply the AliceBob-specific
+# hooks, including re-pretraining a reinitialized agent's CNN.
+class AliceBobPopulation(PopulationMixin, AliceBob):
+    def __init__(self, args, logger, dataset, signal_dump_dir):
+        # Builds all the standard AliceBob state (receiver preprocessor, a single throwaway
+        # sender/receiver/optimizer, ...); _init_population then replaces the agents/optimizer.
+        super().__init__(args, logger, dataset, signal_dump_dir)
 
-        self.use_expectation = args.use_expectation
-        self.grad_scaling = args.grad_scaling or 0
-        self.grad_clipping = args.grad_clipping or 0
-        self.beta_sender = args.beta_sender
-        self.beta_receiver = args.beta_receiver
-        self.len_penalty = args.len_penalty
+        # Arguments used to re-pretrain a reinitialized agent's CNN (see _on_reinitialized).
+        self._pretrain_args = {
+            "pretrain_CNN_mode": args.pretrain_CNNs,
+            "freeze_pretrained_CNN": args.freeze_pretrained_CNNs,
+            "learning_rate": (args.pretrain_learning_rate or args.learning_rate),
+            "epochs": args.pretrain_epochs,
+            "steps_per_epoch": args.steps_per_epoch,
+            "display_mode": args.display,
+            "pretrain_CNNs_on_eval": args.pretrain_CNNs_on_eval,
+            "deconvolution_factory": get_default_fn(build_cnn_decoder_from_args, args),
+        }
 
-        size = args.population # There are `size` senders and `size` receivers.
+        # `--population N` provides a symmetric default of N-N; `--pop_size n-m` overrides it.
+        pop = getattr(args, "population", None)
+        default_size = (pop, pop) if pop else (2, 2)
+        self._init_population(args, roles=("sender", "receiver"), default_size=default_size, default_period=(0, 0))
 
-        self.shared = args.shared
+    def _population_factories(self, args):
+        return ((lambda: Sender.from_args(args)), (lambda: Receiver.from_args(args)))
+
+    def _assign_current(self, producer, consumer):
+        self._sender, self._receiver = producer, consumer
+
+    # Overrides AliceBob.agents_for_CNN_pretraining: pretrain every agent in the population.
+    def agents_for_CNN_pretraining(self):
         if(self.shared):
             raise NotImplementedError
-        else:
-            senders = [Sender.from_args(args) for _ in range(size)]
-            receivers = [Receiver.from_args(args) for _ in range(size)]
-            agents = (senders + receivers)
-        self.senders, self.receivers, self._agents = nn.ModuleList(senders), nn.ModuleList(receivers), nn.ModuleList(agents)
-
-        self._sender, self._receiver = None, None # These properties will be set before each episode by `start_episode`.
-
-        # Mathusalemian dynamics:
-        # If `_reaper_step` is an integer, at the beginning of each `_reaper_step` training epoch, one agent is reinitialized.
-        # The agents are reinitialized in turn.
-        self._reaper_step = args.reaper_step
-        if(self._reaper_step is not None):
-            self._current_epoch = 0
-            self._death_row = itertools.cycle(self._agents)
-            self._pretrain_args = {
-                "pretrain_CNN_mode": args.pretrain_CNNs,
-                "freeze_pretrained_CNN": args.freeze_pretrained_CNNs,
-                "learning_rate": args.pretrain_learning_rate or args.learning_rate,
-                "epochs": args.pretrain_epochs,
-                "steps_per_epoch": args.steps_per_epoch,
-                "display_mode": args.display,
-                "pretrain_CNNs_on_eval": args.pretrain_CNNs_on_eval,
-                "deconvolution_factory": get_default_fn(build_cnn_decoder_from_args, args),
-            }
-
-        self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
-
-        self.use_baseline = args.use_baseline
-        if(self.use_baseline): # In that case, the loss will take into account the "baseline term", into the average recent reward.
-            # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
-            self._sender_avg_reward = misc.Averager(size=12800)
-            self._receiver_avg_reward = misc.Averager(size=12800)
-
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (leading to successful communication)
-        
-        self.debug = args.debug
-        self.signal_dump_file = args.signal_dump_file
-
-    @property
-    def sender(self):
-        return self._sender
-
-    @property
-    def receiver(self):
-        return self._receiver
-
-    @property
-    def all_agents(self):
-        return self._agents
-
-    @property
-    def current_agents(self):
-        return (self._sender, self._receiver)
-
-    # Overrides AliceBob.agents_for_CNN_pretraining.
-    def agents_for_CNN_pretraining(self):
-        if(self.shared): raise NotImplementedError
         return self.all_agents
 
-    # Overrides Game.start_episode.
-    def start_episode(self, train_episode=True):
-        self._sender = random.choice(self.senders)
-        self._receiver = random.choice(self.receivers)
-
-        super().start_episode(train_episode=train_episode)
-
-    # Overrides Game.start_epoch.
-    def start_epoch(self, data_iterator, summary_writer):
-        if(self._reaper_step is not None):
-            if((self._current_epoch != 0) and (self._current_epoch % self._reaper_step == 0)):
-                reborn_agent = next(self._death_row)
-                reborn_agent.reinitialize()
-                for p in reborn_agent.parameters(): self._optim.state.pop(p, None)
-
-                if(self._pretrain_args['pretrain_CNN_mode'] is not None):
-                    agent_name = 'reborn agent %i' % (self._current_epoch // self._reaper_step)
-                    self.pretrain_agent_CNN(reborn_agent, data_iterator, **self._pretrain_args, agent_name=agent_name)
-                    print(f"[{datetime.now()}] {agent_name} reinitialized.")
-
-            self._current_epoch += 1
+    # Overrides PopulationMixin hook: re-pretrain a reinitialized agent's CNN, if enabled.
+    def _on_reinitialized(self, agent, role, epoch, data_iterator):
+        if(self._pretrain_args.get("pretrain_CNN_mode") is not None):
+            self.pretrain_agent_CNN(agent, data_iterator, **self._pretrain_args, agent_name=f"reborn {role} @epoch {epoch}")

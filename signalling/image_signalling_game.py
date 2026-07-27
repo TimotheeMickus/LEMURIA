@@ -57,7 +57,12 @@ def do(args):
             assert (args.population is None) # NotImplementedFeature
             model = AliceBobCharlie(args, autologger, data_loader, signal_dump_dir)
         elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader, signal_dump_dir)
-        else: model = AliceBob(args, autologger, data_loader, signal_dump_dir)
+        else:
+            # --population is the population-game selector (also used by the eval scripts), so the
+            # reset/size options only make sense alongside it.
+            assert (args.pop_size is None) and (args.pop_reset_period is None), \
+                "--pop_size / --pop_reset_period require the population game; pass --population too (e.g. --population 1)."
+            model = AliceBob(args, autologger, data_loader, signal_dump_dir)
         model = model.to(args.device)
 
         if(args.detect_anomaly):
@@ -204,9 +209,10 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
-    group.add_argument('--population', help='population size', default=None, type=int)
+    group.add_argument('--population', help='select the population game; N gives a symmetric default of N-N senders/receivers (override with --pop_size)', default=None, type=int)
     group.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
-    group.add_argument('--reaper_step', help='population size regulator', default=None, type=int)
+    group.add_argument('--pop_size', help="population sizes as 'n-m' (n senders, m receivers); overrides the symmetric default from --population", default=None, type=str)
+    group.add_argument('--pop_reset_period', help="reset periods as 'a-b'; reinitialize senders every a epochs and receivers every b epochs (0 = never); default 0-0", default=None, type=str)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
     group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
