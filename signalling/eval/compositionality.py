@@ -271,7 +271,8 @@ def _val_loss(model, data, idx, spec, batch=512):
 
 def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
     """
-    Trains one seq2seq on `train_idx` and returns (best held-out exact-match, stopping epoch).
+    Trains one seq2seq on `train_idx` and returns
+    (best held-out exact-match, best held-out loss, stopping epoch).
 
     Early stopping watches the held-out *loss* (which decreases smoothly from the first
     epoch) rather than exact-match: exact-match sits at exactly 0 during warm-up until it
@@ -315,7 +316,7 @@ def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
                 stale += 1
                 if stale >= h.patience:
                     break
-    return best_acc, stopped_epoch
+    return best_acc, best_val, stopped_epoch
 
 
 def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=False, return_epochs=False):
@@ -325,14 +326,16 @@ def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=Fa
     pairs:   list[(src_ids: list[int], tgt_ids: list[int])]; tgt_ids are the predicate tokens (Polish notation; without any BOS/EOS).
     spec:    Spec with vocab sizes and special-token ids.
     hparams: HParams.
-    Returns the mean over folds of each fold's best held-out exact-match accuracy, a float in [0, 1] (NaN if there are fewer pairs than folds). If `return_epochs`, returns (mean_score, per_fold_stopping_epochs) instead.
+    Returns (mean_acc, mean_loss): the mean over folds of each fold's best held-out exact-match
+    accuracy (a float in [0, 1]) and of each fold's best held-out loss ((NaN, NaN) if there are
+    fewer pairs than folds). If `return_epochs`, returns (mean_acc, mean_loss, per_fold_stopping_epochs) instead.
     """
     print(f"[comp] hparams={hparams}; n_folds={n_folds}")
     
     n = len(pairs)
     if(n < n_folds):
         print(f"[comp] Aborted (n < n_folds; {n} < {n_folds}).")
-        return (float("nan"), []) if return_epochs else float("nan")
+        return (float("nan"), float("nan"), []) if return_epochs else (float("nan"), float("nan"))
 
     data = _Data(pairs, spec, device)
 
@@ -340,18 +343,20 @@ def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=Fa
     perm = np.random.default_rng(seed).permutation(n)
     folds = np.array_split(perm, n_folds)
 
-    scores, epochs = [], []
+    scores, losses, epochs = [], [], []
     for f in range(n_folds):
         test_idx = folds[f]
         train_idx = np.concatenate([folds[j] for j in range(n_folds) if j != f])
-        score, stopped_epoch = _run_one_fold(data, train_idx, test_idx, spec, hparams, device, seed=(seed + f))
+        score, val_loss, stopped_epoch = _run_one_fold(data, train_idx, test_idx, spec, hparams, device, seed=(seed + f))
         scores.append(score)
+        losses.append(val_loss)
         epochs.append(stopped_epoch)
         if(verbose):
-            print(f"    [comp] fold {f}: best test exact-match = {score:.4f} (stopped at epoch {stopped_epoch})", flush=True)
+            print(f"    [comp] fold {f}: best test exact-match = {score:.4f}, best test loss = {val_loss:.4f} (stopped at epoch {stopped_epoch})", flush=True)
 
     mean_score = float(np.mean(scores))
-    return (mean_score, epochs) if return_epochs else mean_score
+    mean_loss = float(np.mean(losses))
+    return (mean_score, mean_loss, epochs) if return_epochs else (mean_score, mean_loss)
 
 
 # ----------------------------------------------------------------------------- #
@@ -470,12 +475,12 @@ def main(global_args=None, remaining_args=None):
     history = []
     for trial in range(args.comp_search_trials):
         h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience)
-        score, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.comp_search_seed, return_epochs=True)
-        history.append({"score": score, "stopped_epochs": stopped_epochs, **asdict(h)})
+        score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.comp_search_seed, return_epochs=True)
+        history.append({"score": score, "loss": loss, "stopped_epochs": stopped_epochs, **asdict(h)})
         if (best_score is None) or (score > best_score):
             best_score, best_h = score, h
         print(f"[comp-search] trial {trial + 1}/{args.comp_search_trials}: "
-              f"score={score:.4f}  best={best_score:.4f}  stopped@{stopped_epochs}  {h}", flush=True)
+              f"score={score:.4f}  loss={loss:.4f}  best={best_score:.4f}  stopped@{stopped_epochs}  {h}", flush=True)
 
     print(f"\n[comp-search] best score = {best_score:.4f}")
     print("[comp-search] best hyperparameters (copy as CLI flags):")

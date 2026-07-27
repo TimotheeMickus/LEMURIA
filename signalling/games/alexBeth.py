@@ -228,7 +228,8 @@ class AlexBeth(Game):
             "eval/retriever_entropy",
             "eval/signal_length",
             "eval/vocab_used",
-            "eval/compositionality",
+            "eval/compositionality_acc",
+            "eval/compositionality_loss",
             "eval/c.e._verify",
             "eval/c.e._falsify",
             "eval/scrambling-resistance",
@@ -445,7 +446,8 @@ class AlexBeth(Game):
     # Measures the compositionality of the emergent language: the asker produces one
     # signal per predicate, and a seq2seq probe is trained (5-fold CV, early stopping) to
     # reconstruct the predicate in Polish notation from the signal. Returns the mean over
-    # folds of each fold's best held-out exact-match rate (a float in [0, 1]).
+    # folds of each fold's best held-out exact-match rate (a float in [0, 1]) and best
+    # held-out loss, as an (accuracy, loss) pair.
     def _compute_compositionality(self):
         device = next(self.asker.parameters()).device
         pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
@@ -684,11 +686,14 @@ class AlexBeth(Game):
         log('eval/vocab_used', eval_vocab_used)
 
         # Compositionality: can a generic seq2seq learner recover each predicate (in Polish
-        # notation) from its emergent signal? Reported as the 5-fold-CV exact-match rate.
-        compositionality_score = float("nan")
+        # notation) from its emergent signal? Reported as the 5-fold-CV exact-match rate
+        # ('eval/compositionality_acc') and the corresponding held-out loss ('eval/compositionality_loss').
+        compositionality_acc = float("nan")
+        compositionality_loss = float("nan")
         if(self.eval_compositionality):
-            compositionality_score = self._compute_compositionality()
-            log('eval/compositionality', compositionality_score)
+            compositionality_acc, compositionality_loss = self._compute_compositionality()
+            log('eval/compositionality_acc', compositionality_acc)
+            log('eval/compositionality_loss', compositionality_loss)
         
         avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
@@ -872,7 +877,8 @@ class AlexBeth(Game):
                 "eval/retriever_entropy": float(eval_retriever_entropy),
                 "eval/signal_length": float(eval_signal_length),
                 "eval/vocab_used": eval_vocab_used,
-                "eval/compositionality": float(compositionality_score),
+                "eval/compositionality_acc": float(compositionality_acc),
+                "eval/compositionality_loss": float(compositionality_loss),
                 "eval/c.e._verify": verify_ratio,
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,
