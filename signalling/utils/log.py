@@ -46,7 +46,8 @@ DEFAULT_ABBREVIATIONS = {
     "max_len": "mlen",            "learning_rate": "lr",
     "candidate_encoder": "enc",   "batch_size": "bs",
     "steps_per_epoch": "spe",     "epochs": "ep",
-    "reaper_step": "reap",        "beth_reaper_step": "breap",
+    "reaper_step": "reap",        "pop_size": "pop",
+    "pop_reset_period": "preset",
     "jaccard": "jac",
 }
 

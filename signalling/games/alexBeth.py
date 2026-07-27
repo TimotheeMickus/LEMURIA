@@ -93,8 +93,6 @@ class AlexBeth(Game):
         self.curriculum_negation_acc = getattr(args, "curriculum_negation", None)
         self._curriculum_unlocked = (self.curriculum_negation_acc is None) or self.no_negation
         self._curriculum_unlock_epoch = None
-        self._beth_reaper_step = getattr(args, "beth_reaper_step", None)
-        self._current_epoch = 0
         if((self.curriculum_negation_acc is not None) and (not self.no_negation)):
             self._dataset.use_positive_predicates_only()
             print(
@@ -143,18 +141,6 @@ class AlexBeth(Game):
     def autologger(self):
         return self._logger
 
-    # Beth reaper.
-    def start_epoch(self, data_iterator, summary_writer):
-        super().start_epoch(data_iterator, summary_writer)
-
-        if((self._beth_reaper_step is not None) and (self._current_epoch != 0) and ((self._current_epoch % self._beth_reaper_step) == 0)):
-            self.retriever.reinitialize()
-            for p in self.retriever.parameters(): self._optim.state.pop(p, None)
-
-            print(f"[beth-reaper] epoch {self._current_epoch}: retriever reinitialized.")
-
-        self._current_epoch += 1
-    
     def _build_candidate_vector(self):
         candidate_vector = [
             predicate_data.Candidate({prop: value for prop, value in zip(self._dataset.properties, values)})

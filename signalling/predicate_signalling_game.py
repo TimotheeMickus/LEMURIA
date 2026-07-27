@@ -8,7 +8,7 @@ import torch
 import json
 import numpy as np
 
-from .games import AlexBeth
+from .games import AlexBeth, AlexBethPopulation
 from .utils.predicate_data import get_data_loader
 from .utils.misc import path_replace
 from .utils.log import AutoLogger, build_run_name, setup_wandb_logging, finish_wandb_logging
@@ -96,7 +96,12 @@ def do(args):
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
 
         # Creates the model.
-        model = AlexBeth(args, autologger, data_loader, signal_dump_dir)
+        # Passing --pop_size or --pop_reset_period selects the population game; the basic
+        # AlexBeth game is exactly AlexBethPopulation(pop_size=1-1, pop_reset_period=0-0).
+        if((args.pop_size is not None) or (args.pop_reset_period is not None)):
+            model = AlexBethPopulation(args, autologger, data_loader, signal_dump_dir)
+        else:
+            model = AlexBeth(args, autologger, data_loader, signal_dump_dir)
         model = model.to(args.device)
 
         if(args.detect_anomaly):
@@ -242,7 +247,8 @@ def get_args(remaining_args=None):
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
     group.add_argument('--curriculum_negation', help='train on predicates without negation first, then unlock all predicates at the given eval accuracy threshold (default: 1.0)', nargs='?', const=1.0, default=None, type=float)
-    group.add_argument('--beth_reaper_step', help='reinitialize Beth every N training epochs', default=None, type=int)
+    group.add_argument('--pop_size', help="AlexBethPopulation: population sizes as 'n-m' (n askers, m retrievers). Passing this (or --pop_reset_period) selects the population game; the omitted one defaults to 2-2 / 0-0.", default=None, type=str)
+    group.add_argument('--pop_reset_period', help="AlexBethPopulation: reset periods as 'a-b'; reinitialize askers every a epochs and retrievers every b epochs (0 = never).", default=None, type=str)
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')
