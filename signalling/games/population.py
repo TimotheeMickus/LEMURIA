@@ -21,7 +21,7 @@ def parse_pop_pair(spec, default):
 # None). Agents are reinitialized on a staggered schedule so that no producer lives more than
 # `a` epochs and no consumer more than `b` epochs (0 = never); within a group the resets are
 # spread over the period (one every ~period/count epochs) rather than happening together.
-# During evaluation the language is produced by the *oldest* producer.
+# During evaluation the oldest producer and the oldest consumer are used.
 #
 # A concrete game mixes this in *before* its base game, e.g.
 #     class AliceBobPopulation(PopulationMixin, AliceBob): ...
@@ -98,21 +98,23 @@ class PopulationMixin:
     def current_agents(self):
         return (self._cur_producer, self._cur_consumer)
 
-    # The oldest producer = the one with the largest age = the smallest birth epoch (ties: lowest
-    # index). Used to fix the language during evaluation.
-    def _oldest_producer(self):
-        i = min(range(len(self._producers)), key=(lambda j: self._producer_birth[j]))
-        return self._producers[i]
+    # The oldest agent of a group = the one with the largest age = the smallest birth epoch (ties: lowest index).
+    # Used to fix the evaluated pair.
+    @staticmethod
+    def _oldest(agents, births):
+        i = min(range(len(agents)), key=(lambda j: births[j]))
+        return agents[i]
 
-    # Overrides Game.start_episode: select the agents used for this round. Training: a random
-    # producer and a random consumer. Evaluation: the oldest producer (stable, well-trained
-    # language) and a random consumer.
+    # Overrides Game.start_episode.
+    # Selects the agents used for this round. Training: a random producer and a random consumer. Evaluation: the oldest producer and the oldest consumer.
     def start_episode(self, train_episode=True):
-        self._cur_producer = random.choice(self._producers) if train_episode else self._oldest_producer()
-        self._cur_consumer = random.choice(self._consumers)
+        if(train_episode):
+            self._cur_producer = random.choice(self._producers)
+            self._cur_consumer = random.choice(self._consumers)
+        else:
+            self._cur_producer = self._oldest(self._producers, self._producer_birth)
+            self._cur_consumer = self._oldest(self._consumers, self._consumer_birth)
         self._assign_current(self._cur_producer, self._cur_consumer)
-
-        super().start_episode(train_episode=train_episode)  # sets train/eval mode on current_agents
 
     # Overrides Game.start_epoch: apply the reinitialization schedule.
     def start_epoch(self, data_iterator, summary_writer):
