@@ -21,12 +21,13 @@ from ..eval import decision_tree
 from ..eval import compositionality
 
 from .game import Game
+from .signalling_eval import SignallingEvalMixin, dump_signals_csv
 
 # In this game, there is one asker (Alex) and one retriever (Beth).
 # They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
 # Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
-class AlexBeth(Game):
+class AlexBeth(SignallingEvalMixin, Game):
     def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
 
@@ -450,14 +451,21 @@ class AlexBeth(Game):
         pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
         return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._comp_seed)
 
+    # Overrides SignallingEvalMixin._signal_correctness: P(correct) under the retriever for each
+    # candidate (P(true) where the predicate holds, P(false) otherwise), given (possibly
+    # scrambled) signals.
+    def _signal_correctness(self, batch, signals, lengths):
+        truth_targets = self._compute_truth_targets(batch)
+        outcome = self.retriever(self._beth_input(batch), signal=signals, length=lengths)
+        probs = torch.sigmoid(outcome.scores)
+        return torch.where(truth_targets > 0.5, probs, 1.0 - probs)
+
     # Called at the end of each training epoch.
     # data_loader: Dataset
     # epoch_index: int
     @torch.no_grad()
     def evaluate(self, data_loader, epoch_index):
-        def log(name, value):
-            self.autologger._write(name, value, epoch_index, direct=True)
-            if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
+        def log(name, value): self._log(name, value, epoch_index)
 
         # We try to visit each predicate on average 8 times.
         batch_size = data_loader.batch_size
@@ -566,26 +574,12 @@ class AlexBeth(Game):
             total_asker_entropy += asker_entropy * batch_items
             total_signal_length += signal_length * batch_items
 
-            # Scrambles the symbol order inside signals and recompute correctness probs on these.
-            # Then checks how much original performance is kept.
-            # If retention is high, semantics likely rely less on order/composition.
+            # Scrambling resistance: how much correctness is kept when the symbol order is
+            # shuffled. High retention suggests the semantics rely less on order/composition.
             if(self.run_fancy_lang_eval):
-                batch_signals = asker_outcome.action[0].detach().clone()
-                batch_lens = asker_outcome.action[1].detach().clone()
-                scrambled_signals = batch_signals.clone()
-                for i in range(scrambled_signals.size(0)):
-                    signal_len = int(batch_lens[i].item())
-                    if(signal_len > 1):
-                        scrambled_signals[i, :signal_len] = scrambled_signals[i, :signal_len][torch.randperm(signal_len)]
-
-                scrambled_outcome = self.retriever(self._beth_input(batch), signal=scrambled_signals, length=batch_lens)
-                scrambled_probs = torch.sigmoid(scrambled_outcome.scores)
-
-                scrambled_correct_prob = torch.where(truth_targets > 0.5, scrambled_probs, 1.0 - scrambled_probs)
-
-                # Limits at min(original, scrambled) so scrambling does not increase score.
-                perf_scrambled += torch.minimum(correct_prob, scrambled_correct_prob).sum().item()
-                perf_baseline += correct_prob.sum().item()
+                kept, base = self._scrambling_resistance(batch, asker_outcome.action[0], asker_outcome.action[1], correct_prob)
+                perf_scrambled += kept
+                perf_baseline += base
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
@@ -851,16 +845,14 @@ class AlexBeth(Game):
                  or (epoch_index == (self.epochs - 1))))
             )):
             filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")
-            with open(filename, 'w') as ostr:
-                writer = csv.writer(ostr)
-                _ = writer.writerow(['signal', 'pred_idx', 'pred_str'])
+            rows = [
+                [' '.join(map(str, signal)), pred_idx, pred_text]
                 for signal, pred_idx, pred_text in zip(
                     dump_cache["signals"],
                     dump_cache["predicate_ids"],
                     dump_cache["predicate_texts"],
-                ):
-                    signal = ' '.join(map(str, signal))
-                    row = [signal, pred_idx, pred_text]
-                    _ = writer.writerow(row)
+                )
+            ]
+            dump_signals_csv(filename, ['signal', 'pred_idx', 'pred_str'], rows)
         
         return

@@ -19,11 +19,12 @@ from ..eval import decision_tree
 
 from .game import Game
 from .pretraining import CNNPretrainable
+from .signalling_eval import SignallingEvalMixin, dump_signals_csv
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
-class AliceBob(CNNPretrainable, Game):
+class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
     def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
 
@@ -269,12 +270,16 @@ class AliceBob(CNNPretrainable, Game):
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
 
+    # Overrides SignallingEvalMixin._signal_correctness: P(target) under the receiver for each
+    # item, given (possibly scrambled) signals.
+    def _signal_correctness(self, batch, signals, lengths):
+        outcome = self.receiver(self._bob_input(batch), signal=signals, length=lengths)
+        return misc.pointing(outcome.scores)['dist'].probs[:, 0]
+
     # Called at the end of each training epoch.
     @torch.no_grad()
     def evaluate(self, data_iterator, epoch_index):
-        def log(name, value):
-            self.autologger._write(name, value, epoch_index, direct=True)
-            if(self.autologger.display != 'minimal'): print(f'{name}\t{value}')
+        def log(name, value): self._log(name, value, epoch_index)
 
         counts_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
         failure_matrix = np.zeros((data_iterator.nb_categories, data_iterator.nb_categories))
@@ -293,8 +298,9 @@ class AliceBob(CNNPretrainable, Game):
         batch_numbers = range(nb_batch)
         if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
         success = [] # Binary
-        success_prob = [] # Probabilities
-        scrambled_success_prob = [] # Probabilities
+        # Scrambling resistance: preserved correctness after shuffling / original correctness.
+        perf_scrambled = 0.0
+        perf_baseline = 0.0
 
         for batch_index in batch_numbers:
             self.start_episode(train_episode=False)
@@ -305,7 +311,7 @@ class AliceBob(CNNPretrainable, Game):
 
             receiver_pointing = misc.pointing(receiver_outcome.scores, argmax=True)
             success.append((receiver_pointing['action'] == 0).float())
-            success_prob.append(receiver_pointing['dist'].probs[:, 0]) # Probability of the target
+            success_prob = receiver_pointing['dist'].probs[:, 0] # Probability of the target
 
             target_category = [data_iterator.category_idx(x.category) for x in batch.original]
             distractor_category = [data_iterator.category_idx(x.category) for base_distractors in batch.base_distractors for x in base_distractors]
@@ -316,8 +322,7 @@ class AliceBob(CNNPretrainable, Game):
             np.add.at(counts_matrix, (target_category, distractor_category), 1.0)
             np.add.at(failure_matrix, (target_category, distractor_category), failure)
 
-            scrambled_signals = sender_outcome.action[0].clone().detach() # We have to be careful as we probably don't want to modify the original signals
-            for i, datapoint in enumerate(batch.original): # Saves the (signal, category) pairs and prepares for scrambling
+            for i, datapoint in enumerate(batch.original): # Saves the (signal, category) pairs
                 signal = sender_outcome.action[0][i]
                 signal_len = sender_outcome.action[1][i]
                 cat = datapoint.category
@@ -326,31 +331,23 @@ class AliceBob(CNNPretrainable, Game):
                     signals.append(signal.tolist()[:signal_len])
                     categories.append(cat)
                     input_ids.append(datapoint.idx)
-                # Scrambles the whole signal, including the EOS (but not the padding symbols, of course)
-                l = signal_len.item()
-                scrambled_signals[i, :l] = scrambled_signals[i][torch.randperm(l)]
 
-            scrambled_receiver_outcome = self.receiver(self._bob_input(batch), signal=scrambled_signals, length=sender_outcome.action[1])
-            scrambled_receiver_pointing = misc.pointing(scrambled_receiver_outcome.scores)
-            scrambled_success_prob.append(scrambled_receiver_pointing['dist'].probs[:, 0])
+            # Scrambling resistance (scrambles signal order, incl. EOS, and rescores).
+            kept, base = self._scrambling_resistance(batch, sender_outcome.action[0], sender_outcome.action[1], success_prob)
+            perf_scrambled += kept
+            perf_baseline += base
 
         if(self.signal_dump_dir is not None):
-            import csv
             import os
 
             filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")
-            with open(filename, 'w') as ostr:
-                writer = csv.writer(ostr)
-                _ = writer.writerow(['signal', 'cat', 'idx'])
-                for signal, cat, idx in zip(signals, categories, input_ids):
-                    signal = ' '.join(map(str, signal))
-                    cat = ' '.join(map(str, cat))
-                    row = [signal, cat, idx]
-                    _ = writer.writerow(row)
+            rows = [
+                [' '.join(map(str, signal)), ' '.join(map(str, cat)), idx]
+                for signal, cat, idx in zip(signals, categories, input_ids)
+            ]
+            dump_signals_csv(filename, ['signal', 'cat', 'idx'], rows)
 
-        success_prob = torch.stack(success_prob)
-        scrambled_success_prob = torch.stack(scrambled_success_prob)
-        scrambling_resistance = (torch.stack([success_prob, scrambled_success_prob]).min(0).values.mean().item() / success_prob.mean().item()) # Between 0 and 1. We take the min in order to not count signals that become accidentaly better after scrambling
+        scrambling_resistance = (perf_scrambled / perf_baseline) if(perf_baseline > 0.0) else 0.0 # Between 0 and 1. The min inside _scrambling_resistance avoids counting signals that accidentally improve after scrambling.
         log('eval/scrambling-resistance', scrambling_resistance)
 
         # Here, we try to see how much the signals describe the categories and not the particular images
