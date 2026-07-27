@@ -4,13 +4,6 @@ import time
 import torch
 
 class Game(metaclass=ABCMeta):
-    @abstractmethod
-    def test_visualize(self, data_iterator, learning_rate):
-        """
-        Make Bob dream again!
-        """
-        pass
-
     @property
     @abstractmethod
     def current_agents(self):
@@ -135,23 +128,30 @@ class Game(metaclass=ABCMeta):
 
     def save(self, path):
         """
-        Saves the model to the file `path`.
+        Saves the model (agents and optimizers) to the file `path`.
         """
         state = {
             'agents_state_dicts': [agent.state_dict() for agent in self.all_agents],
-            'optims': self.optims,
+            'optims_state_dicts': [optim.state_dict() for optim in self.optims],
         }
         torch.save(state, path)
 
     @classmethod
     def load(cls, path, args):
+        """
+        Rebuilds the game from `args`, then restores agents and optimizers from `path`.
+        Symmetric with `save`: both iterate over `self.all_agents` and `self.optims`, so
+        this works for any game regardless of how many optimizers it exposes (no need for
+        a game-specific override, since the per-game shape is already carried by the
+        `all_agents` and `optims` properties).
+        """
         instance = cls(args)
 
         checkpoint = torch.load(path, map_location=args.device)
         for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
             agent.load_state_dict(state_dict)
-
-        instance._optim = checkpoint['optims'][0]
+        for optim, state_dict in zip(instance.optims, checkpoint['optims_state_dicts']):
+            optim.load_state_dict(state_dict)
 
         return instance
 
