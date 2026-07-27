@@ -157,8 +157,13 @@ def levenshtein(str1, str2, normalise=False):
     return tmp
 
 @ft.lru_cache(maxsize=32768)
+# Hamming distance between two equal-length sequences (number of differing positions).
+def hamming(u, v):
+    return float(sum(1 for a, b in zip(u, v) if (a != b)))
+
+@ft.lru_cache(maxsize=32768)
 # `str1` and `str2` must be two strings of the same length
-def hamming(str1, str2):
+def hamming_str(str1, str2):
     return Levenshtein.hamming(str1, str2)
 
 @ft.lru_cache(maxsize=32768)
@@ -262,7 +267,7 @@ def jaccard2(seq1, seq2):
     return 1 - (intersection / (proto_union - intersection))
 """
 
-def compute_correlation(signals, categories, signal_distance=levenshtein, meaning_distance=hamming, map_signal_to_str=True, map_ctg_to_str=True):
+def compute_correlation(signals, categories, signal_distance=levenshtein, meaning_distance=hamming_str, map_signal_to_str=True, map_ctg_to_str=True):
     """
     Compute correlation of signal distance and meaning distance.
     """
@@ -305,7 +310,7 @@ def analyze_correlation(signals, categories, scrambling_pool_size=1000, **kwargs
 
     return cor, μ, σ, impr
 
-def mantel(signals, categories, signal_distance=levenshtein, meaning_distance=hamming, perms=1000, method='pearson', map_signal_to_str=True, map_ctg_to_str=True, correl_only=False):
+def mantel(signals, categories, signal_distance=levenshtein, meaning_distance=hamming_str, perms=1000, method='pearson', map_signal_to_str=True, map_ctg_to_str=True, correl_only=False):
     assert len(signals) == len(categories)
 
     if map_signal_to_str:

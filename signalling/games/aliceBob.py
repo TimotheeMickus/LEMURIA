@@ -19,7 +19,7 @@ from ..eval import decision_tree
 
 from .game import Game
 from .pretraining import CNNPretrainable
-from .signalling_eval import SignallingEvalMixin, dump_signals_csv
+from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
@@ -62,6 +62,7 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
             self._receiver_avg_reward = misc.Averager(size=12800)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
+        self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
         
         self.debug = args.debug
         self.signal_dump_dir = signal_dump_dir # str|None
@@ -500,39 +501,53 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
         sample = sample[:size_sample]
         # (To sample from each category instead, start with: d = misc.group_by(signals, categories))
 
-        # Checks that the sample contains at least two different categories and two differents signals
+        # Checks that the sample contains at least two different categories and two differents signals.
         ok = False
-        mes = set()
-        cat = set()
-        for m, c in sample:
-            mes.add(tuple(m))
-            cat.add(tuple(c))
-            if((len(mes) > 1) and (len(cat) > 1)):
+        s_signals = set()
+        s_cat = set()
+        for s, c in sample:
+            s_signals.add(tuple(s))
+            s_cat.add(tuple(c))
+            if((len(s_signals) > 1) and (len(s_cat) > 1)):
                 ok = True
                 break
 
         if(ok == False):
-            print(f'Compositionality measures cannot be computed ({len(mes)} signals and {len(cat)} categories in the sample).') # Unique signals and unique categories.
+            print(f'Compositionality measures cannot be computed ({len(s_signals)} signals and {len(s_cat)} categories in the sample).') # Unique signals and unique categories.
         else:
             sample_signals, sample_categories = zip(*sample)
-            sample_signals, sample_categories = list(map(tuple, sample_signals)), list(map(tuple, sample_categories))
+            sample_signals = list(map(tuple, sample_signals))
+            sample_categories = list(map(tuple, sample_categories))
 
-            l_cor, *_ = compute_correlation.mantel(sample_signals, sample_categories, correl_only=True)
-            log('FM_corr/Lev-based comp', l_cor)
-            #log('FM_corr/Lev-based comp (z-score)', l_cor_n)
-            #log('FM_corr/Lev-based comp (random)', l_cor_rd)
+            # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning
+            # (category) so repeated categories don't inflate the correlation.
+            def _topsim(signal_distance, map_signal_to_str):
+                return topographic_similarity(
+                    sample_signals, sample_categories,
+                    signal_distance=signal_distance, meaning_distance=compute_correlation.hamming_str,
+                    meaning_keys=sample_categories, map_signal_to_str=map_signal_to_str, map_meaning_to_str=True,
+                    method='spearman', deduplicate=True, correl_only=self._topsim_correl_only, error_on_duplicate_meanings=False,
+                )
 
-            l_n_cor, *_ = compute_correlation.mantel(sample_signals, sample_categories, signal_distance=compute_correlation.levenshtein_normalised, correl_only=True)
-            log('FM_corr/Normalised Lev-based comp', l_n_cor)
-            #log('FM_corr/Normalised Lev-based comp (z-score)', l_n_cor_n)
-            #log('FM_corr/Normalised Lev-based comp (random)', l_n_cor_rd)
+            lev = _topsim(compute_correlation.levenshtein, True)
+            log('FM_corr/Lev-based comp', lev.r)
+            if(not self._topsim_correl_only):
+                log('FM_corr/Lev-based comp (p)', lev.p)
+                log('FM_corr/Lev-based comp (z)', lev.z)
 
-            j_cor, *_ = compute_correlation.mantel(sample_signals, sample_categories, signal_distance=compute_correlation.jaccard, map_signal_to_str=False, correl_only=True)
-            log('FM_corr/Jaccard-based comp', j_cor)
-            #log('FM_corr/Jaccard-based comp (z-score)', j_cor_n)
-            #log('FM_corr/Jaccard-based comp (random)', j_cor_rd)
+            n_lev = _topsim(compute_correlation.levenshtein_normalised, True)
+            log('FM_corr/Normalised Lev-based comp', n_lev.r)
+            if(not self._topsim_correl_only):
+                log('FM_corr/Normalised Lev-based comp (p)', n_lev.p)
+                log('FM_corr/Normalised Lev-based comp (z)', n_lev.z)
 
-            if(l_n_cor > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (j_cor / l_n_cor))
+            jac = _topsim(compute_correlation.jaccard, False)
+            log('FM_corr/Jaccard-based comp', jac.r)
+            if(not self._topsim_correl_only):
+                log('FM_corr/Jaccard-based comp (p)', jac.p)
+                log('FM_corr/Jaccard-based comp (z)', jac.z)
+
+            if(n_lev.r > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (jac.r / n_lev.r))
 
             minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_signals, sample_categories, base=2)
             log('FM_corr/min Entropy category per signals', minH)

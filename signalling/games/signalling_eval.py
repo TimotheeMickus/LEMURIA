@@ -1,6 +1,10 @@
 import csv
+from collections import namedtuple
 
+import numpy as np
 import torch
+
+from ..eval import compute_correlation
 
 
 # Returns a copy of `signals` in which, for each row i, the first `lengths[i]` tokens are
@@ -53,3 +57,96 @@ class SignallingEvalMixin:
         kept = torch.minimum(orig_correctness, scrambled_correctness).sum().item()
         base = orig_correctness.sum().item()
         return kept, base
+
+
+# ----------------------------------------------------------------------------------------------
+# Topographic similarity (shared by AliceBob and AlexBeth)
+# ----------------------------------------------------------------------------------------------
+
+TopsimResult = namedtuple("TopsimResult", ["r", "p", "z"])
+
+_NAN_TOPSIM = TopsimResult(float("nan"), float("nan"), float("nan"))
+
+
+
+# Makes a meaning (or signal) hashable so it can be used as a dedup key / counted for variation.
+def _key(x):
+    if(isinstance(x, np.ndarray)):
+        return tuple(x.ravel().tolist())
+    if(isinstance(x, (list, tuple))):
+        return tuple(x)
+    return x
+
+
+# Topographic similarity between signals and meanings: the correlation between pairwise signal
+# distances and pairwise meaning distances, via the Mantel test (so we also get a permutation
+# p-value and a z-score, i.e. how many standard deviations above the permutation null).
+#
+# signals, meanings:   aligned lists; `meaning_distance`/`signal_distance` are applied to the raw
+#                      objects (or to their per-symbol-chr string form when map_*_to_str=True).
+# meaning_keys:        aligned list of hashable keys identifying each meaning, used only for
+#                      deduplication (defaults to `meanings`).
+# deduplicate:         if True (default), each meaning is kept at most once. Duplicate
+#                      meaning/signal points otherwise inflate the correlation arbitrarily.
+# error_on_duplicate_meanings:
+#                      if True, a repeated meaning raises instead. This is checked even when
+#                      `deduplicate` is False (i.e. it takes precedence over keeping duplicates).
+# method:              'spearman' (default, the topsim convention) or 'pearson'.
+# correl_only:         if True (default), only the veridical correlation is computed; the Mantel
+#                      permutations are skipped, so it is fast but p and z are returned as NaN.
+#                      Set False to run the permutation test and get a real p-value and z-score.
+#
+# Returns a TopsimResult(r, p, z); r/p/z are NaN if the sample is degenerate (< 3 meanings, or
+# no variation in signals or in meanings). p and z are also NaN whenever correl_only is True.
+def topographic_similarity(signals, meanings, signal_distance, meaning_distance, *,
+                           meaning_keys=None, deduplicate=True, map_signal_to_str=True,
+                           map_meaning_to_str=False, method="spearman", perms=1000,
+                           correl_only=True, error_on_duplicate_meanings=False):
+    if(meaning_keys is None):
+        meaning_keys = meanings
+
+    # Handle duplicate meanings:
+    #   * error_on_duplicate_meanings -> raise on the first repeat (takes precedence, checked
+    #     even when deduplicate is False);
+    #   * deduplicate (default)       -> keep only the first occurrence of each meaning;
+    #   * otherwise                   -> keep every point, duplicates included.
+    seen = set()
+    u_signals, u_meanings = [], []
+    for signal, meaning, mkey in zip(signals, meanings, meaning_keys):
+        key = _key(mkey)
+        is_duplicate = (key in seen)
+        if(is_duplicate and error_on_duplicate_meanings):
+            raise ValueError("topographic_similarity: duplicate meaning encountered (key=%r); the "
+                             "sample must contain each meaning at most once when "
+                             "error_on_duplicate_meanings=True." % (key,))
+        if(is_duplicate and deduplicate):
+            continue
+        seen.add(key)
+        u_signals.append(signal)
+        u_meanings.append(meaning)
+
+    # The Mantel test needs at least 3 objects and some variation on each side.
+    if(len(u_meanings) < 3): return _NAN_TOPSIM
+    if(len(set(_key(s) for s in u_signals)) < 2): return _NAN_TOPSIM
+    if(len(set(_key(m) for m in u_meanings)) < 2): return _NAN_TOPSIM
+
+    # The Mantel permutation test draws from NumPy's *global* RNG; snapshot and restore it so
+    # that measuring the language does not perturb the experiment's own random stream. (When
+    # correl_only is True no permutations run, so this is a cheap no-op.)
+    rng_state = np.random.get_state()
+    try:
+        r, p, z, _r_mean = compute_correlation.mantel(
+            u_signals, u_meanings,
+            signal_distance=signal_distance, meaning_distance=meaning_distance,
+            map_signal_to_str=map_signal_to_str, map_ctg_to_str=map_meaning_to_str,
+            method=method, perms=perms, correl_only=correl_only,
+        )
+    finally:
+        np.random.set_state(rng_state)
+
+    # With correl_only=True the Mantel test returns p = z = None.
+    return TopsimResult(
+        float(r),
+        float(p) if (p is not None) else float("nan"),
+        float(z) if (z is not None) else float("nan"),
+    )

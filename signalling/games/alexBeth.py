@@ -21,7 +21,7 @@ from ..eval import decision_tree
 from ..eval import compositionality
 
 from .game import Game
-from .signalling_eval import SignallingEvalMixin, dump_signals_csv
+from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
 
 # In this game, there is one asker (Alex) and one retriever (Beth).
 # They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
@@ -83,6 +83,7 @@ class AlexBeth(SignallingEvalMixin, Game):
         self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self.use_jaccard_eval = getattr(args, "jaccard", False)
+        self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
         # Compositionality probe (biLSTM->LSTM seq2seq): measured during evaluation when enabled.
         self.eval_compositionality = getattr(args, "eval_compositionality", False)
         self._comp_hparams = compositionality.hparams_from_args(args) if self.eval_compositionality else None
@@ -100,7 +101,7 @@ class AlexBeth(SignallingEvalMixin, Game):
                 f"[curriculum] positive-only phase enabled "
                 f"(unlock_acc={self.curriculum_negation_acc})"
             )
-        # Used to decide whether to dump signals during a hike in performance
+        # Used to decide whether to dump signals during a hike in performance.
         self._prev_eval_perf = None
         self._best_eval_perf = None
         self._predicate_negation_idx = self._build_negation_correspondence()
@@ -235,9 +236,17 @@ class AlexBeth(SignallingEvalMixin, Game):
             "eval/scrambling-resistance",
             "eval/curriculum_unlocked",
             "eval/topsim_extensional_norm_levenshtein",
+            "eval/topsim_extensional_norm_levenshtein_p",
+            "eval/topsim_extensional_norm_levenshtein_z",
             "eval/topsim_extensional_multi_jaccard",
+            "eval/topsim_extensional_multi_jaccard_p",
+            "eval/topsim_extensional_multi_jaccard_z",
             "eval/topsim_intensional_norm_levenshtein",
-            "eval/topsim_intensional_multi_jaccard"
+            "eval/topsim_intensional_norm_levenshtein_p",
+            "eval/topsim_intensional_norm_levenshtein_z",
+            "eval/topsim_intensional_multi_jaccard",
+            "eval/topsim_intensional_multi_jaccard_p",
+            "eval/topsim_intensional_multi_jaccard_z"
         ]
 
         with open(rows_path, "w") as ostr:
@@ -657,115 +666,87 @@ class AlexBeth(SignallingEvalMixin, Game):
         # Fancy metrics
         scrambling_ratio = None
         topsim_ext_levenshtein = float("nan")
+        topsim_ext_levenshtein_p = float("nan")
+        topsim_ext_levenshtein_z = float("nan")
         topsim_ext_jaccard = float("nan")
+        topsim_ext_jaccard_p = float("nan")
+        topsim_ext_jaccard_z = float("nan")
         topsim_int_levenshtein = float("nan")
+        topsim_int_levenshtein_p = float("nan")
+        topsim_int_levenshtein_z = float("nan")
         topsim_int_jaccard = float("nan")
+        topsim_int_jaccard_p = float("nan")
+        topsim_int_jaccard_z = float("nan")
         if(self.run_fancy_lang_eval):
             scrambling_ratio = 0
             if(perf_baseline > 0.0): scrambling_ratio = perf_scrambled / perf_baseline
             log('eval/scrambling-resistance', scrambling_ratio)
 
             # Topographic similarity
+            # Extensional meaning is a binary vector over candidate IDs; used with Hamming distance.
+            # Intensional meaning is the predicate embedding ("what the robots think"); used with cosine distance.
             if((eval_cache is not None) and (len(eval_cache["signals"]) > 1)):
                 num_predicates = len(self._dataset.predicates)
-                sample_size = int(min(1024, max(128, 12 * np.sqrt(max(1, num_predicates)))))
-                # sample = [([s0, s1], id0), ([s2], id1), ...]
-                sample = list(zip(eval_cache["signals"], eval_cache["predicate_ids"]))
+                sample_size = min(256, num_predicates)
+                sample = list(zip(eval_cache["signals"], eval_cache["predicate_ids"])) # sample = [([s0, s1], id0), ([s2], id1), ...]
                 random.shuffle(sample)
                 sample = sample[:sample_size]
-                # Consider only unique (predicate, signal) pairs.
-                sample_type = []
-                seen_pairs = set()
-                for signal, pid in sample:
-                    key = (int(pid), tuple(signal))
-                    if(key in seen_pairs):
-                        continue
-                    seen_pairs.add(key)
-                    sample_type.append((signal, int(pid)))
-                sample = sample_type
-                # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
                 sample_signals = [tuple(s) for (s, _) in sample]
                 sample_pred_ids = [int(pid) for (_, pid) in sample]
 
-                # Extensional meaning is expressed as a binary vector over candidate IDs
-                # sample_cand_vec = [(1,1,0,0), (0,0,1,1), ...]
+                # Extensional meaning
                 sample_cand_vecs = []
-                # For each predicate build meaning vector
-                for _, pid in sample:
+                for pid in sample_pred_ids:
                     pred = self._dataset.predicates[int(pid)]
-                    # candidate_vec[k] = 1 if predicate verifies candidate_k, 0 otherwise
                     candidate_vec = tuple(1 if(pred.check(cand) == 1) else 0 for cand in self._topsim_candidates)
                     sample_cand_vecs.append(candidate_vec)
 
-                # Topographic similarity:
-                # extensional: predicate meaning expressed as the binary vector of whether a candidate satisfies it
-                # intensional: the meaning is the embedding ("what the robots think")
-                # Levenshtein vs. Jaccard: order-dependent vs. invariant
-                # report 2 x 2
-                # Polarity (Levenshtein): topsim over signed literals
-                # Levenshtein is normalised to account for varying signal length
+                # Levenshtein (order dependent) vs. Jaccard (order invariant)
+                # Levenshtein is normalised to account for varying signal length.
                 if((len(set(sample_signals)) > 1) and (len(set(sample_cand_vecs)) > 1)):
-                    # Intensional topsim: meaning distance is cosine distance between predicate embeddings.
-                    asker_device = next(self.asker.parameters()).device
-                    pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=asker_device)
-                    # sender_vecs: (n, d) predicate embeddings for intensional distance.
-                    sender_vecs = self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()
-                    # Compute one condensed pairwise vector per distance notion.
-                    # signal_strings: length-n list of signal strings for Levenshtein.
-                    signal_strings = [''.join(map(chr, signal)) for signal in sample_signals]
-                    n = len(sample_signals)
-                    # Pairwise distance vectors built only on non-identical (predicate, signal) pairs.
-                    signal_lev_d = []
-                    ext_d = []
-                    int_d = []
-                    signal_jac_d = [] if(self.use_jaccard_eval) else None
+                    # Intensional meaning
+                    device = next(self.asker.parameters()).device
+                    pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=device)
+                    sender_vecs = [row for row in self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()] # per-predicate embedding
 
-                    for i in range(n - 1):
-                        sig_i_str = signal_strings[i]
-                        sig_i = sample_signals[i]
-                        pid_i = sample_pred_ids[i]
-                        ext_i = sample_cand_vecs[i]
-                        vec_i = sender_vecs[i]
-                        for j in range(i + 1, n):
-                            # Keep one of each pair type.
-                            if((pid_i == sample_pred_ids[j]) and (sig_i == sample_signals[j])):
-                                continue
-                            # signal_lev_d: normalized Levenshtein (order-sensitive, normalize by length).
-                            signal_lev_d.append(compute_correlation.levenshtein_normalised(sig_i_str, signal_strings[j]))
-                            # ext_d: Hamming distance over candidate truth vectors
-                            # Hamming is equally sensitive to verify and falsify.
-                            ext_d.append(sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j])))
-                            # int_d: cosine distance between predicate embeddings (intensional meaning).
-                            int_d.append(float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j])))
-                            if(self.use_jaccard_eval):
-                                # multiset Jaccard over token sequences (order-invariant).
-                                signal_jac_d.append(compute_correlation.jaccard(sig_i, sample_signals[j]))
+                    # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning
+                    # (predicate id) so repeated categories don't inflate the correlation.
+                    def _topsim(meanings, meaning_distance, signal_distance, map_signal_to_str):
+                        return topographic_similarity(
+                            sample_signals, meanings,
+                            signal_distance=signal_distance, meaning_distance=meaning_distance,
+                            meaning_keys=sample_pred_ids, map_signal_to_str=map_signal_to_str, map_meaning_to_str=False,
+                            method='spearman', deduplicate=True, correl_only=self._topsim_correl_only, error_on_duplicate_meanings=False,
+                        )
 
-                    signal_lev_d = np.asarray(signal_lev_d, dtype=float)
-                    ext_d = np.asarray(ext_d, dtype=float)
-                    int_d = np.asarray(int_d, dtype=float)
+                    ext_lev = _topsim(sample_cand_vecs, compute_correlation.hamming, compute_correlation.levenshtein_normalised, True)
+                    topsim_ext_levenshtein, topsim_ext_levenshtein_p, topsim_ext_levenshtein_z = ext_lev
+                    log('eval/topsim_extensional_norm_levenshtein', ext_lev.r)
+                    if(not self._topsim_correl_only):
+                        log('eval/topsim_extensional_norm_levenshtein_p', ext_lev.p)
+                        log('eval/topsim_extensional_norm_levenshtein_z', ext_lev.z)
+                    
+                    int_lev = _topsim(sender_vecs, scipy.spatial.distance.cosine, compute_correlation.levenshtein_normalised, True)
+                    topsim_int_levenshtein, topsim_int_levenshtein_p, topsim_int_levenshtein_z = int_lev
+                    log('eval/topsim_intensional_norm_levenshtein', int_lev.r)
+                    if(not self._topsim_correl_only):
+                        log('eval/topsim_intensional_norm_levenshtein_p', int_lev.p)
+                        log('eval/topsim_intensional_norm_levenshtein_z', int_lev.z)
+
                     if(self.use_jaccard_eval):
-                        signal_jac_d = np.asarray(signal_jac_d, dtype=float)
-
-                    def _safe_spearman(x, y):
-                        # Spearman correlation on pairwise distance vectors; NaN if degenerate.
-                        if((x.size == 0) or (y.size == 0)):
-                            return float("nan")
-                        if(np.all(x == x[0]) or np.all(y == y[0])):
-                            return float("nan")
-                        return float(scipy.stats.spearmanr(x, y).correlation)
-
-                    topsim_ext_levenshtein = _safe_spearman(signal_lev_d, ext_d)
-                    topsim_int_levenshtein = _safe_spearman(signal_lev_d, int_d)
-                    if(self.use_jaccard_eval):
-                        topsim_ext_jaccard = _safe_spearman(signal_jac_d, ext_d)
-                        topsim_int_jaccard = _safe_spearman(signal_jac_d, int_d)
-
-                    log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
-                    log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
-                    if(self.use_jaccard_eval):
-                        log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
-                        log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
+                        ext_jac = _topsim(sample_cand_vecs, compute_correlation.hamming, compute_correlation.jaccard, False)
+                        topsim_ext_jaccard, topsim_ext_jaccard_p, topsim_ext_jaccard_z = ext_jac
+                        log('eval/topsim_extensional_multi_jaccard', ext_jac.r)
+                        if(not self._topsim_correl_only):
+                            log('eval/topsim_extensional_multi_jaccard_p', ext_jac.p)
+                            log('eval/topsim_extensional_multi_jaccard_z', ext_jac.z)
+                        
+                        int_jac = _topsim(sender_vecs, scipy.spatial.distance.cosine, compute_correlation.jaccard, False)
+                        topsim_int_jaccard, topsim_int_jaccard_p, topsim_int_jaccard_z = int_jac
+                        log('eval/topsim_intensional_multi_jaccard', int_jac.r)
+                        if(not self._topsim_correl_only):
+                            log('eval/topsim_intensional_multi_jaccard_p', int_jac.p)
+                            log('eval/topsim_intensional_multi_jaccard_z', int_jac.z)
                 else:
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
@@ -792,11 +773,19 @@ class AlexBeth(SignallingEvalMixin, Game):
                 "eval/scrambling-resistance": scrambling_ratio,
                 "eval/curriculum_unlocked": curriculum_unlocked,
                 "eval/topsim_extensional_norm_levenshtein": topsim_ext_levenshtein,
+                "eval/topsim_extensional_norm_levenshtein_p": topsim_ext_levenshtein_p,
+                "eval/topsim_extensional_norm_levenshtein_z": topsim_ext_levenshtein_z,
                 "eval/topsim_extensional_multi_jaccard": topsim_ext_jaccard,
+                "eval/topsim_extensional_multi_jaccard_p": topsim_ext_jaccard_p,
+                "eval/topsim_extensional_multi_jaccard_z": topsim_ext_jaccard_z,
                 "eval/topsim_intensional_norm_levenshtein": topsim_int_levenshtein,
+                "eval/topsim_intensional_norm_levenshtein_p": topsim_int_levenshtein_p,
+                "eval/topsim_intensional_norm_levenshtein_z": topsim_int_levenshtein_z,
                 "eval/topsim_intensional_multi_jaccard": topsim_int_jaccard,
+                "eval/topsim_intensional_multi_jaccard_p": topsim_int_jaccard_p,
+                "eval/topsim_intensional_multi_jaccard_z": topsim_int_jaccard_z,
             }
-            missing = [k for k, v in row.items() if(k != "epoch" and v is None)]
+            missing = [k for k, v in row.items() if((k != "epoch") and (v is None))]
             if(missing):
                 raise RuntimeError(
                     "Missing eval metrics for epoch "
@@ -805,7 +794,7 @@ class AlexBeth(SignallingEvalMixin, Game):
                 )
             self._eval_metrics_rows.append(row)
 
-        # Decide if there is a performance hike.
+        # Decides if there is a performance hike.
         def _min_jump(best):
             if(best < 0.50): return 0.10
             if(best < 0.70): return 0.05
