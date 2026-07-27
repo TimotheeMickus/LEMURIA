@@ -256,6 +256,20 @@ def get_args(remaining_args=None):
     group.add_argument('--wandb', help='enable Weights & Biases logging', action='store_true')
     group.add_argument('--wandb_project', help='W&B project name', default='lemuria', type=str)
 
+    group = arg_parser.add_argument_group(title='Compositionality', description='compositionality probe (biLSTM encoder -> LSTM decoder) and its hyperparameter search')
+    group.add_argument('--eval_compositionality', help='during evaluation, measure the compositionality of the emergent language (5-fold CV exact-match) and log it as "compositionality"', action='store_true')
+    group.add_argument('--comp_embed_dim', help='probe: token embedding dimension', type=int, default=64)
+    group.add_argument('--comp_hidden_dim', help='probe: LSTM hidden dimension', type=int, default=64)
+    group.add_argument('--comp_num_layers', help='probe: number of LSTM layers (encoder and decoder)', type=int, default=1)
+    group.add_argument('--comp_dropout', help='probe: dropout', type=float, default=0.1)
+    group.add_argument('--comp_lr', help='probe: learning rate (Adam)', type=float, default=1e-3)
+    group.add_argument('--comp_batch_size', help='probe: batch size', type=int, default=64)
+    group.add_argument('--comp_max_epochs', help='probe: maximum training epochs per fold (early stopping usually stops earlier)', type=int, default=512)
+    group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
+    group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
+    group.add_argument('--comp_search_seed', help='compositionality_search / probe cross-validation: random seed', type=int, default=0)
+    group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
+
     args = arg_parser.parse_args(remaining_args)
     # Snapshot of the parser defaults, used by `build_run_name` so that a run
     # name only advertises the arguments that were actually changed.

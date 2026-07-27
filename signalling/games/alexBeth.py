@@ -18,6 +18,7 @@ from ..utils import misc, predicate_data
 
 from ..eval import compute_correlation
 from ..eval import decision_tree
+from ..eval import compositionality
 
 from .game import Game
 
@@ -81,6 +82,10 @@ class AlexBeth(Game):
         self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self.use_jaccard_eval = getattr(args, "jaccard", False)
+        # Compositionality probe (biLSTM->LSTM seq2seq): measured during evaluation when enabled.
+        self.eval_compositionality = getattr(args, "eval_compositionality", False)
+        self._comp_hparams = compositionality.hparams_from_args(args) if self.eval_compositionality else None
+        self._comp_seed = getattr(args, "comp_search_seed", 0)
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
@@ -237,6 +242,7 @@ class AlexBeth(Game):
             "eval/retriever_entropy",
             "eval/signal_length",
             "eval/vocab_used",
+            "eval/compositionality",
             "eval/c.e._verify",
             "eval/c.e._falsify",
             "eval/scrambling-resistance",
@@ -449,6 +455,15 @@ class AlexBeth(Game):
 
         if(return_entropy): return (loss, perf, entropy)
         return (loss, perf)
+
+    # Measures the compositionality of the emergent language: the asker produces one
+    # signal per predicate, and a seq2seq probe is trained (5-fold CV, early stopping) to
+    # reconstruct the predicate in Polish notation from the signal. Returns the mean over
+    # folds of each fold's best held-out exact-match rate (a float in [0, 1]).
+    def _compute_compositionality(self):
+        device = next(self.asker.parameters()).device
+        pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
+        return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._comp_seed)
 
     # Called at the end of each training epoch.
     # data_loader: Dataset
@@ -681,6 +696,13 @@ class AlexBeth(Game):
         log('eval/retriever_entropy', eval_retriever_entropy)
         log('eval/signal_length', eval_signal_length)  # Average number of symbols Alex produced.
         log('eval/vocab_used', eval_vocab_used)
+
+        # Compositionality: can a generic seq2seq learner recover each predicate (in Polish
+        # notation) from its emergent signal? Reported as the 5-fold-CV exact-match rate.
+        compositionality_score = float("nan")
+        if(self.eval_compositionality):
+            compositionality_score = self._compute_compositionality()
+            log('eval/compositionality', compositionality_score)
         
         avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
@@ -864,6 +886,7 @@ class AlexBeth(Game):
                 "eval/retriever_entropy": float(eval_retriever_entropy),
                 "eval/signal_length": float(eval_signal_length),
                 "eval/vocab_used": eval_vocab_used,
+                "eval/compositionality": float(compositionality_score),
                 "eval/c.e._verify": verify_ratio,
                 "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,

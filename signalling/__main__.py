@@ -17,7 +17,7 @@ import torch # for device
 def get_args():
     arg_parser = argparse.ArgumentParser()
     
-    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'predicate_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation'])
+    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'predicate_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation', 'compositionality_search'])
     
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --quiet vs. --display quiet?
@@ -66,6 +66,9 @@ if(__name__ == "__main__"):
         main(args, remaining_args)
     elif(args.do == 'predicate_signalling_game'):
         from .predicate_signalling_game import main
+        main(args, remaining_args)
+    elif(args.do == 'compositionality_search'):
+        from .eval.compositionality import main
         main(args, remaining_args)
     else:
         print(f'I do not know what to do ("{args.do}").')

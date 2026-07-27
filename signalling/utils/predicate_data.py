@@ -10,6 +10,12 @@ try:
 except:
     from dataset import SeqAsyncDataset # When directly executing this file.
 
+# Single-symbol tokens for the logical operators, used when serialising a predicate
+# as a token sequence (Polish / reverse-Polish notation). Each atomic value uses its
+# own name (e.g. "P0-v0") as its token.
+NEGATION_TOKEN = "NEG"
+CONJUNCTION_TOKEN = "CONJ"
+
 class Batch():
     def __init__(self, size, predicate, predicate_idx, candidate, node_idx, edge_idx, graph_sizes, candidate_truth=None):
         self.size = size # int, in number of instances
@@ -109,6 +115,21 @@ class Predicate():
     def _build(self, target=1):
         raise NotImplementedError
 
+    # Serialises the predicate as a list[str] of atom/operator tokens, using fixed
+    # operator arities (value: 0, NEG: 1, CONJ: 2) so the sequence is unambiguous.
+    # reverse=False -> Polish (prefix) notation:  ((¬P0-v0)∧P1-v2) -> [CONJ, NEG, P0-v0, P1-v2]
+    # reverse=True  -> reverse-Polish (postfix)  :                 -> [P0-v0, NEG, P1-v2, CONJ]
+    def serialize(self, reverse=False):
+        raise NotImplementedError
+
+    # Outputs a list[str] in Polish (prefix) notation.
+    def polish(self):
+        return self.serialize(reverse=False)
+
+    # Outputs a list[str] in reverse-Polish (postfix) notation.
+    def reverse_polish(self):
+        return self.serialize(reverse=True)
+
     # Outputs a bool.
     def isVerifiable(self):
         return (len(self.build(target=1)) > 0)
@@ -188,6 +209,9 @@ class Value(Predicate):
         if(target == 0): return [Candidate(prop2value={self.prop: None})]
         assert False, f"Unknown target value ({target})."
 
+    def serialize(self, reverse=False):
+        return [self.name]
+
     def __str__(self): return self.name
 
     # A value predicate is always verifiable: assign this value to its property.
@@ -218,6 +242,10 @@ class Negation(Predicate):
     # Outputs a list[Candidate].
     def _build(self, target=1):
         return self.predicate.build(target=(-target))
+
+    def serialize(self, reverse=False):
+        inner = self.predicate.serialize(reverse=reverse)
+        return (inner + [NEGATION_TOKEN]) if reverse else ([NEGATION_TOKEN] + inner)
 
     def __str__(self): return f"(¬{self.predicate})"
 
@@ -278,6 +306,11 @@ class Conjunction(Predicate):
             return list(s)
         
         assert False, f"Unknown target value ({target})."
+
+    def serialize(self, reverse=False):
+        left = self.pred1.serialize(reverse=reverse)
+        right = self.pred2.serialize(reverse=reverse)
+        return (left + right + [CONJUNCTION_TOKEN]) if reverse else ([CONJUNCTION_TOKEN] + left + right)
 
     def __str__(self):
         return f"({self.pred1}∧{self.pred2})"
