@@ -226,20 +226,17 @@ class AlexBeth(Game):
             "eval/perf",
             "eval/accuracy",
             "eval/retriever_entropy",
+            "eval/asker_entropy",
             "eval/signal_length",
             "eval/vocab_used",
             "eval/compositionality_acc",
             "eval/compositionality_loss",
-            "eval/c.e._verify",
-            "eval/c.e._falsify",
             "eval/scrambling-resistance",
-            "eval/neg_consistency",
             "eval/curriculum_unlocked",
             "eval/topsim_extensional_norm_levenshtein",
             "eval/topsim_extensional_multi_jaccard",
             "eval/topsim_intensional_norm_levenshtein",
-            "eval/topsim_intensional_multi_jaccard",
-            "eval/topsim_polarity_norm_levenshtein"
+            "eval/topsim_intensional_multi_jaccard"
         ]
 
         with open(rows_path, "w") as ostr:
@@ -475,18 +472,11 @@ class AlexBeth(Game):
         total_perf = 0.0 # average probability of the retriever selecting correctly
         total_accuracy = 0.0 # average accuracy of the retriever argmax selection
         total_entropy = 0.0
+        total_asker_entropy = 0.0
         total_signal_length = 0.0
-        # Communication-efficiency split by truth label (model can be ex. good at positives and bad at negatives).
-        total_verify_ce = 0.0 # verify: predicate true for candidate
-        total_falsify_ce = 0.0 # falsify: predicate false for candidate.
-        total_verify_items = 0 # denominators for ratios
-        total_falsify_items = 0
         # Scrambling resistance = preserved correctness after shuffling / original correctness.
         perf_scrambled = 0.0
         perf_baseline = 0.0
-        # Mean negation consistency over matched (p, ¬p) rows.
-        neg_consistency_total = 0.0
-        neg_consistency_count = 0
         # Count symbol usage across eval batches.
         total_vocab_counts = None
 
@@ -523,6 +513,7 @@ class AlexBeth(Game):
             dist = retriever_selecting["dist"] # RMK: dist.logits == retriever_outcome.scores
             
             entropy = dist.entropy().mean().item()
+            asker_entropy = asker_outcome.entropy.mean().item()
             
             retriever_loss = F.binary_cross_entropy_with_logits(retriever_outcome.scores, truth_targets, reduction='mean').item()
 
@@ -572,19 +563,8 @@ class AlexBeth(Game):
             total_perf += perf * batch_items
             total_accuracy += accuracy * batch_items
             total_entropy += entropy * batch_items
+            total_asker_entropy += asker_entropy * batch_items
             total_signal_length += signal_length * batch_items
-
-            # Splits candidate decisions into verify/falsify subsets.
-            verify_mask = (truth_targets > 0.5)
-            falsify_mask = ~verify_mask
-            if(verify_mask.any()):
-                # c.e._verify: average P(true) on true instances.
-                total_verify_ce += dist.probs[verify_mask].sum().item()
-                total_verify_items += int(verify_mask.sum().item())
-            if(falsify_mask.any()):
-                # c.e._falsify: average P(false)=1-P(true) on false instances.
-                total_falsify_ce += (1.0 - dist.probs[falsify_mask]).sum().item()
-                total_falsify_items += int(falsify_mask.sum().item())
 
             # Scrambles the symbol order inside signals and recompute correctness probs on these.
             # Then checks how much original performance is kept.
@@ -606,41 +586,6 @@ class AlexBeth(Game):
                 # Limits at min(original, scrambled) so scrambling does not increase score.
                 perf_scrambled += torch.minimum(correct_prob, scrambled_correct_prob).sum().item()
                 perf_baseline += correct_prob.sum().item()
-
-            # Negation consistency: Is it the case that for any predicate p and candidate c, P(p true | c) + P(¬p true | c) = 1?
-            # Consistency for (p, c): cons(p, c) = 1 - |P(p true | c ) + P(¬p true | c) - 1|
-            # Per batch: avg of cons(p, c) over all (p, c)
-            if(self.run_fancy_lang_eval and (not self.no_negation)):
-                paired_rows = [] # list[int], row indices (of rows in the batch about a predicate that has or is a negation)
-                neg_pred_indices = [] # list[int], predicate indices
-                for row_i, pred_i in enumerate(batch.predicate_idx):
-                    neg_i = self._predicate_negation_idx.get(int(pred_i))
-                    if(neg_i is not None):
-                        paired_rows.append(row_i)
-                        neg_pred_indices.append(neg_i)
-
-                if(len(paired_rows) > 0):
-                    paired_rows = torch.tensor(paired_rows, device=dist.probs.device, dtype=torch.long)
-                    
-                    p_prob = dist.probs.index_select(dim=0, index=paired_rows) # Shape: (batch size, num candidates)
-                    
-                    # Generates signals for negated predicates.
-                    neg_pred_indices = torch.tensor(neg_pred_indices, device=dist.probs.device, dtype=torch.long)
-                    neg_asker_outcome = self.asker(neg_pred_indices)
-
-                    # Collects the candidates used for predicates that have or are a negation.
-                    beth_input = self._beth_input(batch)
-                    beth_input_subset = {k: v.index_select(dim=0, index=paired_rows) for k, v in beth_input.items()}
-                    
-                    # Scores candidates based on ¬p signals.
-                    neg_retriever_outcome = self.retriever(beth_input_subset, *neg_asker_outcome.action)
-                    not_p_prob = torch.sigmoid(neg_retriever_outcome.scores) # Shape: (batch size, num candidates)
-
-                    neg_consistency = 1.0 - torch.abs((p_prob + not_p_prob) - 1.0) # Shape: (batch size, num candidates)
-
-                    # Accumulates sum and count.
-                    neg_consistency_total += neg_consistency.sum().item()
-                    neg_consistency_count += neg_consistency.numel()
 
             # Cache signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
@@ -674,6 +619,7 @@ class AlexBeth(Game):
         eval_perf = total_perf / total_items
         eval_accuracy = total_accuracy / total_items
         eval_retriever_entropy = total_entropy / total_items
+        eval_asker_entropy = total_asker_entropy / total_items
         eval_signal_length = total_signal_length / total_items
         if(total_vocab_counts is None): eval_vocab_used = 0
         else: eval_vocab_used = int((total_vocab_counts > 0).sum().item())
@@ -682,6 +628,7 @@ class AlexBeth(Game):
         log('eval/perf', eval_perf)
         log('eval/accuracy', eval_accuracy)
         log('eval/retriever_entropy', eval_retriever_entropy)
+        log('eval/asker_entropy', eval_asker_entropy)
         log('eval/signal_length', eval_signal_length)  # Average number of symbols Alex produced.
         log('eval/vocab_used', eval_vocab_used)
 
@@ -714,32 +661,15 @@ class AlexBeth(Game):
         log('eval/curriculum_unlocked', curriculum_unlocked)
 
         # Fancy metrics
-        verify_ratio = None
-        falsify_ratio = None
         scrambling_ratio = None
-        neg_consistency_ratio = (float("nan") if(self.no_negation) else None)
         topsim_ext_levenshtein = float("nan")
         topsim_ext_jaccard = float("nan")
         topsim_int_levenshtein = float("nan")
         topsim_int_jaccard = float("nan")
-        topsim_polarity_norm_levenshtein = float("nan")
         if(self.run_fancy_lang_eval):
-            verify_ratio = 0
-            falsify_ratio = 0
-            if(total_verify_items > 0): verify_ratio = total_verify_ce / total_verify_items
-            if(total_falsify_items > 0): falsify_ratio = total_falsify_ce / total_falsify_items
-            log('eval/c.e._verify', verify_ratio)
-            log('eval/c.e._falsify', falsify_ratio)
-
             scrambling_ratio = 0
             if(perf_baseline > 0.0): scrambling_ratio = perf_scrambled / perf_baseline
             log('eval/scrambling-resistance', scrambling_ratio)
-            # Only meaningful when negation predicates exist.
-            if(not self.no_negation): 
-                neg_consistency_ratio = 0
-                if(neg_consistency_count > 0): 
-                    neg_consistency_ratio = neg_consistency_total / neg_consistency_count
-                log('eval/neg_consistency', neg_consistency_ratio)
 
             # Topographic similarity
             if((eval_cache is not None) and (len(eval_cache["signals"]) > 1)):
@@ -762,9 +692,6 @@ class AlexBeth(Game):
                 # sample_signals = [(s0,s1), (s2,), (s0,s3), ...]
                 sample_signals = [tuple(s) for (s, _) in sample]
                 sample_pred_ids = [int(pid) for (_, pid) in sample]
-                # signed-literal representation (polarity topsim)
-                if(not self.no_negation):
-                    sample_signed_literals = [self._polarity_repr(self._dataset.predicates[pid]) for pid in sample_pred_ids]
 
                 # Extensional meaning is expressed as a binary vector over candidate IDs
                 # sample_cand_vec = [(1,1,0,0), (0,0,1,1), ...]
@@ -797,7 +724,6 @@ class AlexBeth(Game):
                     signal_lev_d = []
                     ext_d = []
                     int_d = []
-                    pol_d = [] if(not self.no_negation) else None
                     signal_jac_d = [] if(self.use_jaccard_eval) else None
 
                     for i in range(n - 1):
@@ -817,9 +743,6 @@ class AlexBeth(Game):
                             ext_d.append(sum(int(a != b) for a, b in zip(ext_i, sample_cand_vecs[j])))
                             # int_d: cosine distance between predicate embeddings (intensional meaning).
                             int_d.append(float(scipy.spatial.distance.cosine(vec_i, sender_vecs[j])))
-                            # pol_d: symmetric difference over signed literals (equiv. Hamming over binary).
-                            if(not self.no_negation):
-                                pol_d.append(float(len(sample_signed_literals[i] ^ sample_signed_literals[j])))
                             if(self.use_jaccard_eval):
                                 # multiset Jaccard over token sequences (order-invariant).
                                 signal_jac_d.append(compute_correlation.jaccard(sig_i, sample_signals[j]))
@@ -827,8 +750,6 @@ class AlexBeth(Game):
                     signal_lev_d = np.asarray(signal_lev_d, dtype=float)
                     ext_d = np.asarray(ext_d, dtype=float)
                     int_d = np.asarray(int_d, dtype=float)
-                    if(not self.no_negation):
-                        pol_d = np.asarray(pol_d, dtype=float)
                     if(self.use_jaccard_eval):
                         signal_jac_d = np.asarray(signal_jac_d, dtype=float)
 
@@ -842,24 +763,18 @@ class AlexBeth(Game):
 
                     topsim_ext_levenshtein = _safe_spearman(signal_lev_d, ext_d)
                     topsim_int_levenshtein = _safe_spearman(signal_lev_d, int_d)
-                    if(not self.no_negation):
-                        topsim_polarity_norm_levenshtein = _safe_spearman(signal_lev_d, pol_d)
                     if(self.use_jaccard_eval):
                         topsim_ext_jaccard = _safe_spearman(signal_jac_d, ext_d)
                         topsim_int_jaccard = _safe_spearman(signal_jac_d, int_d)
 
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
-                    if(not self.no_negation):
-                        log('eval/topsim_polarity_norm_levenshtein', topsim_polarity_norm_levenshtein)
                     if(self.use_jaccard_eval):
                         log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
                 else:
                     log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
                     log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
-                    if(not self.no_negation):
-                        log('eval/topsim_polarity_norm_levenshtein', topsim_polarity_norm_levenshtein)
                     if(self.use_jaccard_eval):
                         log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
@@ -875,20 +790,17 @@ class AlexBeth(Game):
                 "eval/perf": float(eval_perf),
                 "eval/accuracy": float(eval_accuracy),
                 "eval/retriever_entropy": float(eval_retriever_entropy),
+                "eval/asker_entropy": float(eval_asker_entropy),
                 "eval/signal_length": float(eval_signal_length),
                 "eval/vocab_used": eval_vocab_used,
                 "eval/compositionality_acc": float(compositionality_acc),
                 "eval/compositionality_loss": float(compositionality_loss),
-                "eval/c.e._verify": verify_ratio,
-                "eval/c.e._falsify": falsify_ratio,
                 "eval/scrambling-resistance": scrambling_ratio,
-                "eval/neg_consistency": neg_consistency_ratio,
                 "eval/curriculum_unlocked": curriculum_unlocked,
                 "eval/topsim_extensional_norm_levenshtein": topsim_ext_levenshtein,
                 "eval/topsim_extensional_multi_jaccard": topsim_ext_jaccard,
                 "eval/topsim_intensional_norm_levenshtein": topsim_int_levenshtein,
                 "eval/topsim_intensional_multi_jaccard": topsim_int_jaccard,
-                "eval/topsim_polarity_norm_levenshtein": topsim_polarity_norm_levenshtein,
             }
             missing = [k for k, v in row.items() if(k != "epoch" and v is None)]
             if(missing):
