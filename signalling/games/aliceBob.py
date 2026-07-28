@@ -63,6 +63,15 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
+        # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-
+        # compositional "control"/oracle language (one unique symbol per (concept, value) of the
+        # category) during fancy evaluation. This is a debugging/diagnostic aid rather than part
+        # of normal runs: it shows what the language metrics report for a language that is
+        # compositional by construction (an upper-bound sanity check). Applied to topographic
+        # similarity, the category-per-signal entropy stats, and the decision tree.
+        self.eval_oracle_language = getattr(args, "eval_oracle_language", False)
+        self._oracle_concept_offsets = None  # list[int]; per-concept symbol base, built lazily
+        self._oracle_alphabet_size = None     # int; total number of (concept, value) symbols
         
         self.debug = args.debug
         self.signal_dump_dir = signal_dump_dir # str|None
@@ -270,6 +279,25 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
 
         if return_entropy: return (loss, perf, entropy)
         return (loss, perf)
+
+    # Lazily computes the per-concept symbol bases for the "oracle" language: concept d, value v
+    # maps to the unique symbol (offset[d] + v), so both the concept (position/identity) and its
+    # value are recoverable even under an order-invariant (set-based) metric like Jaccard.
+    def _ensure_oracle_setup(self, data_iterator):
+        if(self._oracle_concept_offsets is None):
+            sizes = [len(concept) for concept in data_iterator.concepts]
+            offsets, running = [], 0
+            for size in sizes:
+                offsets.append(running)
+                running += size
+            self._oracle_concept_offsets = offsets
+            self._oracle_alphabet_size = running
+
+    # Oracle signal for a category (a tuple of per-concept value indices), as a list of int
+    # symbols. Used only when self.eval_oracle_language is set, to replace the emergent signals
+    # during fancy eval.
+    def _oracle_signal_for_category(self, category):
+        return [self._oracle_concept_offsets[d] + int(v) for d, v in enumerate(category)]
 
     # Overrides SignallingEvalMixin._signal_correctness: P(target) under the receiver for each
     # item, given (possibly scrambled) signals.
@@ -519,11 +547,24 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
             sample_signals = list(map(tuple, sample_signals))
             sample_categories = list(map(tuple, sample_categories))
 
+            # DEBUG FEATURE: when --eval_oracle_language is set, the fancy language analyses run
+            # on a known-compositional "control"/oracle language (one unique symbol per
+            # (concept, value) of the category) instead of the emergent signals. This is a
+            # debugging/diagnostic aid — it lets us see what these metrics report for a language
+            # that is compositional by construction (an upper-bound sanity check), and is not part
+            # of normal training/evaluation. It feeds both topographic similarity and the
+            # category-per-signal entropy stats below.
+            if(self.eval_oracle_language):
+                self._ensure_oracle_setup(data_iterator)
+                analysis_signals = [tuple(self._oracle_signal_for_category(c)) for c in sample_categories]
+            else:
+                analysis_signals = sample_signals
+
             # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning
             # (category) so repeated categories don't inflate the correlation.
             def _topsim(signal_distance, map_signal_to_str):
                 return topographic_similarity(
-                    sample_signals, sample_categories,
+                    analysis_signals, sample_categories,
                     signal_distance=signal_distance, meaning_distance=compute_correlation.hamming_str,
                     meaning_keys=sample_categories, map_signal_to_str=map_signal_to_str, map_meaning_to_str=True,
                     method='spearman', deduplicate=True, correl_only=self._topsim_correl_only, error_on_duplicate_meanings=False,
@@ -549,7 +590,9 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
 
             if(n_lev.r > 0.0): log('FM_corr/Jaccard-n.Lev ratio', (jac.r / n_lev.r))
 
-            minH, meanH, medH, maxH, varH = compute_entropy_stats(sample_signals, sample_categories, base=2)
+            # Uses `analysis_signals`, so under --eval_oracle_language this entropy is computed on
+            # the control language too (see the debug-feature note above).
+            minH, meanH, medH, maxH, varH = compute_entropy_stats(analysis_signals, sample_categories, base=2)
             log('FM_corr/min Entropy category per signals', minH)
             log('FM_corr/mean Entropy category per signals', meanH)
             log('FM_corr/med Entropy category per signals', medH)
@@ -559,7 +602,17 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
         # Decision tree stuff
         alphabet_size = (self.base_alphabet_size + 1)
         gram_size = 1 # Max size of n-grams to consider
-        tmp = decision_tree.analyse(signals, categories, alphabet_size, data_iterator.concepts, gram_size)
+        # Oracle: recover the category from the compositional (concept, value) symbols instead of
+        # the emergent signal. `alphabet_size` here is only the out-of-signal sentinel, so it must
+        # stay strictly above every symbol actually present.
+        if(self.eval_oracle_language):
+            self._ensure_oracle_setup(data_iterator)
+            dt_signals = [self._oracle_signal_for_category(c) for c in categories]
+            dt_alphabet_size = (self._oracle_alphabet_size + 1)
+        else:
+            dt_signals = signals
+            dt_alphabet_size = alphabet_size
+        tmp = decision_tree.analyse(dt_signals, categories, dt_alphabet_size, data_iterator.concepts, gram_size)
         (full_tree, full_tree_accuracy) = tmp['full_tree']
         conceptual_trees = tmp['conceptual_trees']
 

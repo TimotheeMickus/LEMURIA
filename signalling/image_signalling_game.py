@@ -247,6 +247,7 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')
+    group.add_argument('--eval_oracle_language', help="debug feature: during fancy evaluation, replace the emergent language with a known-compositional 'oracle'/control language (an upper-bound sanity check, not part of normal runs). In AliceBob this is one unique symbol per (concept, value) of the category. Applied to topographic similarity, the entropy stats, and the decision tree; signal dumping and scrambling resistance keep using the emergent language.", action='store_true')
     
     group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
 

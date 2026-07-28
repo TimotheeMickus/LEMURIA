@@ -87,6 +87,14 @@ class AlexBeth(SignallingEvalMixin, Game):
         # Compositionality probe (biLSTM->LSTM seq2seq): measured during evaluation when enabled.
         self.eval_compositionality = getattr(args, "eval_compositionality", False)
         self._comp_hparams = compositionality.hparams_from_args(args) if self.eval_compositionality else None
+        # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-
+        # compositional "control"/oracle language (the reverse-Polish encoding of the predicate)
+        # during fancy evaluation. This is a debugging/diagnostic aid rather than part of normal
+        # runs: it shows what the language metrics report for a language that is compositional by
+        # construction (an upper-bound sanity check). Applied to the compositionality probe and
+        # topographic similarity.
+        self.eval_oracle_language = getattr(args, "eval_oracle_language", False)
+        self._oracle_signals_cache = None  # list[list[int]] indexed by predicate index; built lazily
         self._comp_seed = getattr(args, "comp_search_seed", 0)
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
@@ -457,8 +465,23 @@ class AlexBeth(SignallingEvalMixin, Game):
     # held-out loss, as an (accuracy, loss) pair.
     def _compute_compositionality(self):
         device = next(self.asker.parameters()).device
-        pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
+        if(self.eval_oracle_language):
+            # Oracle: feed the probe the reverse-Polish encoding of each predicate instead of
+            # the emergent signal (targets stay in Polish notation); this is exactly the
+            # compositional control language, so the probe should reconstruct it near-perfectly.
+            pairs, spec = compositionality.reverse_polish_pairs(self._dataset)
+        else:
+            pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
         return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._comp_seed)
+
+    # Reverse-Polish "oracle" signal for each predicate, as a list of int symbols, indexed by
+    # predicate index (parallel to self._dataset.predicates). Built once and cached. Used only
+    # when self.eval_oracle_language is set, to replace the emergent signals during fancy eval.
+    def _oracle_signals_by_predicate(self):
+        if(self._oracle_signals_cache is None):
+            vocab = compositionality.PredicateVocab(self._dataset)
+            self._oracle_signals_cache = [vocab.encode(pred.reverse_polish()) for pred in self._dataset.predicates]
+        return self._oracle_signals_cache
 
     # Overrides SignallingEvalMixin._signal_correctness: P(correct) under the retriever for each
     # candidate (P(true) where the predicate holds, P(false) otherwise), given (possibly
@@ -693,6 +716,12 @@ class AlexBeth(SignallingEvalMixin, Game):
                 sample = sample[:sample_size]
                 sample_signals = [tuple(s) for (s, _) in sample]
                 sample_pred_ids = [int(pid) for (_, pid) in sample]
+
+                # Oracle: replace the emergent signals with the reverse-Polish encoding of each
+                # predicate (meaning side is left untouched). The dump cache is not affected.
+                if(self.eval_oracle_language):
+                    oracle_by_pred = self._oracle_signals_by_predicate()
+                    sample_signals = [tuple(oracle_by_pred[pid]) for pid in sample_pred_ids]
 
                 # Extensional meaning
                 sample_cand_vecs = []
