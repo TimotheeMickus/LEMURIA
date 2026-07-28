@@ -26,7 +26,7 @@ def do(args):
     # Snapshot of the arguments for run naming, taken before the loop injects
     # derived values (num_predicates, graph_d_model, ...) into `args`, so every
     # run gets a consistent name.
-    name_defaults = getattr(args, "_arg_defaults", None)
+    name_defaults = args._arg_defaults
     name_args = dict(vars(args))
 
     for run in range(args.runs):

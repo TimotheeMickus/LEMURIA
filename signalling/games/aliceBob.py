@@ -78,7 +78,7 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
         # of normal runs: it shows what the language metrics report for a language that is
         # compositional by construction (an upper-bound sanity check). Applied to topographic
         # similarity, the category-per-signal entropy stats, and the decision tree.
-        self.eval_oracle_language = getattr(args, "eval_oracle_language", False)
+        self.eval_oracle_language = args.eval_oracle_language
         self._oracle_concept_offsets = None  # list[int]; per-concept symbol base, built lazily
         self._oracle_alphabet_size = None     # int; total number of (concept, value) symbols
         

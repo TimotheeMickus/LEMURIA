@@ -36,8 +36,8 @@ class PopulationMixin:
 
         self._producer_role, self._consumer_role = roles
 
-        n, m = parse_pop_pair(getattr(args, "pop_size", None), default_size)
-        a, b = parse_pop_pair(getattr(args, "pop_reset_period", None), default_period)
+        n, m = parse_pop_pair(args.pop_size, default_size)
+        a, b = parse_pop_pair(args.pop_reset_period, default_period)
         assert (n >= 1) and (m >= 1), "pop_size must be at least 1-1"
         assert (a >= 0) and (b >= 0), "pop_reset_period must be at least 0-0"
         self._producer_period, self._consumer_period = a, b

@@ -487,7 +487,7 @@ def main(global_args=None, remaining_args=None):
     for k, v in asdict(best_h).items():
         print(f"    --comp_{k} {v}")
 
-    if getattr(args, "comp_search_out", None) is not None:
+    if args.comp_search_out is not None:
         payload = {"best_score": best_score, "best_hparams": asdict(best_h), "history": history}
         with open(args.comp_search_out, "w") as f:
             json.dump(payload, f, indent=2)

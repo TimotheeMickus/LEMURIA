@@ -63,7 +63,7 @@ class Asker(Agent):
     def from_args(cls, args, predicate_encoder=None, symbol_embeddings=None):
         has_shared_param = (predicate_encoder is not None) or (symbol_embeddings is not None)
         
-        num_predicates = getattr(args, "num_predicates") # TODO Why this weird instruction?
+        num_predicates = args.num_predicates
         if(predicate_encoder is None): predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
 
         signal_decoder = SignalDecoder.from_args(args, symbol_embeddings=symbol_embeddings)

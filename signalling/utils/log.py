@@ -242,7 +242,7 @@ def setup_wandb_logging(autologger, enabled, project, run_name, args):
         write_to_summary(name, value, step, direct=direct)
         # Train logs pass an iteration-like step, while eval logs pass an epoch index with direct=True.
         # Convert eval steps to the scale so both curves share one WandB x-axis.
-        if direct: wandb_step = (int(step) + 1) * int(getattr(args, "steps_per_epoch", 1))
+        if direct: wandb_step = (int(step) + 1) * int(args.steps_per_epoch)
         else: wandb_step = int(step)
         wandb.log({name: value}, step=wandb_step)
     autologger._write = _write_and_wandb

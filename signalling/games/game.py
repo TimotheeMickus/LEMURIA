@@ -154,16 +154,16 @@ class Game(metaclass=ABCMeta):
         state = {
             # The exact args the model was constructed from (post any injection of derived fields,
             # e.g. num_predicates), stored as a plain dict so `load` can reconstruct without a
-            # separate hparams file. `None` for models built without recording their args.
-            'hparams': (dict(vars(self._args)) if (getattr(self, "_args", None) is not None) else None),
+            # separate hparams file. Every game records its args in its constructor (self._args).
+            'hparams': dict(vars(self._args)),
             'agents_state_dicts': [agent.state_dict() for agent in self.all_agents],
             'optims_state_dicts': [optim.state_dict() for optim in self.optims],
         }
         torch.save(state, path)
 
-    # Reads just the embedded training hyperparameters from a checkpoint (or None for older
-    # checkpoints that predate this). Handy for deciding *which* game class to load (e.g. whether
-    # it is a population model) before reconstructing anything.
+    # Reads just the embedded training hyperparameters from a checkpoint. Handy for deciding
+    # *which* game class to load (e.g. whether it is a population model) before reconstructing
+    # anything. Returns None only for checkpoints that predate hparams embedding.
     @staticmethod
     def peek_hparams(path, map_location="cpu"):
         # weights_only=False: the checkpoint embeds `hparams` (a dict with non-tensor objects such
@@ -179,8 +179,7 @@ class Game(metaclass=ABCMeta):
 
         The hyperparameters are taken from the checkpoint itself (embedded by `save`); a caller
         that only wants to override a field or two (typically `device`) may pass an `args` whose
-        set fields take precedence. For older checkpoints without embedded hparams, `args` is
-        required and used as-is.
+        set fields take precedence.
 
         `dataset` is rebuilt from those hyperparameters via `_data_loader_from_args` unless one is
         supplied. `logger`/`signal_dump_dir` default to None (evaluation does not need them).
@@ -192,23 +191,19 @@ class Game(metaclass=ABCMeta):
         a truncated subset.
         """
         embedded = Game.peek_hparams(path, map_location="cpu")
-
-        if(embedded is not None):
-            load_args = argparse.Namespace(**embedded)
-            # Let the caller override individual fields (device being the common one).
-            if(args is not None):
-                for key, value in vars(args).items():
-                    if(value is not None): setattr(load_args, key, value)
-        elif(args is not None):
-            load_args = args  # legacy checkpoint: no embedded hparams, rely on the passed args.
-        else:
+        if(embedded is None):
             raise RuntimeError(
                 f"Cannot load {cls.__name__} from '{path}': the checkpoint has no embedded "
-                "hyperparameters (it predates this feature) and no `args` was provided to rebuild "
-                "the model. Pass args=... (the training arguments)."
+                "hyperparameters. Re-save it with the current code (save() now records them)."
             )
 
-        device = getattr(load_args, "device", None) or "cpu"
+        load_args = argparse.Namespace(**embedded)
+        # Let the caller override individual fields (device being the common one).
+        if(args is not None):
+            for key, value in vars(args).items():
+                if(value is not None): setattr(load_args, key, value)
+
+        device = load_args.device
 
         if(dataset is None):
             dataset = cls._data_loader_from_args(load_args)

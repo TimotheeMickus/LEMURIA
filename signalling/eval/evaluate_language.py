@@ -24,13 +24,9 @@ def main(args):
         sys.exit()
     assert args.load_model is not None, "You need to specify 'load_model'"
 
-    # Population game iff a size or reset period was set. Read this from the checkpoint's embedded
-    # hyperparameters when available (robust), otherwise fall back to the args (legacy checkpoints).
+    # Population game iff the checkpoint's embedded hyperparameters set a size or reset period.
     hparams = AliceBob.peek_hparams(args.load_model)
-    if(hparams is not None):
-        is_population = (hparams.get("pop_size") is not None) or (hparams.get("pop_reset_period") is not None)
-    else:
-        is_population = (getattr(args, "pop_size", None) is not None) or (getattr(args, "pop_reset_period", None) is not None)
+    is_population = (hparams.get("pop_size") is not None) or (hparams.get("pop_reset_period") is not None)
     model = (AliceBobPopulation if is_population else AliceBob).load(args.load_model, args)
     #print(model)
 

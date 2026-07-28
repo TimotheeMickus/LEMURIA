@@ -23,8 +23,8 @@ class Retriever(Agent):
 
         self.candidate_encoder = candidate_encoder # currently embedding-based averaging encoder 
         self.signal_encoder = signal_encoder # RNN (LSTM) encoder
-        self.blind_candidates = getattr(args, "blind_candidates", False)
-        self.blind_signal = getattr(args, "blind_signal", False)
+        self.blind_candidates = args.blind_candidates
+        self.blind_signal = args.blind_signal
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param

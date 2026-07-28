@@ -85,16 +85,16 @@ class AlexBeth(SignallingEvalMixin, Game):
             self._asker_avg_reward = misc.Averager(size=12800)
             self._retriever_avg_reward = misc.Averager(size=12800)
 
-        self.dump_signal_mode = getattr(args, "dump_signals", None)
-        self.dump_predicate_perf = getattr(args, "dump_predicate_perf", False)
-        self.dump_eval_metrics_enabled = getattr(args, "dump_eval_metrics", False)
+        self.dump_signal_mode = args.dump_signals
+        self.dump_predicate_perf = args.dump_predicate_perf
+        self.dump_eval_metrics_enabled = args.dump_eval_metrics
         # Fancy language eval is only needed for eval metrics.
         self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
-        self.use_jaccard_eval = getattr(args, "jaccard", False)
+        self.use_jaccard_eval = args.jaccard
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
         # Compositionality probe (biLSTM->LSTM seq2seq): measured during evaluation when enabled.
-        self.eval_compositionality = getattr(args, "eval_compositionality", False)
+        self.eval_compositionality = args.eval_compositionality
         self._comp_hparams = compositionality.hparams_from_args(args) if self.eval_compositionality else None
         # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-
         # compositional "control"/oracle language (the reverse-Polish encoding of the predicate)
@@ -102,15 +102,15 @@ class AlexBeth(SignallingEvalMixin, Game):
         # runs: it shows what the language metrics report for a language that is compositional by
         # construction (an upper-bound sanity check). Applied to the compositionality probe and
         # topographic similarity.
-        self.eval_oracle_language = getattr(args, "eval_oracle_language", False)
+        self.eval_oracle_language = args.eval_oracle_language
         self._oracle_signals_cache = None  # list[list[int]] indexed by predicate index; built lazily
-        self._comp_seed = getattr(args, "comp_search_seed", 0)
-        self.epochs = getattr(args, "epochs", None)
+        self._comp_seed = args.comp_search_seed
+        self.epochs = args.epochs
         # Negation metrics only run when negation exists.
-        self.no_negation = getattr(args, "no_negation", False)
+        self.no_negation = args.no_negation
         # Predicate-depth training curriculum (disabled when --depth_curriculum_threshold is
         # None). All of its state is encapsulated in this single object.
-        self._depth_curriculum = DepthCurriculum(getattr(args, "depth_curriculum_threshold", None), dataset)
+        self._depth_curriculum = DepthCurriculum(args.depth_curriculum_threshold, dataset)
         if(self._depth_curriculum.enabled):
             print(
                 f"[depth-curriculum] enabled: starting at depth {self._depth_curriculum.current_max_depth} "
