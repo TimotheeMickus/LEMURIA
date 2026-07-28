@@ -29,24 +29,31 @@ DEFAULT_EXCLUDED_ARGS = frozenset({
     "quiet", "display",         # console verbosity
 })
 
-# Hand-picked short names. These pin the abbreviations of the important knobs so
-# they stay readable and *stable* no matter what other arguments exist, and they
-# resolve every real initials-collision in the current argument set
-# (properties/population, max_depth/min_depth, num_candidates/no_conjunction,
-# no_summary/no_spigot, ...). Anything not listed here falls back to automatic,
-# collision-free initials (see `_auto_abbreviations`).
+# Hand-picked short names.
+# These pin the abbreviations of the important knobs so they stay readable and *stable* no matter what other arguments exist, and they resolve every real initials-collision in the current argument set (properties/population, max_depth/min_depth, num_candidates/no_conjunction, no_summary/no_spigot, ...).
+# Anything not listed here falls back to automatic, collision-free initials (see `_auto_abbreviations`).
 DEFAULT_ABBREVIATIONS = {
-    "properties": "props",        "population": "pop",
-    "max_depth": "maxd",          "min_depth": "mind",
-    "num_candidates": "cand",     "no_conjunction": "noconj",
-    "no_summary": "nosum",        "no_spigot": "nospig",
-    "nontrivial_only": "ntriv",   "overfit": "ofit",
-    "len_penalty": "lenpen",      "voc_penalty": "vocpen",
-    "logging_period": "logper",   "base_alphabet_size": "asize",
-    "max_len": "mlen",            "learning_rate": "lr",
-    "candidate_encoder": "enc",   "batch_size": "bs",
-    "steps_per_epoch": "spe",     "epochs": "ep",
-    "reaper_step": "reap",        "pop_size": "pop",
+    "properties": "props",
+    "population": "pop",
+    "max_depth": "maxd",
+    "min_depth": "mind",
+    "num_candidates": "cand",
+    "no_conjunction": "noconj",
+    "no_summary": "nosum",
+    "no_spigot": "nospig",
+    "nontrivial_only": "ntriv",
+    "overfit": "ofit",
+    "len_penalty": "lenpen",
+    "voc_penalty": "vocpen",
+    "logging_period": "logper",
+    "base_alphabet_size": "asize",
+    "max_len": "mlen",
+    "learning_rate": "lr",
+    "candidate_encoder": "enc",
+    "batch_size": "bs",
+    "steps_per_epoch": "spe",
+    "epochs": "ep",
+    "pop_size": "pop",
     "pop_reset_period": "preset",
     "jaccard": "jac",
 }
