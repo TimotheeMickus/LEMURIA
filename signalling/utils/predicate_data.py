@@ -93,7 +93,14 @@ class Property():
 class Predicate():
     def __init__(self):
         self._build_cache = dict() # dict[int, list[Candidate]]
-    
+
+    # The structural depth of the predicate (an atomic predicate has depth 1; each Negation or
+    # Conjunction node adds one to the depth of its deepest child). This matches the levels at
+    # which predicates are produced by Dataset.generateAllPredicates.
+    # Outputs an int.
+    def depth(self):
+        raise NotImplementedError
+
     # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
     # Outputs an int.
@@ -192,6 +199,9 @@ class Value(Predicate):
         self.name = name
         self.prop = prop
 
+    def depth(self):
+        return 1
+
     # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
     # Outputs an int.
@@ -232,6 +242,9 @@ class Negation(Predicate):
         
         self.predicate = predicate # Predicate
 
+    def depth(self):
+        return 1 + self.predicate.depth()
+
     # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
     # Outputs an int.
@@ -266,6 +279,9 @@ class Conjunction(Predicate):
         
         self.pred1 = pred1
         self.pred2 = pred2
+
+    def depth(self):
+        return 1 + max(self.pred1.depth(), self.pred2.depth())
 
     # Computes the truth value in {-1, 0, 1} of the predicate applied on a given candidate based on Kleene logic. (-1 for false, 0 for unknown, 1 for true)
     # candidate: Candidate
@@ -547,8 +563,9 @@ class Dataset(SeqAsyncDataset):
         self.nb_categories = len(self.predicates) 
         # Predicate-selection mask used by get_batch. True means "can be sampled".
         self.predicate_sampling_mask = np.ones((self.nb_categories,), dtype=bool)
-        # Positive predicates are predicates that do not contain any negation node.
-        self.positive_predicate_mask = np.array([not self._has_negation(pred) for pred in self.predicates], dtype=bool)
+        # Structural depth of each predicate (parallel to self.predicates), used by the
+        # depth-based training curriculum (see games.depth_curriculum.DepthCurriculum).
+        self.predicate_depths = np.array([pred.depth() for pred in self.predicates], dtype=int)
 
         # Builds a global node vocabulary.
         node_labels = {GraphConverter.object_token} # set[str | (str, str)]
@@ -706,25 +723,16 @@ class Dataset(SeqAsyncDataset):
         print(f"predicate_sampling: {self.predicate_sampling}")
         print(f"candidate_sampling: {self.candidate_sampling}")
 
-    @staticmethod
-    def _has_negation(predicate):
-        if isinstance(predicate, Negation):
-            return True
-        if isinstance(predicate, Conjunction):
-            return Dataset._has_negation(predicate.pred1) or Dataset._has_negation(predicate.pred2)
-        return False
-
     def set_predicate_sampling_mask(self, mask):
         mask = np.asarray(mask, dtype=bool)
         assert mask.shape == (self.nb_categories,), f"Mask shape {mask.shape} does not match number of predicates ({self.nb_categories})."
         assert np.any(mask), "Predicate sampling mask cannot be empty."
         self.predicate_sampling_mask = mask.copy()
 
-    def use_positive_predicates_only(self):
-        self.set_predicate_sampling_mask(self.positive_predicate_mask)
-
-    def use_all_predicates(self):
-        self.predicate_sampling_mask = np.ones((self.nb_categories,), dtype=bool)
+    # Restricts sampling (training and evaluation) to predicates whose structural depth is at
+    # most `max_depth`. Used by the depth-based training curriculum.
+    def use_predicates_up_to_depth(self, max_depth):
+        self.set_predicate_sampling_mask(self.predicate_depths <= max_depth)
    
     # symbols: collection[str]
     # unknown: str

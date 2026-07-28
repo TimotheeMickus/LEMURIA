@@ -22,6 +22,7 @@ from ..eval import compositionality
 
 from .game import Game
 from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
+from .depth_curriculum import DepthCurriculum
 
 # In this game, there is one asker (Alex) and one retriever (Beth).
 # They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
@@ -99,15 +100,13 @@ class AlexBeth(SignallingEvalMixin, Game):
         self.epochs = getattr(args, "epochs", None)
         # Negation metrics only run when negation exists.
         self.no_negation = getattr(args, "no_negation", False)
-        # "Curriculum learning"; if not None, then some accuracy threshold in [0,1] unlocks it
-        self.curriculum_negation_acc = getattr(args, "curriculum_negation", None)
-        self._curriculum_unlocked = (self.curriculum_negation_acc is None) or self.no_negation
-        self._curriculum_unlock_epoch = None
-        if((self.curriculum_negation_acc is not None) and (not self.no_negation)):
-            self._dataset.use_positive_predicates_only()
+        # Predicate-depth training curriculum (disabled when --depth_curriculum_threshold is
+        # None). All of its state is encapsulated in this single object.
+        self._depth_curriculum = DepthCurriculum(getattr(args, "depth_curriculum_threshold", None), dataset)
+        if(self._depth_curriculum.enabled):
             print(
-                f"[curriculum] positive-only phase enabled "
-                f"(unlock_acc={self.curriculum_negation_acc})"
+                f"[depth-curriculum] enabled: starting at depth {self._depth_curriculum.current_max_depth} "
+                f"(cap {self._depth_curriculum.max_depth}), unlock threshold eval/accuracy >= {self._depth_curriculum.threshold}"
             )
         # Used to decide whether to dump signals during a hike in performance.
         self._prev_eval_perf = None
@@ -242,7 +241,6 @@ class AlexBeth(SignallingEvalMixin, Game):
             "eval/compositionality_acc",
             "eval/compositionality_loss",
             "eval/scrambling-resistance",
-            "eval/curriculum_unlocked",
             "eval/topsim_extensional_norm_levenshtein",
             "eval/topsim_extensional_norm_levenshtein_p",
             "eval/topsim_extensional_norm_levenshtein_z",
@@ -256,6 +254,9 @@ class AlexBeth(SignallingEvalMixin, Game):
             "eval/topsim_intensional_multi_jaccard_p",
             "eval/topsim_intensional_multi_jaccard_z"
         ]
+        # Present only when the depth curriculum was active (matches the row dict).
+        if(self._depth_curriculum.enabled):
+            fieldnames.append("eval/curriculum_max_depth")
 
         with open(rows_path, "w") as ostr:
             writer = csv.DictWriter(ostr, fieldnames=fieldnames)
@@ -672,19 +673,19 @@ class AlexBeth(SignallingEvalMixin, Game):
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
 
         is_perf_hike = False
-        # Curriculum: start with positive-only predicates, unlock all once eval accuracy reaches threshold.
-        if((self.curriculum_negation_acc is not None) and (not self._curriculum_unlocked)):
-            if(eval_accuracy >= self.curriculum_negation_acc):
-                data_loader.use_all_predicates()
-                self._curriculum_unlocked = True
-                self._curriculum_unlock_epoch = epoch_index
-                is_perf_hike = True
-                print(
-                    f"[curriculum] unlocked all predicates at epoch {epoch_index} "
-                    f"(eval/accuracy={eval_accuracy:.6f})"
-                )
-        curriculum_unlocked = float((self._curriculum_unlock_epoch is not None) and (epoch_index > self._curriculum_unlock_epoch))
-        log('eval/curriculum_unlocked', curriculum_unlocked)
+        # Depth curriculum: unlock the next predicate depth once eval accuracy reaches the threshold.
+        if(self._depth_curriculum.maybe_unlock(eval_accuracy, epoch_index)):
+            is_perf_hike = True
+            print(
+                f"[depth-curriculum] epoch {epoch_index}: eval/accuracy={eval_accuracy:.6f} "
+                f">= {self._depth_curriculum.threshold} -> unlocked depth {self._depth_curriculum.current_max_depth} "
+                f"(now using depths {self._depth_curriculum.min_depth}..{self._depth_curriculum.current_max_depth})"
+            )
+        # Log the current max depth (only when the curriculum is active).
+        if(self._depth_curriculum.enabled):
+            log('eval/curriculum_max_depth', float(self._depth_curriculum.current_max_depth))
+            if(self.autologger.display != 'minimal'):
+                print(self._depth_curriculum.status_line(epoch_index))
 
         # Fancy metrics
         scrambling_ratio = None
@@ -800,7 +801,6 @@ class AlexBeth(SignallingEvalMixin, Game):
                 "eval/compositionality_acc": float(compositionality_acc),
                 "eval/compositionality_loss": float(compositionality_loss),
                 "eval/scrambling-resistance": scrambling_ratio,
-                "eval/curriculum_unlocked": curriculum_unlocked,
                 "eval/topsim_extensional_norm_levenshtein": topsim_ext_levenshtein,
                 "eval/topsim_extensional_norm_levenshtein_p": topsim_ext_levenshtein_p,
                 "eval/topsim_extensional_norm_levenshtein_z": topsim_ext_levenshtein_z,
@@ -814,6 +814,9 @@ class AlexBeth(SignallingEvalMixin, Game):
                 "eval/topsim_intensional_multi_jaccard_p": topsim_int_jaccard_p,
                 "eval/topsim_intensional_multi_jaccard_z": topsim_int_jaccard_z,
             }
+            # Only recorded when the depth curriculum is active (constant within a run).
+            if(self._depth_curriculum.enabled):
+                row["eval/curriculum_max_depth"] = int(self._depth_curriculum.current_max_depth)
             missing = [k for k, v in row.items() if((k != "epoch") and (v is None))]
             if(missing):
                 raise RuntimeError(
@@ -832,8 +835,8 @@ class AlexBeth(SignallingEvalMixin, Game):
             return 0.001
         
         if(self.dump_signal_mode in ('when_hike', 'when_hike_strict')):
-            if((self._curriculum_unlock_epoch is not None) and (epoch_index == (self._curriculum_unlock_epoch + 1))):
-                # Reset performance baseline.
+            if(self._depth_curriculum.is_epoch_after_unlock(epoch_index)):
+                # Reset performance baseline (the predicate set just enlarged).
                 self._best_eval_perf = eval_perf
                 self._prev_eval_perf = eval_perf
                 is_perf_hike = False
@@ -859,7 +862,7 @@ class AlexBeth(SignallingEvalMixin, Game):
             ((self.dump_signal_mode == 'last') and (epoch_index == (self.epochs - 1))) or
             ((self.dump_signal_mode in ('when_hike', 'when_hike_strict')) and (
                  is_perf_hike 
-                 or ((self._curriculum_unlock_epoch is not None) and (epoch_index == (self._curriculum_unlock_epoch + 1)))
+                 or self._depth_curriculum.is_epoch_after_unlock(epoch_index)
                  or (epoch_index == (self.epochs - 1))))
             )):
             filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")

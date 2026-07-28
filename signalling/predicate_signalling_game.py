@@ -237,7 +237,7 @@ def get_args(remaining_args=None):
     group.add_argument('--blind_candidates', help='debug: retriever ignores candidate features (scores become constant across candidates)', action='store_true')
     group.add_argument('--blind_signal', help='debug: retriever ignores signal embedding', action='store_true')
 
-    group = arg_parser.add_argument_group(title='Training', description='arguments relative to training curriculum')
+    group = arg_parser.add_argument_group(title='Training', description='arguments relative to training')
     group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
@@ -246,7 +246,7 @@ def get_args(remaining_args=None):
     group.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
     group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
     group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
-    group.add_argument('--curriculum_negation', help='train on predicates without negation first, then unlock all predicates at the given eval accuracy threshold (default: 1.0)', nargs='?', const=1.0, default=None, type=float)
+    group.add_argument('--depth_curriculum_threshold', help='predicate-depth curriculum: start using only the shallowest predicates (depth = min_depth) for both training and evaluation, then unlock the next depth each time eval accuracy reaches this threshold. Default: None (disabled, all depths used from the start); a bare flag means 1.0.', nargs='?', const=1.0, default=None, type=float)
     group.add_argument('--pop_size', help="AlexBethPopulation: population sizes as 'n-m' (n askers, m retrievers). Passing this (or --pop_reset_period) selects the population game; the omitted one defaults to 2-2 / 0-0.", default=None, type=str)
     group.add_argument('--pop_reset_period', help="AlexBethPopulation: reset periods as 'a-b'; reinitialize askers every a epochs and retrievers every b epochs (0 = never).", default=None, type=str)
 
@@ -278,14 +278,13 @@ def get_args(remaining_args=None):
     group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
 
     args = arg_parser.parse_args(remaining_args)
-    # Snapshot of the parser defaults, used by `build_run_name` so that a run
-    # name only advertises the arguments that were actually changed.
+    
+    # Snapshot of the parser defaults, used by `build_run_name` so that a run name only advertises the arguments that were actually changed.
     args._arg_defaults = vars(arg_parser.parse_args([]))
-    if args.debug and not args.log_debug:
-        args.log_debug = True
-    if (args.curriculum_negation is not None) and (not (0.0 <= args.curriculum_negation <= 1.0)):
-        raise ValueError(f"--curriculum_negation threshold must be in [0,1], got {args.curriculum_negation}.")
-    if not args.quiet:
+    
+    if(args.debug and (not args.log_debug)): args.log_debug = True
+    
+    if(not args.quiet):
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)
     
