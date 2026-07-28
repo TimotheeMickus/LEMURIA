@@ -31,7 +31,7 @@ def parse_pop_pair(spec, default):
 class PopulationMixin:
     # Call from the subclass __init__ *after* super().__init__(...). Replaces the base game's single producer/consumer/optimizer with the populations.
     def _init_population(self, args, roles=("producer", "consumer"), default_size=(2, 2), default_period=(0, 0)):
-        if(getattr(self, "shared", False)):
+        if(self.shared):
             raise NotImplementedError("Population games do not support shared parameters.")
 
         self._producer_role, self._consumer_role = roles

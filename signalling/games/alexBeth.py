@@ -467,25 +467,17 @@ class AlexBeth(SignallingEvalMixin, Game):
         if(return_entropy): return (loss, perf, entropy)
         return (loss, perf)
 
-    # Measures the compositionality of the emergent language: the asker produces one
-    # signal per predicate, and a seq2seq probe is trained (5-fold CV, early stopping) to
-    # reconstruct the predicate in Polish notation from the signal. Returns the mean over
-    # folds of each fold's best held-out exact-match rate (a float in [0, 1]) and best
-    # held-out loss, as an (accuracy, loss) pair.
+    # Measures the compositionality of the emergent language: the asker produces one signal per predicate, and a seq2seq probe is trained (5-fold CV, early stopping) to reconstruct the predicate in Polish notation from the signal. Returns the mean over folds of each fold's best held-out exact-match rate (a float in [0, 1]) and best held-out loss, as an (accuracy, loss) pair.
     def _compute_compositionality(self):
         device = next(self.asker.parameters()).device
         if(self.eval_oracle_language):
-            # Oracle: feed the probe the reverse-Polish encoding of each predicate instead of
-            # the emergent signal (targets stay in Polish notation); this is exactly the
-            # compositional control language, so the probe should reconstruct it near-perfectly.
+            # Oracle: feed the probe the reverse-Polish encoding of each predicate instead of the emergent signal (targets stay in Polish notation); this is exactly the compositional control language, so the probe should reconstruct it near-perfectly.
             pairs, spec = compositionality.reverse_polish_pairs(self._dataset)
         else:
             pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
         return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._comp_seed)
 
-    # Reverse-Polish "oracle" signal for each predicate, as a list of int symbols, indexed by
-    # predicate index (parallel to self._dataset.predicates). Built once and cached. Used only
-    # when self.eval_oracle_language is set, to replace the emergent signals during fancy eval.
+    # Reverse-Polish "oracle" signal for each predicate, as a list of int symbols, indexed by predicate index (parallel to self._dataset.predicates). Built once and cached. Used only when self.eval_oracle_language is set, to replace the emergent signals during fancy eval.
     def _oracle_signals_by_predicate(self):
         if(self._oracle_signals_cache is None):
             vocab = compositionality.PredicateVocab(self._dataset)
@@ -535,7 +527,6 @@ class AlexBeth(SignallingEvalMixin, Game):
             dump_cache = {
                 "signals": [],
                 "predicate_ids": [],
-                "predicate_texts": [],
             }
 
         # Cache for language-level eval metrics.
@@ -544,7 +535,6 @@ class AlexBeth(SignallingEvalMixin, Game):
             eval_cache = dump_cache if(dump_cache is not None) else {
                 "signals": [],
                 "predicate_ids": [],
-                "predicate_texts": [],
             }
 
         batch_numbers = range(nb_batch)
@@ -615,14 +605,13 @@ class AlexBeth(SignallingEvalMixin, Game):
             total_asker_entropy += asker_entropy * batch_items
             total_signal_length += signal_length * batch_items
 
-            # Scrambling resistance: how much correctness is kept when the symbol order is
-            # shuffled. High retention suggests the semantics rely less on order/composition.
+            # Scrambling resistance: how much correctness is kept when the symbol order isshuffled. High retention suggests the semantics rely less on order/composition.
             if(self.run_fancy_lang_eval):
                 kept, base = self._scrambling_resistance(batch, asker_outcome.action[0], asker_outcome.action[1], correct_prob)
                 perf_scrambled += kept
                 perf_baseline += base
 
-            # Cache signals once so dump and fancy eval can reuse them.
+            # Caches signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
             cache = dump_cache if(dump_cache is not None) else eval_cache
             if(cache is not None):
@@ -632,24 +621,15 @@ class AlexBeth(SignallingEvalMixin, Game):
                 for i in range(batch_signals.size(0)):
                     if(self.correct_only and (not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)))):
                         # not: (accuracy_per_item[i].item() < 0.5):
-                        continue # skip low accuracy items
-                    # truncate padding away from signals
+                        continue # Skips low accuracy items.
+                    # Truncates padding away from signals.
                     signal = batch_signals[i].tolist()[:batch_lens[i].item()]
                     cache["signals"].append(signal)
                     cache["predicate_ids"].append(int(batch.predicate_idx[i]))
-                    # TODO This was crashing
-                    # eval_cache["predicate_texts"].append(str(batch.predicate[i]))
-                    # ---- and with this it works now:
-                    pred_list = getattr(batch, "predicate", None)
-                    if(pred_list is not None): 
-                        cache["predicate_texts"].append(str(pred_list[i]))
-                    else: 
-                        cache["predicate_texts"].append(str(self._dataset.predicates[int(batch.predicate_idx[i])]))
-                    
 
         # --- logging and stdout --- #
         #                            #
-        # Normalise the accumulated sums and push them to TensorBoard / stdout.
+        # Normalises the accumulated sums and push them to TensorBoard / stdout.
         eval_retriever_loss = total_retriever_loss / total_items
         eval_perf = total_perf / total_items
         eval_accuracy = total_accuracy / total_items
@@ -664,12 +644,10 @@ class AlexBeth(SignallingEvalMixin, Game):
         log('eval/accuracy', eval_accuracy)
         log('eval/retriever_entropy', eval_retriever_entropy)
         log('eval/asker_entropy', eval_asker_entropy)
-        log('eval/signal_length', eval_signal_length)  # Average number of symbols Alex produced.
+        log('eval/signal_length', eval_signal_length) # Average number of symbols Alex produced.
         log('eval/vocab_used', eval_vocab_used)
 
-        # Compositionality: can a generic seq2seq learner recover each predicate (in Polish
-        # notation) from its emergent signal? Reported as the 5-fold-CV exact-match rate
-        # ('eval/compositionality_acc') and the corresponding held-out loss ('eval/compositionality_loss').
+        # Compositionality: can a generic seq2seq learner recover each predicate (in Polish notation) from its emergent signal? Reported as the 5-fold-CV exact-match rate ('eval/compositionality_acc') and the corresponding held-out loss ('eval/compositionality_loss').
         compositionality_acc = float("nan")
         compositionality_loss = float("nan")
         if(self.eval_compositionality):
@@ -689,7 +667,8 @@ class AlexBeth(SignallingEvalMixin, Game):
                 f">= {self._depth_curriculum.threshold} -> unlocked depth {self._depth_curriculum.current_max_depth} "
                 f"(now using depths {self._depth_curriculum.min_depth}..{self._depth_curriculum.current_max_depth})"
             )
-        # Log the current max depth (only when the curriculum is active).
+        
+        # Logs the current max depth (only when the curriculum is active).
         if(self._depth_curriculum.enabled):
             log('eval/curriculum_max_depth', float(self._depth_curriculum.current_max_depth))
             if(self.autologger.display != 'minimal'):
@@ -747,8 +726,7 @@ class AlexBeth(SignallingEvalMixin, Game):
                     pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=device)
                     sender_vecs = [row for row in self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()] # per-predicate embedding
 
-                    # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning
-                    # (predicate id) so repeated categories don't inflate the correlation.
+                    # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning (predicate id) so repeated categories don't inflate the correlation.
                     def _topsim(meanings, meaning_distance, signal_distance, map_signal_to_str):
                         return topographic_similarity(
                             sample_signals, meanings,
@@ -793,8 +771,6 @@ class AlexBeth(SignallingEvalMixin, Game):
                         log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
                     if(self.autologger.display != 'minimal'):
                         print('eval/topsim\tnot enough variation in sampled signals/meanings')
-
-                # Decision tree TODO: how easily predicate identity can be recovered from signals.
 
         if(self.dump_eval_metrics_enabled):
             row = {
@@ -864,6 +840,7 @@ class AlexBeth(SignallingEvalMixin, Game):
                 if(is_perf_hike and (eval_perf > self._best_eval_perf)):
                     self._best_eval_perf = eval_perf
                 self._prev_eval_perf = eval_perf
+        
         # Dumps signals into file every epoch or on the last epoch, depending on the flag.
         if(self.signal_dump_dir and (dump_cache is not None) and (
             (self.dump_signal_mode == 'all') or 
@@ -875,11 +852,10 @@ class AlexBeth(SignallingEvalMixin, Game):
             )):
             filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")
             rows = [
-                [' '.join(map(str, signal)), pred_idx, pred_text]
-                for signal, pred_idx, pred_text in zip(
+                [' '.join(map(str, signal)), pred_idx, str(self._dataset.predicates[pred_idx])]
+                for signal, pred_idx in zip(
                     dump_cache["signals"],
                     dump_cache["predicate_ids"],
-                    dump_cache["predicate_texts"],
                 )
             ]
             dump_signals_csv(filename, ['signal', 'pred_idx', 'pred_str'], rows)
