@@ -7,7 +7,6 @@ from ..utils.modules import build_cnn_decoder_from_args
 
 # Population variant of AliceBob: `n` senders (Alice·s) and `m` receivers (Bob·s), set by
 # `pop_size` ("n-m"), reinitialized on a staggered schedule set by `pop_reset_period` ("a-b").
-# For backward compatibility, `--population N` (when `--pop_size` is not given) means N-N.
 # All the population machinery lives in PopulationMixin; here we only supply the AliceBob-specific
 # hooks, including re-pretraining a reinitialized agent's CNN.
 class AliceBobPopulation(PopulationMixin, AliceBob):
@@ -28,10 +27,8 @@ class AliceBobPopulation(PopulationMixin, AliceBob):
             "deconvolution_factory": get_default_fn(build_cnn_decoder_from_args, args),
         }
 
-        # `--population N` provides a symmetric default of N-N; `--pop_size n-m` overrides it.
-        pop = getattr(args, "population", None)
-        default_size = (pop, pop) if pop else (2, 2)
-        self._init_population(args, roles=("sender", "receiver"), default_size=default_size, default_period=(0, 0))
+        # `--pop_size n-m` sets the population sizes; absent, it defaults to 2-2.
+        self._init_population(args, roles=("sender", "receiver"), default_size=(2, 2), default_period=(0, 0))
 
     def _population_factories(self, args):
         return ((lambda: Sender.from_args(args)), (lambda: Receiver.from_args(args)))

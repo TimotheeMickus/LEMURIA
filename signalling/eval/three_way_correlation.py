@@ -270,7 +270,9 @@ def main(args):
         sys.exit()
     assert args.load_model is not None, "You need to specify 'load_model'"
 
-    if(args.population is not None): model = AliceBobPopulation.load(args.load_model, args)
+    # Population game iff a size or reset period was given (same criterion as the training entry points).
+    is_population = (getattr(args, "pop_size", None) is not None) or (getattr(args, "pop_reset_period", None) is not None)
+    if(is_population): model = AliceBobPopulation.load(args.load_model, args)
     else: model = AliceBob.load(args.load_model, args)
     #print(model)
 
@@ -291,7 +293,7 @@ def main(args):
     batch_numbers = range(nb_batch)
     if(args.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers)
     with torch.no_grad():
-        sender = model._sender if (args.population is not None) else model.sender
+        sender = model._sender if is_population else model.sender
         for _ in batch_numbers:
             model.start_episode(train_episode=False) # Selects agents at random if necessary
 

@@ -223,7 +223,6 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
-    group.add_argument('--population', help='population size', default=None, type=int)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
     group.add_argument('--candidate_encoder', help='candidate encoder type', choices=['node_averager', 'graph_transformer'], default='node_averager')
     # Graph encoder parameters (used when --candidate_encoder=graph)

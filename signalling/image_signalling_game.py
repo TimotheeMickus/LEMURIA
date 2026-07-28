@@ -53,15 +53,14 @@ def do(args):
         if(args.save_every > 0): run_models_dir.mkdir(parents=True, exist_ok=True)
         
         # Creates the model.
+        # Passing --pop_size or --pop_reset_period selects the population game; plain AliceBob is
+        # exactly AliceBobPopulation(pop_size=1-1, pop_reset_period=0-0).
+        is_population = (args.pop_size is not None) or (args.pop_reset_period is not None)
         if(args.charlie):
-            assert (args.population is None) # NotImplementedFeature
+            assert (not is_population) # NotImplementedFeature: Charlie has no population variant.
             model = AliceBobCharlie(args, autologger, data_loader, signal_dump_dir)
-        elif(args.population is not None): model = AliceBobPopulation(args, autologger, data_loader, signal_dump_dir)
+        elif(is_population): model = AliceBobPopulation(args, autologger, data_loader, signal_dump_dir)
         else:
-            # --population is the population-game selector (also used by the eval scripts), so the
-            # reset/size options only make sense alongside it.
-            assert (args.pop_size is None) and (args.pop_reset_period is None), \
-                "--pop_size / --pop_reset_period require the population game; pass --population too (e.g. --population 1)."
             model = AliceBob(args, autologger, data_loader, signal_dump_dir)
         model = model.to(args.device)
 
@@ -209,9 +208,8 @@ def get_args(remaining_args=None):
 
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
     group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
-    group.add_argument('--population', help='select the population game; N gives a symmetric default of N-N senders/receivers (override with --pop_size)', default=None, type=int)
     group.add_argument('--charlie', '-c', help='add adversary drawing agent', action='store_true')
-    group.add_argument('--pop_size', help="population sizes as 'n-m' (n senders, m receivers); overrides the symmetric default from --population", default=None, type=str)
+    group.add_argument('--pop_size', help="population sizes as 'n-m' (n senders, m receivers). Passing this (or --pop_reset_period) selects the population game; the omitted one defaults to 2-2 / 0-0.", default=None, type=str)
     group.add_argument('--pop_reset_period', help="reset periods as 'a-b'; reinitialize senders every a epochs and receivers every b epochs (0 = never); default 0-0", default=None, type=str)
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
 
