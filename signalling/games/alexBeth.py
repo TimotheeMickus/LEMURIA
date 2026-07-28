@@ -29,8 +29,16 @@ from .depth_curriculum import DepthCurriculum
 # Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
 class AlexBeth(SignallingEvalMixin, Game):
+    # Builds the predicate dataset used by Game.load to rebuild the model.
+    @classmethod
+    def _data_loader_from_args(cls, args):
+        return predicate_data.get_data_loader(args)
+
     def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
+
+        # Kept so save() can embed the exact (post-injection) args in the checkpoint; load() rebuilds from them.
+        self._args = args
 
         self._logger = logger
         self._dataset = dataset

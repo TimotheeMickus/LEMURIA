@@ -25,8 +25,17 @@ from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
 class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
+    # Builds the image dataset used by Game.load to rebuild the model.
+    @classmethod
+    def _data_loader_from_args(cls, args):
+        from ..utils.image_data import get_data_loader
+        return get_data_loader(args)
+
     def __init__(self, args, logger, dataset, signal_dump_dir):
         self.max_perf = 0.0
+
+        # Kept so save() can embed the exact (post-injection) args in the checkpoint; load() rebuilds from them.
+        self._args = args
 
         self._logger = logger
         self.base_alphabet_size = args.base_alphabet_size

@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+import argparse
 import time
 
 import torch
@@ -133,28 +134,105 @@ class Game(metaclass=ABCMeta):
                     index=iter_index,
                 )
 
+    # Builds the dataset a `load` needs to reconstruct an identically-shaped model. A checkpoint
+    # stores only parameter/optimizer *state*, so `load` must first rebuild the model (whose layer
+    # shapes depend on the dataset) before copying that state in. Concrete game families override
+    # this to call their own data loader (image vs predicate). Only needed when `load` is not given
+    # an explicit `dataset`.
+    @classmethod
+    def _data_loader_from_args(cls, args):
+        raise NotImplementedError(
+            f"{cls.__name__}.load needs a dataset to rebuild the model: either pass dataset=... "
+            f"or implement {cls.__name__}._data_loader_from_args(args)."
+        )
+
     def save(self, path):
         """
-        Saves the model (agents and optimizers) to the file `path`.
+        Saves the model (agents and optimizers) to the file `path`, together with the training
+        hyperparameters (`hparams`) needed to rebuild an identically-shaped model in `load`.
         """
         state = {
+            # The exact args the model was constructed from (post any injection of derived fields,
+            # e.g. num_predicates), stored as a plain dict so `load` can reconstruct without a
+            # separate hparams file. `None` for models built without recording their args.
+            'hparams': (dict(vars(self._args)) if (getattr(self, "_args", None) is not None) else None),
             'agents_state_dicts': [agent.state_dict() for agent in self.all_agents],
             'optims_state_dicts': [optim.state_dict() for optim in self.optims],
         }
         torch.save(state, path)
 
-    @classmethod
-    def load(cls, path, args):
-        """
-        Rebuilds the game from `args`, then restores agents and optimizers from `path`.
-        Symmetric with `save`: both iterate over `self.all_agents` and `self.optims`, so
-        this works for any game regardless of how many optimizers it exposes (no need for
-        a game-specific override, since the per-game shape is already carried by the
-        `all_agents` and `optims` properties).
-        """
-        instance = cls(args)
+    # Reads just the embedded training hyperparameters from a checkpoint (or None for older
+    # checkpoints that predate this). Handy for deciding *which* game class to load (e.g. whether
+    # it is a population model) before reconstructing anything.
+    @staticmethod
+    def peek_hparams(path, map_location="cpu"):
+        # weights_only=False: the checkpoint embeds `hparams` (a dict with non-tensor objects such
+        # as pathlib.Path / torch.device), which the PyTorch>=2.6 default (weights_only=True) would
+        # refuse to unpickle. These are the user's own training checkpoints, so this is safe here.
+        checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+        return checkpoint.get('hparams', None)
 
-        checkpoint = torch.load(path, map_location=args.device)
+    @classmethod
+    def load(cls, path, args=None, logger=None, dataset=None, signal_dump_dir=None):
+        """
+        Rebuilds the game and restores agents and optimizers from `path`.
+
+        The hyperparameters are taken from the checkpoint itself (embedded by `save`); a caller
+        that only wants to override a field or two (typically `device`) may pass an `args` whose
+        set fields take precedence. For older checkpoints without embedded hparams, `args` is
+        required and used as-is.
+
+        `dataset` is rebuilt from those hyperparameters via `_data_loader_from_args` unless one is
+        supplied. `logger`/`signal_dump_dir` default to None (evaluation does not need them).
+
+        Symmetric with `save`: both iterate over `all_agents`/`optims`, so this works for any game
+        regardless of how many agents/optimizers it exposes. The agent/optimizer counts are checked
+        against the checkpoint so a shape mismatch (e.g. loading a population checkpoint into the
+        single-agent class, or with a different pop_size) fails loudly instead of silently loading
+        a truncated subset.
+        """
+        embedded = Game.peek_hparams(path, map_location="cpu")
+
+        if(embedded is not None):
+            load_args = argparse.Namespace(**embedded)
+            # Let the caller override individual fields (device being the common one).
+            if(args is not None):
+                for key, value in vars(args).items():
+                    if(value is not None): setattr(load_args, key, value)
+        elif(args is not None):
+            load_args = args  # legacy checkpoint: no embedded hparams, rely on the passed args.
+        else:
+            raise RuntimeError(
+                f"Cannot load {cls.__name__} from '{path}': the checkpoint has no embedded "
+                "hyperparameters (it predates this feature) and no `args` was provided to rebuild "
+                "the model. Pass args=... (the training arguments)."
+            )
+
+        device = getattr(load_args, "device", None) or "cpu"
+
+        if(dataset is None):
+            dataset = cls._data_loader_from_args(load_args)
+
+        instance = cls(load_args, logger, dataset, signal_dump_dir)
+
+        # weights_only=False: see peek_hparams (the checkpoint holds non-tensor `hparams`).
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+        n_agents, n_saved = len(instance.all_agents), len(checkpoint['agents_state_dicts'])
+        if(n_agents != n_saved):
+            raise RuntimeError(
+                f"Cannot restore {cls.__name__}: the rebuilt model has {n_agents} agents but the "
+                f"checkpoint holds {n_saved}. This usually means the wrong game class was chosen "
+                f"(e.g. a population checkpoint loaded as the single-agent game) or a mismatched "
+                f"pop_size. Check --pop_size / --pop_reset_period or the loaded class."
+            )
+        n_optims, n_saved_optims = len(instance.optims), len(checkpoint['optims_state_dicts'])
+        if(n_optims != n_saved_optims):
+            raise RuntimeError(
+                f"Cannot restore {cls.__name__}: the rebuilt model has {n_optims} optimizer(s) but "
+                f"the checkpoint holds {n_saved_optims}."
+            )
+
         for agent, state_dict in zip(instance.all_agents, checkpoint['agents_state_dicts']):
             agent.load_state_dict(state_dict)
         for optim, state_dict in zip(instance.optims, checkpoint['optims_state_dicts']):
