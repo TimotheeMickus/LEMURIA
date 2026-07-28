@@ -117,9 +117,16 @@ class Game(metaclass=ABCMeta):
                     optim.step() # Parameters update. Should not be performed until all gradients have been computed.
                     optim.zero_grad() # Reinitialization of the gradient buffers.
 
-                # TODO This needs an update.
+                # The losses carried by `optimization` are already detached (see
+                # `compute_interaction`), so summing them here just aggregates
+                # values for logging and does not touch the graph. This is what
+                # gets logged as `train/loss`.
+                total_loss = torch.tensor(0.0)
+                for (_, loss, _) in optimization:
+                    total_loss = total_loss + loss.detach().to(total_loss.device)
+
                 udpated_state = self.autologger.update(
-                    torch.tensor(0.0), # This is where "the loss" should be, but I'm logging the losses directly in compute_interaction.
+                    total_loss,
                     *external_output,
                     parameters=(p for a in self.all_agents for p in a.parameters()), # TODO `self.all_agents` or `self.current_agents`?
                     batch=batch,
