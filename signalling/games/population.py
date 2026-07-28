@@ -14,31 +14,22 @@ def parse_pop_pair(spec, default):
     return (int(parts[0]), int(parts[1]))
 
 
-# Shared logic for population games. There is a group of `n` "producers" (senders / askers) and
-# a group of `m` "consumers" (receivers / retrievers). For each round a random producer and a
-# random consumer are selected and trained together; a single optimizer covers the whole
-# population, so a step only updates the selected pair (Adam skips parameters whose `.grad` is
-# None). Agents are reinitialized on a staggered schedule so that no producer lives more than
-# `a` epochs and no consumer more than `b` epochs (0 = never); within a group the resets are
-# spread over the period (one every ~period/count epochs) rather than happening together.
-# During evaluation the oldest producer and the oldest consumer are used.
+# Shared logic for population games.
+# There is a group of `n` "producers" (senders / askers) and a group of `m` "consumers" (receivers / retrievers). For each training round a random producer and a random consumer are selected and trained together. During evaluation the oldest producer and the oldest consumer are used.
+# A single optimizer covers the whole population (but possibly with per agent parameters).
+# Agents are reinitialized on a staggered schedule so that no producer lives more than `a` epochs and no consumer more than `b` epochs (0 = never); within a group the resets are spread over the period (one every ~period/count epochs).
 #
 # A concrete game mixes this in *before* its base game, e.g.
 #     class AliceBobPopulation(PopulationMixin, AliceBob): ...
-# calls `self._init_population(args, ...)` at the end of its __init__ (after super().__init__),
-# and provides these hooks:
+# calls `self._init_population(args, ...)` at the end of its __init__ (after super().__init__), and provides these hooks:
 #   * _population_factories(args) -> (make_producer, make_consumer): zero-arg constructors.
-#   * _assign_current(producer, consumer): store the pair under the names the base game reads
-#     (e.g. self._sender/self._receiver, or self._asker/self._retriever).
-#   * _on_reinitialized(agent, role, epoch, data_iterator): optional post-reset hook (default
-#     no-op; the image game overrides it to re-pretrain the reinitialized agent's CNN).
+#   * _assign_current(producer, consumer): store the pair under the names the base game reads (e.g. self._sender/self._receiver, or self._asker/self._retriever).
+#   * _on_reinitialized(agent, role, epoch, data_iterator): optional post-reset hook (default no-op; the image game overrides it to re-pretrain the reinitialized agent's CNN).
 #
-# Equivalences (for either game):
+# Equivalence (for either game):
 #   * the plain 1-agent game  == population(pop_size=1-1, pop_reset_period=0-0)
-#   * an "every-B-epochs reaper" on the consumer == population(pop_size=1-1, pop_reset_period=0-B)
 class PopulationMixin:
-    # Call from the subclass __init__ *after* super().__init__(...). Replaces the base game's
-    # single producer/consumer/optimizer with the populations.
+    # Call from the subclass __init__ *after* super().__init__(...). Replaces the base game's single producer/consumer/optimizer with the populations.
     def _init_population(self, args, roles=("producer", "consumer"), default_size=(2, 2), default_period=(0, 0)):
         if(getattr(self, "shared", False)):
             raise NotImplementedError("Population games do not support shared parameters.")
@@ -61,9 +52,7 @@ class PopulationMixin:
         # A single optimizer over the whole population.
         self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
 
-        # Staggered schedule: birth = -offset with offset = floor(i * period / count), so agent i
-        # starts at age `offset` and is first reset at epoch period - offset. Hence the group's
-        # first reset is at ~period/count and every agent's lifespan is at most `period`.
+        # Staggered schedule: birth = -offset with offset = floor(i * period / count), so agent i starts at age `offset` and is first reset at epoch period - offset. Hence the group's first reset is at ~period/count and every agent's lifespan is at most `period`.
         self._producer_birth = self._initial_births(n, a)
         self._consumer_birth = self._initial_births(m, b)
         self._current_epoch = 0
@@ -79,7 +68,6 @@ class PopulationMixin:
             return [0] * count
         return [-((i * period) // count) for i in range(count)]
 
-    # --- hooks a concrete game must / may provide -------------------------------------------
     def _population_factories(self, args):
         raise NotImplementedError
 
@@ -88,7 +76,6 @@ class PopulationMixin:
 
     def _on_reinitialized(self, agent, role, epoch, data_iterator):
         pass  # default: nothing to do after a reinitialization
-    # ----------------------------------------------------------------------------------------
 
     @property
     def all_agents(self):
@@ -125,8 +112,7 @@ class PopulationMixin:
 
         self._current_epoch += 1
 
-    # Reinitializes every agent of a group whose age has reached `period` (0 = never), clears the
-    # stale optimizer state for it, and runs the post-reset hook.
+    # Reinitializes every agent of a group whose age has reached `period` (0 = never), clears the stale optimizer state for it, and runs the post-reset hook.
     def _reinit_due(self, agents, births, period, role, data_iterator):
         if(period <= 0):
             return
