@@ -72,12 +72,6 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
-        # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-
-        # compositional "control"/oracle language (one unique symbol per (concept, value) of the
-        # category) during fancy evaluation. This is a debugging/diagnostic aid rather than part
-        # of normal runs: it shows what the language metrics report for a language that is
-        # compositional by construction (an upper-bound sanity check). Applied to topographic
-        # similarity, the category-per-signal entropy stats, and the decision tree.
         self.eval_oracle_language = args.eval_oracle_language
         self._oracle_concept_offsets = None  # list[int]; per-concept symbol base, built lazily
         self._oracle_alphabet_size = None     # int; total number of (concept, value) symbols
@@ -556,21 +550,14 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
             sample_signals = list(map(tuple, sample_signals))
             sample_categories = list(map(tuple, sample_categories))
 
-            # DEBUG FEATURE: when --eval_oracle_language is set, the fancy language analyses run
-            # on a known-compositional "control"/oracle language (one unique symbol per
-            # (concept, value) of the category) instead of the emergent signals. This is a
-            # debugging/diagnostic aid — it lets us see what these metrics report for a language
-            # that is compositional by construction (an upper-bound sanity check), and is not part
-            # of normal training/evaluation. It feeds both topographic similarity and the
-            # category-per-signal entropy stats below.
+            # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-compositional "control"/oracle language (the reverse-Polish encoding of the predicate during fancy evaluation. This is a debugging/diagnostic aid; it shows what the language metrics report for a language that is compositional by construction (an upper-bound sanity check). Applied to the category-per-signal entropy and topographic similarity.
             if(self.eval_oracle_language):
                 self._ensure_oracle_setup(data_iterator)
                 analysis_signals = [tuple(self._oracle_signal_for_category(c)) for c in sample_categories]
             else:
                 analysis_signals = sample_signals
 
-            # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning
-            # (category) so repeated categories don't inflate the correlation.
+            # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning (category) so repeated categories don't inflate the correlation.
             def _topsim(signal_distance, map_signal_to_str):
                 return topographic_similarity(
                     analysis_signals, sample_categories,

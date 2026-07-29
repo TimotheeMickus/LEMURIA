@@ -96,12 +96,7 @@ class AlexBeth(SignallingEvalMixin, Game):
         # Compositionality probe (biLSTM->LSTM seq2seq): measured during evaluation when enabled.
         self.eval_compositionality = args.eval_compositionality
         self._comp_hparams = compositionality.hparams_from_args(args) if self.eval_compositionality else None
-        # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-
-        # compositional "control"/oracle language (the reverse-Polish encoding of the predicate)
-        # during fancy evaluation. This is a debugging/diagnostic aid rather than part of normal
-        # runs: it shows what the language metrics report for a language that is compositional by
-        # construction (an upper-bound sanity check). Applied to the compositionality probe and
-        # topographic similarity.
+        # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-compositional "control"/oracle language (the reverse-Polish encoding of the predicate during fancy evaluation. This is a debugging/diagnostic aid; it shows what the language metrics report for a language that is compositional by construction (an upper-bound sanity check). Applied to the compositionality probe and topographic similarity.
         self.eval_oracle_language = args.eval_oracle_language
         self._oracle_signals_cache = None  # list[list[int]] indexed by predicate index; built lazily
         self._comp_seed = args.comp_search_seed
