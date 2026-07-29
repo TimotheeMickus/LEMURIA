@@ -141,16 +141,10 @@ def do(args):
 
         if(args.dump_predicate_perf):
             # Exports predicate-level performance tables and tie them to W&B as one artifact.
-            model.dump_predicate_performance(
-                run_summary_dir,
-                wandb_run=wandb_run,
-            )
+            model.dump_predicate_performance(run_summary_dir, wandb_run=wandb_run)
         
         if(args.dump_eval_metrics):
-            model.dump_eval_metrics(
-                run_summary_dir,
-                wandb_run=wandb_run,
-            )
+            model.dump_eval_metrics(run_summary_dir, wandb_run=wandb_run)
         
         finish_wandb_logging(wandb_run)
 

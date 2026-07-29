@@ -87,9 +87,7 @@ class AlexBeth(SignallingEvalMixin, Game):
 
         self.dump_signal_mode = args.dump_signals
         self.dump_predicate_perf = args.dump_predicate_perf
-        self.dump_eval_metrics_enabled = args.dump_eval_metrics
-        # Fancy language eval is only needed for eval metrics.
-        self.run_fancy_lang_eval = bool(self.dump_eval_metrics_enabled)
+        self._eval_metrics_rows = [] if(args.dump_eval_metrics) else None # Either None or one row per evaluate() call (epoch-level aggregate metrics).
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self.use_jaccard_eval = args.jaccard
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
@@ -119,12 +117,7 @@ class AlexBeth(SignallingEvalMixin, Game):
         # Row-level predicate diagnostics accumulated across eval calls.
         self._predicate_perf_rows = []  # (epoch, pred_idx, perf, acc)
         self._predicate_text_by_idx = {}
-        # One row per evaluate() call (epoch-level aggregate metrics).
-        self._eval_metrics_rows = []
 
-        if(self.dump_eval_metrics_enabled and (not self.run_fancy_lang_eval)):
-            raise ValueError("--dump_eval_metrics requires fancy eval metrics; enable --dump_signals.")
-        
         self.debug = args.debug
         self.signal_dump_dir = signal_dump_dir # str|None
 
@@ -224,10 +217,10 @@ class AlexBeth(SignallingEvalMixin, Game):
             artifact.add_file(rows_path)
             wandb_run.log_artifact(artifact)
 
+    # Saves an epoch-level table at the end of the run.
     def dump_eval_metrics(self, output_dir, wandb_run=None):
-        # Save one epoch-level table at the end of the run.
-        if((not self.dump_eval_metrics_enabled) or (len(self._eval_metrics_rows) == 0)):
-            return
+        assert self._eval_metrics_rows is not None
+        if(len(self._eval_metrics_rows) == 0): return
 
         os.makedirs(output_dir, exist_ok=True)
         rows_path = os.path.join(output_dir, "eval_metrics_rows.csv")
@@ -256,7 +249,7 @@ class AlexBeth(SignallingEvalMixin, Game):
             "eval/topsim_intensional_multi_jaccard_p",
             "eval/topsim_intensional_multi_jaccard_z"
         ]
-        # Present only when the depth curriculum was active (matches the row dict).
+
         if(self._depth_curriculum.enabled):
             fieldnames.append("eval/curriculum_max_depth")
 
@@ -525,11 +518,10 @@ class AlexBeth(SignallingEvalMixin, Game):
 
         # Cache for language-level eval metrics.
         eval_cache = None
-        if(self.run_fancy_lang_eval):
-            eval_cache = dump_cache if(dump_cache is not None) else {
-                "signals": [],
-                "predicate_ids": [],
-            }
+        eval_cache = dump_cache if(dump_cache is not None) else {
+            "signals": [],
+            "predicate_ids": [],
+        }
 
         batch_numbers = range(nb_batch)
         if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
@@ -600,10 +592,9 @@ class AlexBeth(SignallingEvalMixin, Game):
             total_signal_length += signal_length * batch_items
 
             # Scrambling resistance: how much correctness is kept when the symbol order isshuffled. High retention suggests the semantics rely less on order/composition.
-            if(self.run_fancy_lang_eval):
-                kept, base = self._scrambling_resistance(batch, asker_outcome.action[0], asker_outcome.action[1], correct_prob)
-                perf_scrambled += kept
-                perf_baseline += base
+            kept, base = self._scrambling_resistance(batch, asker_outcome.action[0], asker_outcome.action[1], correct_prob)
+            perf_scrambled += kept
+            perf_baseline += base
 
             # Caches signals once so dump and fancy eval can reuse them.
             # If `correct_only` is True, only correct items are cached.
@@ -682,91 +673,91 @@ class AlexBeth(SignallingEvalMixin, Game):
         topsim_int_jaccard = float("nan")
         topsim_int_jaccard_p = float("nan")
         topsim_int_jaccard_z = float("nan")
-        if(self.run_fancy_lang_eval):
-            scrambling_ratio = 0
-            if(perf_baseline > 0.0): scrambling_ratio = perf_scrambled / perf_baseline
-            log('eval/scrambling-resistance', scrambling_ratio)
+        
+        scrambling_ratio = 0
+        if(perf_baseline > 0.0): scrambling_ratio = perf_scrambled / perf_baseline
+        log('eval/scrambling-resistance', scrambling_ratio)
 
-            # Topographic similarity
-            # Extensional meaning is a binary vector over candidate IDs; used with Hamming distance.
-            # Intensional meaning is the predicate embedding ("what the robots think"); used with cosine distance.
-            if((eval_cache is not None) and (len(eval_cache["signals"]) > 1)):
-                num_predicates = len(self._dataset.predicates)
-                sample_size = min(256, num_predicates)
-                sample = list(zip(eval_cache["signals"], eval_cache["predicate_ids"])) # sample = [([s0, s1], id0), ([s2], id1), ...]
-                random.shuffle(sample)
-                sample = sample[:sample_size]
-                sample_signals = [tuple(s) for (s, _) in sample]
-                sample_pred_ids = [int(pid) for (_, pid) in sample]
+        # Topographic similarity
+        # Extensional meaning is a binary vector over candidate IDs; used with Hamming distance.
+        # Intensional meaning is the predicate embedding ("what the robots think"); used with cosine distance.
+        if((eval_cache is not None) and (len(eval_cache["signals"]) > 1)):
+            num_predicates = len(self._dataset.predicates)
+            sample_size = min(256, num_predicates)
+            sample = list(zip(eval_cache["signals"], eval_cache["predicate_ids"])) # sample = [([s0, s1], id0), ([s2], id1), ...]
+            random.shuffle(sample)
+            sample = sample[:sample_size]
+            sample_signals = [tuple(s) for (s, _) in sample]
+            sample_pred_ids = [int(pid) for (_, pid) in sample]
 
-                # Oracle: replace the emergent signals with the reverse-Polish encoding of each
-                # predicate (meaning side is left untouched). The dump cache is not affected.
-                if(self.eval_oracle_language):
-                    oracle_by_pred = self._oracle_signals_by_predicate()
-                    sample_signals = [tuple(oracle_by_pred[pid]) for pid in sample_pred_ids]
+            # Oracle: replace the emergent signals with the reverse-Polish encoding of each
+            # predicate (meaning side is left untouched). The dump cache is not affected.
+            if(self.eval_oracle_language):
+                oracle_by_pred = self._oracle_signals_by_predicate()
+                sample_signals = [tuple(oracle_by_pred[pid]) for pid in sample_pred_ids]
 
-                # Extensional meaning
-                sample_cand_vecs = []
-                for pid in sample_pred_ids:
-                    pred = self._dataset.predicates[int(pid)]
-                    candidate_vec = tuple(1 if(pred.check(cand) == 1) else 0 for cand in self._topsim_candidates)
-                    sample_cand_vecs.append(candidate_vec)
+            # Extensional meaning
+            sample_cand_vecs = []
+            for pid in sample_pred_ids:
+                pred = self._dataset.predicates[int(pid)]
+                candidate_vec = tuple(1 if(pred.check(cand) == 1) else 0 for cand in self._topsim_candidates)
+                sample_cand_vecs.append(candidate_vec)
 
-                # Levenshtein (order dependent) vs. Jaccard (order invariant)
-                # Levenshtein is normalised to account for varying signal length.
-                if((len(set(sample_signals)) > 1) and (len(set(sample_cand_vecs)) > 1)):
-                    # Intensional meaning
-                    device = next(self.asker.parameters()).device
-                    pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=device)
-                    sender_vecs = [row for row in self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()] # per-predicate embedding
+            # Levenshtein (order dependent) vs. Jaccard (order invariant)
+            # Levenshtein is normalised to account for varying signal length.
+            if((len(set(sample_signals)) > 1) and (len(set(sample_cand_vecs)) > 1)):
+                # Intensional meaning
+                device = next(self.asker.parameters()).device
+                pred_idx_tensor = torch.tensor(sample_pred_ids, dtype=torch.long, device=device)
+                sender_vecs = [row for row in self.asker.predicate_encoder(pred_idx_tensor).cpu().numpy()] # per-predicate embedding
 
-                    # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning (predicate id) so repeated categories don't inflate the correlation.
-                    def _topsim(meanings, meaning_distance, signal_distance, map_signal_to_str):
-                        return topographic_similarity(
-                            sample_signals, meanings,
-                            signal_distance=signal_distance, meaning_distance=meaning_distance,
-                            meaning_keys=sample_pred_ids, map_signal_to_str=map_signal_to_str, map_meaning_to_str=False,
-                            method='spearman', deduplicate=True, correl_only=self._topsim_correl_only, error_on_duplicate_meanings=False,
-                        )
+                # Topographic similarity via the Mantel test (Spearman), deduplicating by meaning (predicate id) so repeated categories don't inflate the correlation.
+                def _topsim(meanings, meaning_distance, signal_distance, map_signal_to_str):
+                    return topographic_similarity(
+                        sample_signals, meanings,
+                        signal_distance=signal_distance, meaning_distance=meaning_distance,
+                        meaning_keys=sample_pred_ids, map_signal_to_str=map_signal_to_str, map_meaning_to_str=False,
+                        method='spearman', deduplicate=True, correl_only=self._topsim_correl_only, error_on_duplicate_meanings=False,
+                    )
 
-                    ext_lev = _topsim(sample_cand_vecs, compute_correlation.hamming, compute_correlation.levenshtein_normalised, True)
-                    topsim_ext_levenshtein, topsim_ext_levenshtein_p, topsim_ext_levenshtein_z = ext_lev
-                    log('eval/topsim_extensional_norm_levenshtein', ext_lev.r)
+                ext_lev = _topsim(sample_cand_vecs, compute_correlation.hamming, compute_correlation.levenshtein_normalised, True)
+                topsim_ext_levenshtein, topsim_ext_levenshtein_p, topsim_ext_levenshtein_z = ext_lev
+                log('eval/topsim_extensional_norm_levenshtein', ext_lev.r)
+                if(not self._topsim_correl_only):
+                    log('eval/topsim_extensional_norm_levenshtein_p', ext_lev.p)
+                    log('eval/topsim_extensional_norm_levenshtein_z', ext_lev.z)
+                
+                int_lev = _topsim(sender_vecs, scipy.spatial.distance.cosine, compute_correlation.levenshtein_normalised, True)
+                topsim_int_levenshtein, topsim_int_levenshtein_p, topsim_int_levenshtein_z = int_lev
+                log('eval/topsim_intensional_norm_levenshtein', int_lev.r)
+                if(not self._topsim_correl_only):
+                    log('eval/topsim_intensional_norm_levenshtein_p', int_lev.p)
+                    log('eval/topsim_intensional_norm_levenshtein_z', int_lev.z)
+
+                if(self.use_jaccard_eval):
+                    ext_jac = _topsim(sample_cand_vecs, compute_correlation.hamming, compute_correlation.jaccard, False)
+                    topsim_ext_jaccard, topsim_ext_jaccard_p, topsim_ext_jaccard_z = ext_jac
+                    log('eval/topsim_extensional_multi_jaccard', ext_jac.r)
                     if(not self._topsim_correl_only):
-                        log('eval/topsim_extensional_norm_levenshtein_p', ext_lev.p)
-                        log('eval/topsim_extensional_norm_levenshtein_z', ext_lev.z)
+                        log('eval/topsim_extensional_multi_jaccard_p', ext_jac.p)
+                        log('eval/topsim_extensional_multi_jaccard_z', ext_jac.z)
                     
-                    int_lev = _topsim(sender_vecs, scipy.spatial.distance.cosine, compute_correlation.levenshtein_normalised, True)
-                    topsim_int_levenshtein, topsim_int_levenshtein_p, topsim_int_levenshtein_z = int_lev
-                    log('eval/topsim_intensional_norm_levenshtein', int_lev.r)
+                    int_jac = _topsim(sender_vecs, scipy.spatial.distance.cosine, compute_correlation.jaccard, False)
+                    topsim_int_jaccard, topsim_int_jaccard_p, topsim_int_jaccard_z = int_jac
+                    log('eval/topsim_intensional_multi_jaccard', int_jac.r)
                     if(not self._topsim_correl_only):
-                        log('eval/topsim_intensional_norm_levenshtein_p', int_lev.p)
-                        log('eval/topsim_intensional_norm_levenshtein_z', int_lev.z)
+                        log('eval/topsim_intensional_multi_jaccard_p', int_jac.p)
+                        log('eval/topsim_intensional_multi_jaccard_z', int_jac.z)
+            else:
+                log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
+                log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
+                if(self.use_jaccard_eval):
+                    log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
+                    log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
+                if(self.autologger.display != 'minimal'):
+                    print('eval/topsim\tnot enough variation in sampled signals/meanings')
 
-                    if(self.use_jaccard_eval):
-                        ext_jac = _topsim(sample_cand_vecs, compute_correlation.hamming, compute_correlation.jaccard, False)
-                        topsim_ext_jaccard, topsim_ext_jaccard_p, topsim_ext_jaccard_z = ext_jac
-                        log('eval/topsim_extensional_multi_jaccard', ext_jac.r)
-                        if(not self._topsim_correl_only):
-                            log('eval/topsim_extensional_multi_jaccard_p', ext_jac.p)
-                            log('eval/topsim_extensional_multi_jaccard_z', ext_jac.z)
-                        
-                        int_jac = _topsim(sender_vecs, scipy.spatial.distance.cosine, compute_correlation.jaccard, False)
-                        topsim_int_jaccard, topsim_int_jaccard_p, topsim_int_jaccard_z = int_jac
-                        log('eval/topsim_intensional_multi_jaccard', int_jac.r)
-                        if(not self._topsim_correl_only):
-                            log('eval/topsim_intensional_multi_jaccard_p', int_jac.p)
-                            log('eval/topsim_intensional_multi_jaccard_z', int_jac.z)
-                else:
-                    log('eval/topsim_extensional_norm_levenshtein', topsim_ext_levenshtein)
-                    log('eval/topsim_intensional_norm_levenshtein', topsim_int_levenshtein)
-                    if(self.use_jaccard_eval):
-                        log('eval/topsim_extensional_multi_jaccard', topsim_ext_jaccard)
-                        log('eval/topsim_intensional_multi_jaccard', topsim_int_jaccard)
-                    if(self.autologger.display != 'minimal'):
-                        print('eval/topsim\tnot enough variation in sampled signals/meanings')
-
-        if(self.dump_eval_metrics_enabled):
+        if(self._eval_metrics_rows is not None):
             row = {
                 "epoch": epoch_index,
                 "eval/retriever_loss": float(eval_retriever_loss),
@@ -792,16 +783,14 @@ class AlexBeth(SignallingEvalMixin, Game):
                 "eval/topsim_intensional_multi_jaccard_p": topsim_int_jaccard_p,
                 "eval/topsim_intensional_multi_jaccard_z": topsim_int_jaccard_z,
             }
+            
             # Only recorded when the depth curriculum is active (constant within a run).
             if(self._depth_curriculum.enabled):
                 row["eval/curriculum_max_depth"] = int(self._depth_curriculum.current_max_depth)
+            
             missing = [k for k, v in row.items() if((k != "epoch") and (v is None))]
-            if(missing):
-                raise RuntimeError(
-                    "Missing eval metrics for epoch "
-                    f"{epoch_index}: {', '.join(missing)}. "
-                    "Enable fancy eval with --dump_eval_metrics."
-                )
+            if(missing): raise RuntimeError(f"Missing eval metrics for epoch {epoch_index}: {', '.join(missing)}.")
+
             self._eval_metrics_rows.append(row)
 
         # Decides if there is a performance hike.
