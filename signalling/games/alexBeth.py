@@ -103,8 +103,7 @@ class AlexBeth(SignallingEvalMixin, Game):
         self.epochs = args.epochs
         # Negation metrics only run when negation exists.
         self.no_negation = args.no_negation
-        # Predicate-depth training curriculum (disabled when --depth_curriculum_threshold is
-        # None). All of its state is encapsulated in this single object.
+        # Predicate-depth training curriculum (disabled when --depth_curriculum_threshold is None). All of its state is encapsulated in this single object.
         self._depth_curriculum = DepthCurriculum(args.depth_curriculum_threshold, dataset)
         if(self._depth_curriculum.enabled):
             print(
