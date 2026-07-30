@@ -449,7 +449,7 @@ class AlexBethPretrainer(Pretrainer):
 
                     batch = self.dataset.get_batch(size=self.batch_size, data_type='train')
                     scores = model(self.game._alex_input(batch), self.game._beth_input(batch)) # (batch, num_candidates)
-                    truth = self.game._compute_truth_targets(batch)                             # (batch, num_candidates)
+                    truth = batch.candidate_truth                             # (batch, num_candidates)
 
                     loss = F.binary_cross_entropy_with_logits(scores, truth, reduction='mean')
 
@@ -476,7 +476,7 @@ class AlexBethPretrainer(Pretrainer):
                 for _ in range(1 + (self.steps_per_epoch // 10)):
                     batch = self.dataset.get_batch(size=self.batch_size, data_type='test')
                     scores = model(self.game._alex_input(batch), self.game._beth_input(batch))
-                    truth = self.game._compute_truth_targets(batch)
+                    truth = batch.candidate_truth
                     test_loss += F.binary_cross_entropy_with_logits(scores, truth, reduction='sum').item()
                     test_hits += ((scores >= 0.0).float() == truth).float().sum().item()
                     test_items += truth.numel()
