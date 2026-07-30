@@ -126,7 +126,6 @@ import pathlib
 import pprint
 import sys
 
-#this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
 
 import socket # for `gethostname`
 import torch # for device
@@ -143,7 +142,7 @@ def get_args(remaining_args=None):
 
     default_data_set = pathlib.Path('data') / 'concon'
     default_models = pathlib.Path('[summary]') / 'models'
-    default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + socket.gethostname())
+    default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + cocket.gethostname())
 
     # Dataset (defined in utils/image_data.py, next to the loader that reads these).
     add_data_args(arg_parser, default_data_set)

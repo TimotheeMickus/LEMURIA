@@ -9,8 +9,6 @@ import pathlib
 import pprint
 import sys
 
-#this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
-
 # The subcommands that own a full argument parser of their own (built in their get_args). For these,
 # `--help` is handed through so that the *game's* arguments are shown; every other subcommand's
 # arguments live on this top-level parser, so its help is shown instead.
