@@ -255,7 +255,7 @@ def get_args(remaining_args=None):
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for pretraining', type=int, default=5)
     group.add_argument('--pretrain_steps_per_epoch', help='number of steps per pretraining epoch (defaults to --steps_per_epoch)', type=int, default=None)
     group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining (defaults to --learning_rate)', type=float, default=None)
-    group.add_argument('--freeze_pretrained', help='after pretraining, freeze the pretrained encoder (asker predicate encoder / retriever candidate encoder) so that it is not updated during the communication game', action='store_true')
+    group.add_argument('--freeze_pretrained_parameters', help='after pretraining, freeze all pretrained parameters (here: the asker predicate encoder / retriever candidate encoder) so that they are not updated during the communication game', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')

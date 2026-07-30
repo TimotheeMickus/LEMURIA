@@ -269,7 +269,7 @@ class AlexBethPretrainer:
         self.epochs = getattr(args, 'pretrain_epochs', 5)
         self.steps_per_epoch = getattr(args, 'pretrain_steps_per_epoch', None) or args.steps_per_epoch
         self.learning_rate = getattr(args, 'pretrain_learning_rate', None) or args.learning_rate
-        self.freeze = getattr(args, 'freeze_pretrained', False)
+        self.freeze = getattr(args, 'freeze_pretrained_parameters', False)
 
     # Full pretraining, run once before training (and used by the driver). Pretrains every agent the
     # game exposes; in the shared case there is a single joint pass over the (only) asker/retriever

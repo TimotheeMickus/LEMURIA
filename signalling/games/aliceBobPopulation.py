@@ -18,7 +18,9 @@ class AliceBobPopulation(PopulationMixin, AliceBob):
         # Arguments used to re-pretrain a reinitialized agent's CNN (see _on_reinitialized).
         self._pretrain_args = {
             "pretrain_CNN_mode": args.pretrain_CNNs,
-            "freeze_pretrained_CNN": args.freeze_pretrained_CNNs,
+            # `getattr` keeps old checkpoints loadable: their embedded hparams may carry the legacy
+            # `freeze_pretrained_CNNs` instead of the unified `freeze_pretrained_parameters`.
+            "freeze_pretrained_CNN": getattr(args, 'freeze_pretrained_parameters', getattr(args, 'freeze_pretrained_CNNs', False)),
             "learning_rate": (args.pretrain_learning_rate or args.learning_rate),
             "epochs": args.pretrain_epochs,
             "steps_per_epoch": args.steps_per_epoch,

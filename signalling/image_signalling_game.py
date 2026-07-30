@@ -78,7 +78,7 @@ def do(args):
             pretrained_models = model.pretrain_CNNs(
                 data_loader,
                 pretrain_CNN_mode=args.pretrain_CNNs,
-                freeze_pretrained_CNN=args.freeze_pretrained_CNNs,
+                freeze_pretrained_CNN=args.freeze_pretrained_parameters,
                 learning_rate=args.pretrain_learning_rate or args.learning_rate,
                 epochs=args.pretrain_epochs,
                 steps_per_epoch=args.steps_per_epoch,
@@ -239,7 +239,7 @@ def get_args(remaining_args=None):
     group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining', type=float)
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
-    group.add_argument('--freeze_pretrained_CNNs', help='do not backpropagate gradient on pretrained CNNs', action='store_true')
+    group.add_argument('--freeze_pretrained_parameters', help='after pretraining, freeze all pretrained parameters (here: the pretrained CNNs) so that they are not updated during the game', action='store_true')
     group.add_argument('--detect_outliers', help='if pretraining, then after, the trained model analyses the dataset in order to detect problems', action='store_true')
     group.add_argument('--autoencode_receiver_inputs', help='run all receiver image inputs through a pretrained autoencoder', action='store_true')
 
