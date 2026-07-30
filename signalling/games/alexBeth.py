@@ -264,13 +264,6 @@ class AlexBeth(SignallingEvalMixin, Game):
             artifact.add_file(rows_path)
             wandb_run.log_artifact(artifact)
     
-    # The name is misleading (reflects an older version): this only converts truth to a tensor on the device.
-    def _compute_truth_targets(self, batch):
-        """
-        Returns a float tensor of shape (batch size, nb candidates) where 1.0 denotes that the predicate holds for the candidate, and 0.0 otherwise.
-        """
-        return batch.candidate_truth
-    
     # batch: Batch
     def _alex_input(self, batch):
         return batch.predicate_idx
@@ -306,7 +299,7 @@ class AlexBeth(SignallingEvalMixin, Game):
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
         asker_outcome, retriever_outcome = self(batch)
-        truth_targets = self._compute_truth_targets(batch)
+        truth_targets = batch.candidate_truth
 
         # Alex's part
         (asker_loss, asker_perf, asker_rewards) = self.compute_asker_loss(asker_outcome, retriever_outcome.scores, truth_targets)
@@ -475,7 +468,7 @@ class AlexBeth(SignallingEvalMixin, Game):
     # candidate (P(true) where the predicate holds, P(false) otherwise), given (possibly
     # scrambled) signals.
     def _signal_correctness(self, batch, signals, lengths):
-        truth_targets = self._compute_truth_targets(batch)
+        truth_targets = batch.candidate_truth
         outcome = self.retriever(self._beth_input(batch), signal=signals, length=lengths)
         probs = torch.sigmoid(outcome.scores)
         return torch.where(truth_targets > 0.5, probs, 1.0 - probs)
@@ -530,7 +523,7 @@ class AlexBeth(SignallingEvalMixin, Game):
             self.start_episode(train_episode=False)
             
             batch = data_loader.get_batch(size=batch_size, data_type='test', predicate_sampling='random') # RMK: `data_type` currently has no effect.
-            truth_targets = self._compute_truth_targets(batch) # Shape: (batch_size, num_candidates)
+            truth_targets = batch.candidate_truth # Shape: (batch_size, num_candidates)
 
             asker_outcome, retriever_outcome = self.alex_to_beth(batch)
 

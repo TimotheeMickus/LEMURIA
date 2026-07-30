@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from .agent import Agent
-from ..utils.modules import SignalDecoder, build_cnn_encoder_from_args
+from ..utils.modules import SignalDecoder
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
