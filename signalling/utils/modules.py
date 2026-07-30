@@ -743,3 +743,38 @@ def build_cnn_decoder_from_args(args):
 def build_embeddings(base_alphabet_size, dim, use_bos=False):
     vocab_size = (base_alphabet_size + 3) if use_bos else (base_alphabet_size + 2) # +3: EOS symbol, padding symbol, BOS symbol; +2: EOS symbol, padding symbol
     return nn.Embedding(vocab_size, dim, padding_idx=base_alphabet_size + 1)
+
+# output: torch.nn.Module (a candidate encoder)
+# Builds the candidate encoder selected by `args.candidate_encoder` ("node_averager" or
+# "graph_transformer"). Extracted from `Retriever.from_args` so that the asker-pretraining
+# procedure (which temporarily hands an asker a candidate encoder) makes the *exact same*
+# architectural choice as the retriever does.
+def build_candidate_encoder_from_args(args):
+    if(args.candidate_encoder == "node_averager"):
+        return CandidateNodeAverager(
+            node_vocab_size=args.node_vocab_size,
+            hidden_size=args.hidden_size,
+            padding_idx=args.node_padding_idx,
+        )
+    elif(args.candidate_encoder == "graph_transformer"):
+        return CandidateGraphEncoder(
+            node_vocab_size=args.node_vocab_size,
+            edge_vocab_size=args.edge_vocab_size,
+            num_layers=args.graph_num_layers,
+            d_model=args.graph_d_model,
+            num_heads=args.graph_num_heads,
+            d_hidden=args.graph_d_hidden,
+            dropout=args.graph_dropout,
+            use_norm=(not args.graph_no_norm),
+        )
+    raise ValueError(f"Unknown candidate encoder: {args.candidate_encoder!r}.")
+
+# output: torch.nn.Embedding (a predicate encoder)
+# Builds the predicate encoder used by an asker: one learnable embedding per predicate. Extracted
+# from `Asker.from_args` so that the retriever-pretraining procedure (which temporarily hands a
+# retriever a predicate encoder, "as if it were an asker") builds the *exact same* module.
+# The embedding dimension is `hidden_size`, matching the candidate encoder's output dimension so
+# that the two can be combined by the dot product used in `Retriever.aux_forward` (this is the same
+# implicit `graph_d_model == hidden_size` assumption the retriever itself relies on).
+def build_predicate_encoder_from_args(args):
+    return nn.Embedding(args.num_predicates, args.hidden_size)

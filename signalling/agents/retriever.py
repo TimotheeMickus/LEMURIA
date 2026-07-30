@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .agent import Agent
-from ..utils.modules import SignalEncoder, CandidateNodeAverager, CandidateGraphEncoder
+from ..utils.modules import SignalEncoder, build_candidate_encoder_from_args
 from ..utils import misc
 
 # Structure for outcomes
@@ -97,23 +97,7 @@ class Retriever(Agent):
     def from_args(cls, args, symbol_embeddings=None):
         has_shared_param = (symbol_embeddings is not None)
         
-        if(args.candidate_encoder == "node_averager"):
-            candidate_encoder = CandidateNodeAverager(
-                node_vocab_size=args.node_vocab_size,
-                hidden_size=args.hidden_size,
-                padding_idx=args.node_padding_idx
-            )
-        elif(args.candidate_encoder == "graph_transformer"):
-            candidate_encoder = CandidateGraphEncoder(
-                node_vocab_size=args.node_vocab_size,
-                edge_vocab_size=args.edge_vocab_size,
-                num_layers=args.graph_num_layers,
-                d_model=args.graph_d_model,
-                num_heads=args.graph_num_heads,
-                d_hidden=args.graph_d_hidden,
-                dropout=args.graph_dropout,
-                use_norm=not args.graph_no_norm
-            )
+        candidate_encoder = build_candidate_encoder_from_args(args)
         #candidate_encoder = torch.compile(candidate_encoder)
                 
         signal_encoder = SignalEncoder.from_args(args, symbol_embeddings=symbol_embeddings)

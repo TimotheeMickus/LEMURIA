@@ -107,6 +107,14 @@ def do(args):
         if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)
 
+        # Pretrains the agents on the predicate/candidate satisfaction task, if enabled. Symmetric
+        # with AliceBob's CNN pretraining, but driven through the game's `pretrainer` object rather
+        # than a mixin: `None` means no pretraining. Reinitialized agents are re-pretrained by the
+        # population reset hook (see AlexBethPopulation._on_reinitialized).
+        if(model.pretrainer is not None):
+            print(f"[{datetime.now()}] pretraining start…", flush=True)
+            model.pretrainer.pretrain()
+
         # Runs the run.
         if(args.save_every > 0): model.save(run_models_dir / "model_e-1.pt")
 
@@ -241,6 +249,13 @@ def get_args(remaining_args=None):
     group.add_argument('--depth_curriculum_threshold', help='predicate-depth curriculum: start using only the shallowest predicates (depth = min_depth) for both training and evaluation, then unlock the next depth each time eval accuracy reaches this threshold. Default: None (disabled, all depths used from the start); a bare flag means 1.0.', nargs='?', const=1.0, default=None, type=float)
     group.add_argument('--pop_size', help="AlexBethPopulation: population sizes as 'n-m' (n askers, m retrievers). Passing this (or --pop_reset_period) selects the population game; the omitted one defaults to 2-2 / 0-0.", default=None, type=str)
     group.add_argument('--pop_reset_period', help="AlexBethPopulation: reset periods as 'a-b'; reinitialize askers every a epochs and retrievers every b epochs (0 = never).", default=None, type=str)
+
+    group = arg_parser.add_argument_group(title='Pretraining', description='arguments relative to pretraining agents on the predicate/candidate satisfaction task before the communication game')
+    group.add_argument('--pretrain', help='pretrain each agent on the predicate/candidate satisfaction task before training: askers keep their predicate encoder and are temporarily paired with a candidate encoder (same --candidate_encoder choice as retrievers), retrievers keep their candidate encoder and are temporarily paired with a predicate embedding. Temporary modules are discarded afterwards. Reinitialized agents (population reset) are pretrained again.', action='store_true')
+    group.add_argument('--pretrain_epochs', help='number of epochs per agent for pretraining', type=int, default=5)
+    group.add_argument('--pretrain_steps_per_epoch', help='number of steps per pretraining epoch (defaults to --steps_per_epoch)', type=int, default=None)
+    group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining (defaults to --learning_rate)', type=float, default=None)
+    group.add_argument('--freeze_pretrained', help='after pretraining, freeze the pretrained encoder (asker predicate encoder / retriever candidate encoder) so that it is not updated during the communication game', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')

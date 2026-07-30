@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from .agent import Agent
-from ..utils.modules import SignalDecoder
+from ..utils.modules import SignalDecoder, build_predicate_encoder_from_args
 
 # Structure for outcomes
 Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
@@ -63,8 +63,7 @@ class Asker(Agent):
     def from_args(cls, args, predicate_encoder=None, symbol_embeddings=None):
         has_shared_param = (predicate_encoder is not None) or (symbol_embeddings is not None)
         
-        num_predicates = args.num_predicates
-        if(predicate_encoder is None): predicate_encoder = nn.Embedding(num_predicates, args.hidden_size)
+        if(predicate_encoder is None): predicate_encoder = build_predicate_encoder_from_args(args)
 
         signal_decoder = SignalDecoder.from_args(args, symbol_embeddings=symbol_embeddings)
         #signal_decoder = torch.compile(signal_decoder)

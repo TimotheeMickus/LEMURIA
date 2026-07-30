@@ -21,6 +21,7 @@ from ..eval import decision_tree
 from ..eval import compositionality
 
 from .game import Game
+from .pretraining import AlexBethPretrainer
 from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
 from .depth_curriculum import DepthCurriculum
 
@@ -121,6 +122,12 @@ class AlexBeth(SignallingEvalMixin, Game):
         self.debug = args.debug
         self.signal_dump_dir = signal_dump_dir # str|None
 
+        # Pretraining: either None (no pretraining) or an object encapsulating the whole procedure.
+        # `getattr` keeps old checkpoints (whose embedded hparams predate --pretrain) loadable. The
+        # driver runs it (game.pretrainer.pretrain()); load() never does, so loading a trained model
+        # does not re-pretrain.
+        self.pretrainer = AlexBethPretrainer(self, args, dataset) if(getattr(args, 'pretrain', False)) else None
+
     @property
     def asker(self):
         return self._asker
@@ -144,6 +151,13 @@ class AlexBeth(SignallingEvalMixin, Game):
     @property
     def autologger(self):
         return self._logger
+
+    # Lists the (agent, role) pairs to pretrain, mirroring AliceBob.agents_for_CNN_pretraining.
+    # The single non-shared game pretrains its one asker and its one retriever, each with its own
+    # throwaway partner module. (In the shared case the pretrainer does a single joint pass instead
+    # and does not call this; see AlexBethPretrainer.pretrain.)
+    def agents_for_pretraining(self):
+        return [(self.asker, "asker"), (self.retriever, "retriever")]
 
     def _build_candidate_vector(self):
         candidate_vector = [
