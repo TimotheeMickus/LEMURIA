@@ -559,13 +559,14 @@ class Dataset(SeqAsyncDataset):
         # Generates predicates.
         assert (nontrivial_only or candidate_sampling != "balanced"), "It is impossible to garantee the existence of both positive and negative candidates if there exist trivial predicates."
         self.predicates = self.generateAllPredicates(max_depth=max_depth, min_depth=min_depth, nontrivial_only=nontrivial_only, no_negation=no_negation, no_conjunction=no_conjunction, consider_indeterminate=allow_indeterminate) # ndarray[Predicate]
+
+        # Computes the predicate × candidate satisfaction matrix and prints info about it, in particular its rank.
+        self._print_satisfaction_matrix_rank()
+
         # naming convention inconsistent internally but compatible with modules; TIMOTHÉE: be more specific
         self.nb_categories = len(self.predicates) 
-        # Predicate-selection mask used by get_batch. True means "can be sampled".
-        self.predicate_sampling_mask = np.ones((self.nb_categories,), dtype=bool)
-        # Structural depth of each predicate (parallel to self.predicates), used by the
-        # depth-based training curriculum (see games.depth_curriculum.DepthCurriculum).
-        self.predicate_depths = np.array([pred.depth() for pred in self.predicates], dtype=int)
+        self.predicate_sampling_mask = np.ones((self.nb_categories,), dtype=bool) # Predicate-selection mask used by get_batch. True means "can be sampled".
+        self.predicate_depths = np.array([pred.depth() for pred in self.predicates], dtype=int) # from predicate idx to depth
 
         # Builds a global node vocabulary.
         node_labels = {GraphConverter.object_token} # set[str | (str, str)]
@@ -604,6 +605,33 @@ class Dataset(SeqAsyncDataset):
     @staticmethod
     def _additional_resources(failure_based_distribution_info, **kwargs): 
         return {"failure_based_distribution": FailureBasedDistribution(**failure_based_distribution_info)}
+
+    # Computes the predicate × candidate satisfaction matrix and prints info about it, in particular its rank.
+    def _print_satisfaction_matrix_rank(self):
+        # Enumerates all possible candidates.
+        domains = [
+            prop.values + ([None] if self.allow_indeterminate else [])
+            for prop in self.properties
+        ]
+    
+        candidates = [
+            Candidate(dict(zip(self.properties, assignment)))
+            for assignment in itertools.product(*domains)
+        ]
+    
+        # Builds the predicate × candidate satisfaction matrix. (Entries are -1, 0 or +1.)
+        M = np.empty((len(self.predicates), len(candidates)), dtype=np.int8)
+        for i, pred in enumerate(self.predicates):
+            for j, cand in enumerate(candidates):
+                M[i, j] = pred.check(cand)
+    
+        # Prints information.
+        print()
+        print("Predicate–candidate satisfaction matrix")
+        print(f"  shape : {M.shape}")
+        print(f"  values: {np.unique(M)}")
+        print(f"  rank  : {np.linalg.matrix_rank(M)}")
+        print()
 
     # Builds a fixed pool of instances. (Used for overfitting tests.)
     def init_overfit_pool(self, size=100):
