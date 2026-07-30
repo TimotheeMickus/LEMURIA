@@ -11,9 +11,6 @@ import sys
 
 #this_path = os.path.abspath(os.path.dirname(sys.argv[0])) # The path of (the directory in which is) this file
 
-import socket # for `gethostname`
-import torch # for device
-
 def get_args():
     arg_parser = argparse.ArgumentParser()
     
