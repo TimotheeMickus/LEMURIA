@@ -6,227 +6,335 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..utils.log import Progress
-from ..utils.misc import build_optimizer, Unflatten
+from ..utils.misc import build_optimizer, Unflatten, get_default_fn
 from ..utils.modules import (
     MultiHeadsClassifier,
     build_candidate_encoder_from_args,
     build_predicate_encoder_from_args,
+    build_cnn_decoder_from_args,
+    build_cnn_encoder_from_args,
 )
 
-# Mixin providing CNN-pretraining capability to *image* games.
+# ===========================================================================
+# Pretraining
+# ---------------------------------------------------------------------------
+# A game owns a `pretrainer` attribute that is either `None` (no pretraining) or a `Pretrainer`
+# instance encapsulating the whole procedure (see `Game.pretrainer` / `Game.run_pretraining`). This
+# replaces the old `CNNPretrainable` mixin: pretraining is now a self-contained object rather than a
+# set of methods bolted onto the game, which lets the common machinery live on the base classes
+# (`Game.run_pretraining`, `PopulationMixin._on_reinitialized`).
 #
-# Only games whose agents carry an `image_encoder` (and optionally an
-# `image_decoder`) can pretrain their convolutional stack, so this behaviour
-# lives here rather than on the game base class. A game opts in simply by
-# inheriting from `CNNPretrainable` (e.g. `class AliceBob(CNNPretrainable, Game)`);
-# games without images (e.g. AlexBeth) do not inherit it, and the training
-# driver checks `isinstance(game, CNNPretrainable)` before pretraining.
-#
-# Concrete image games must provide `agents_for_CNN_pretraining`.
-#
-# Expected on the host game: `self.autologger`.
-class CNNPretrainable:
-    # Lists the agents whose CNN should be pretrained. Must be overridden by the
-    # concrete image game (e.g. AliceBob returns its sender/receiver).
-    def agents_for_CNN_pretraining(self):
-        raise NotImplementedError
+# Concrete games expose, when they support pretraining:
+#   * self.pretrainer            : a Pretrainer subclass instance (or None)
+#   * agents_for_pretraining()   : list of (agent, role) pairs to pretrain (role is a short string
+#                                  such as "sender"/"receiver" or "asker"/"retriever", used only for
+#                                  naming/logging by the CNN pretrainer, and to pick the procedure by
+#                                  the AlexBeth pretrainer).
+# ===========================================================================
 
-    # TODO: pretraining should be handled by a separate, dedicated object
-    def pretrain_CNNs(self, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None):
-        pretrained_models = {}
-        agents = self.agents_for_CNN_pretraining()
-        for i, agent in enumerate(agents):
-            agent_name = f"agent {i}"
-            pretrained_models[agent_name] = self.pretrain_agent_CNN(agent, data_iterator, pretrain_CNN_mode, freeze_pretrained_CNN, learning_rate, epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, deconvolution_factory, convolution_factory, agent_name=agent_name)
 
-        return pretrained_models
+# ---------------------------------------------------------------------------
+# CNN training routines (image games)
+# ---------------------------------------------------------------------------
+# These are plain functions rather than methods so that they can be reused both by `CNNPretrainer`
+# and by AliceBob's receiver-preprocessor autoencoder (which is pretrained at construction time,
+# independently of whether the main CNN pretraining is enabled). The only external dependency is the
+# summary writer, which is passed in explicitly.
 
-    def pretrain_agent_CNN(self, agent, data_iterator, pretrain_CNN_mode='category-wise', freeze_pretrained_CNN=False, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, deconvolution_factory=None, convolution_factory=None, agent_name="agent"):
-        """
-        Pretrain (de)convolution of agent.
-        """
-        print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
+# Pretrains the CNN of an agent in category- or feature-wise mode. Returns the MultiHeadsClassifier
+# (its heads are the temporary/discarded part; only the agent's image_encoder is kept).
+def train_cnn_classifier(agent, data_iterator, pretrain_CNN_mode, learning_rate, epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, summary_writer, agent_name="agent"):
+    loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
+    acc_tag = 'pretrain/acc_%s_%s' % (agent_name, pretrain_CNN_mode)
 
-        if(pretrain_CNN_mode != 'auto-encoder'):
-            pretrained_model = self._pretrain_classif(agent, data_iterator, pretrain_CNN_mode, learning_rate, epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
-        else:
-            pretrained_model = self._pretrain_ae(agent, data_iterator, pretrain_CNN_mode, deconvolution_factory, convolution_factory, learning_rate, epochs, steps_per_epoch, display_mode, pretrain_CNNs_on_eval, agent_name)
+    concept_sizes = [len(concept) for concept in data_iterator.concepts]
+    device = next(agent.parameters()).device
 
-        # If necessary, deactivate training in the image encoder.
-        if(freeze_pretrained_CNN):
-            for p in agent.image_encoder.parameters():
-                p.requires_grad = False
+    if pretrain_CNN_mode == 'feature-wise':
+        # Defines one classification head per non-unary concept
+        heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(50, 3), # I guess the 3 could be replaced with csize
+                nn.LogSoftmax(dim=1)
+            ) for csize in concept_sizes if csize > 1
+        ]).to(device)
+        get_head_targets = (lambda cat: [v for v, csize in zip(cat, concept_sizes) if csize > 1])
+    else:
+        heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(50, data_iterator.nb_categories),
+                nn.LogSoftmax(dim=1))
+            ]
+        ).to(device)
+        get_head_targets = (lambda cat: [data_iterator.category_idx(cat)])
 
-        return pretrained_model
+    optimizer = build_optimizer(it.chain(agent.image_encoder.parameters(), heads.parameters()), learning_rate)
+    n_heads = len(heads)
 
-    # Pretrains the CNN of an agent in category- or feature-wise mode
-    def _pretrain_classif(self, agent, data_iterator, pretrain_CNN_mode='category-wise', learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent"):
-        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
-        acc_tag = 'pretrain/acc_%s_%s' % (agent_name, pretrain_CNN_mode)
+    model = MultiHeadsClassifier(agent.image_encoder, optimizer, heads, n_heads, get_head_targets, device)
 
-        concept_sizes = [len(concept) for concept in data_iterator.concepts]
-        xcoder = agent.signal_decoder if hasattr(agent, 'signal_decoder') else agent.signal_encoder
-        hidden_size = xcoder.symbol_embeddings.weight.size(1)
+    total_items = 0
+    for epoch_index in range(epochs):
+        # Optimization
+        pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch_index, logged_items={'L', 'acc'})
+        epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
+        with pbar:
+            for step_i in range(steps_per_epoch):
+                batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
+
+                hits, loss = model.run_batch(batch)
+
+                for x in hits: epoch_hits += x.sum().item()
+                epoch_items += batch.size
+                total_items += batch.size
+
+                if(summary_writer is not None):
+                    summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
+                    summary_writer.add_scalar(acc_tag, (epoch_hits / (epoch_items * n_heads)), total_items)
+                pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
+
+        # Evaluation
+        with torch.no_grad():
+            agent.image_encoder.eval()
+            heads.eval()
+            test_loss, test_epoch_hits, test_epoch_items =  0., 0, 0
+            for step_i in range(1 + (steps_per_epoch // 10)):
+                batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be use
+                hits, losses = model.forward(batch)
+                for x in losses: test_loss += x.sum().item()
+                for x in hits: test_epoch_hits += x.sum().item()
+                test_epoch_items += batch.size
+            test_loss = test_loss / (test_epoch_items * n_heads)
+            test_acc = test_epoch_hits / (test_epoch_items * n_heads)
+            if(summary_writer is not None):
+                summary_writer.writer.add_scalar('eval-' + loss_tag, test_loss, epoch_index)
+                summary_writer.writer.add_scalar('eval-' + acc_tag, test_acc, epoch_index)
+            print(f"[eval-pretrain {agent_name} epoch {epoch_index}] L={test_loss}, acc={test_acc}")
+            agent.image_encoder.train()
+            heads.train()
+
+    return model
+
+
+# Pretrains the CNN of an agent in auto-encoder mode. `agent` may be None (external autoencoder, e.g.
+# AliceBob's receiver preprocessor), in which case the (de)convolution factories build the modules.
+# Returns the Sequential autoencoder model.
+def train_cnn_autoencoder(agent, data_iterator, deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, summary_writer=None, agent_name="agent", _is_external_ae=False, device=None):
+    loss_tag = 'pretrain/loss_%s_auto-encoder' % agent_name
+    if device is None:
         device = next(agent.parameters()).device
 
-        if pretrain_CNN_mode == 'feature-wise':
-            # Defines one classification head per non-unary concept
-            heads = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(50, 3), # I guess the 3 could be replaced with csize
-                    nn.LogSoftmax(dim=1)
-                ) for csize in concept_sizes if csize > 1
-            ]).to(device)
-            get_head_targets = (lambda cat: [v for v, csize in zip(cat, concept_sizes) if csize > 1])
+    found = False
+    if agent is not None and hasattr(agent, 'image_encoder'):
+        encoder = agent.image_encoder
+        found = True
+    else:
+        encoder = convolution_factory()
+    if agent is not None and hasattr(agent, 'image_decoder'):
+        decoder = agent.image_decoder
+        found = True
+    else:
+        decoder = deconvolution_factory()
+
+    assert found or _is_external_ae, "Agent must have an image encoder or decoder!"
+
+    model = nn.Sequential(
+        encoder,
+        Unflatten(),
+        decoder,
+    ).to(device)
+
+    optimizer = build_optimizer(model.parameters(), learning_rate)
+
+    total_items = 0
+    data_type = 'any' if pretrain_CNNs_on_eval else 'train'
+
+    for epoch_index in range(epochs):
+        # Optimization
+        epoch_loss, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
+        pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch_index, logged_items={'L'})
+        with pbar:
+            for _ in range(steps_per_epoch):
+                optimizer.zero_grad()
+
+                batch = data_iterator.get_batch(data_type=data_type, keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
+                batch_img = batch.target_img(stack=True)
+                output = model(batch_img)
+
+                loss = F.mse_loss(output, batch_img, reduction="sum")
+
+                epoch_loss += loss.item()
+                epoch_items += batch_img.size(0)
+                total_items += batch_img.size(0)
+                if(summary_writer is not None): summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), total_items)
+                pbar.update(L=(epoch_loss / epoch_items))
+
+                loss.backward()
+                optimizer.step()
+
+        # Evaluation
+        with torch.no_grad():
+            model.eval()
+            test_epoch_loss, test_epoch_items = 0., 0.
+            for _ in range(1 + (steps_per_epoch // 10)):
+                batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
+                batch_img = batch.target_img(stack=True)
+                output = model(batch_img)
+                loss = F.mse_loss(output, batch_img, reduction="sum")
+                test_epoch_loss += loss.item()
+                test_epoch_items += batch_img.size(0)
+            test_epoch_loss = test_epoch_loss / test_epoch_items
+            if(summary_writer is not None):
+                summary_writer.writer.add_scalar('eval-' + loss_tag, test_epoch_loss, epoch_index)
+            print(f"[eval-pretrain {agent_name} epoch {epoch_index}] L={test_epoch_loss}")
+            model.train()
+
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Pretrainer base
+# ---------------------------------------------------------------------------
+class Pretrainer:
+    """Base class for pretraining procedures.
+
+    A game holds either `None` (no pretraining) or an instance of a subclass in `self.pretrainer`.
+    The base class holds the reference back to the game (from which it reads the autologger and the
+    agents to pretrain), the data loader, and the shared hyperparameters. It also emits a one-line
+    description of the procedure at creation, including which parameters it would freeze.
+
+    Subclasses implement:
+      * `_describe()`            : short human string naming the pretraining task;
+      * `_frozen_description()`  : human string naming the parameters frozen when `freeze` is set;
+      * `pretrain_agent(agent, role, agent_name=None)` : pretrain a single agent (also used to
+        re-pretrain a reinitialized agent after a population reset);
+      * optionally `_pretrain_all()` : the full pass (defaults to pretraining every agent listed by
+        the game; overridden e.g. for the shared case).
+    """
+    def __init__(self, game, args, dataset):
+        self.game = game
+        self.args = args
+        self.dataset = dataset
+
+        self.device = args.device
+        self.display_mode = args.display
+        self.freeze = args.freeze_pretrained_parameters
+        self.epochs = args.pretrain_epochs
+        self.steps_per_epoch = args.pretrain_steps_per_epoch or args.steps_per_epoch
+        self.learning_rate = args.pretrain_learning_rate or args.learning_rate
+
+        self._log_creation()
+
+    @property
+    def summary_writer(self):
+        return self.game.autologger.summary_writer
+
+    # --- description / logging at creation ---
+    def _describe(self):
+        raise NotImplementedError
+
+    def _frozen_description(self):
+        raise NotImplementedError
+
+    def _log_creation(self):
+        freeze_msg = (f"freezes {self._frozen_description()}" if self.freeze
+                      else "keeps all pretrained parameters trainable")
+        print(
+            f"[{datetime.now()}] {type(self).__name__} created — task: {self._describe()}; "
+            f"epochs={self.epochs}, steps/epoch={self.steps_per_epoch}, lr={self.learning_rate}; "
+            f"on completion, {freeze_msg}.",
+            flush=True,
+        )
+
+    # --- driving ---
+    def pretrain(self):
+        """Full pretraining, run once before training. Returns a dict {name: pretrained_model}
+        (used by --detect_outliers for the CNN classifier); values may be None when irrelevant."""
+        print(("[%s] pretraining start…" % datetime.now()), flush=True)
+        return self._pretrain_all()
+
+    def _pretrain_all(self):
+        models = {}
+        for i, (agent, role) in enumerate(self.game.agents_for_pretraining()):
+            models[f"{role} {i}"] = self.pretrain_agent(agent, role)
+        return models
+
+    def pretrain_agent(self, agent, role, agent_name=None):
+        raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# CNN pretrainer (AliceBob family)
+# ---------------------------------------------------------------------------
+class CNNPretrainer(Pretrainer):
+    """Pretrains each agent's convolutional stack on a classification (category-/feature-wise) or
+    auto-encoding proxy task. The classification heads / the auto-encoder's counterpart module are
+    temporary and discarded; only the agent's image_encoder (and, in auto-encoder mode, its
+    image_decoder if it has one) are kept."""
+    def __init__(self, game, args, dataset):
+        self.mode = args.pretrain_CNNs # 'category-wise' | 'feature-wise' | 'auto-encoder'
+        self.on_eval = args.pretrain_CNNs_on_eval
+        self.deconvolution_factory = get_default_fn(build_cnn_decoder_from_args, args)
+        self.convolution_factory = get_default_fn(build_cnn_encoder_from_args, args)
+        super().__init__(game, args, dataset)
+
+    def _describe(self):
+        return f"CNN pretraining (mode={self.mode!r})"
+
+    def _frozen_description(self):
+        if(self.mode == 'auto-encoder'):
+            return "each agent's pretrained image_encoder and image_decoder (whichever it has)"
+        return "each agent's image_encoder (CNN)"
+
+    # Modules that live inside the agent and must therefore keep their pretrained weights (so they
+    # are what --freeze acts on). In auto-encoder mode both the encoder and the decoder may be the
+    # agent's own (e.g. the drawer only has an image_decoder); in classification mode only the
+    # encoder is trained/kept.
+    def _kept_modules(self, agent):
+        if(self.mode == 'auto-encoder'):
+            modules = []
+            if(hasattr(agent, 'image_encoder')): modules.append(agent.image_encoder)
+            if(hasattr(agent, 'image_decoder')): modules.append(agent.image_decoder)
+            return modules
+        return [agent.image_encoder]
+
+    def pretrain_agent(self, agent, role, agent_name=None):
+        if(agent_name is None): agent_name = role
+        print(("[%s] pretraining %s…" % (datetime.now(), agent_name)), flush=True)
+
+        if(self.mode != 'auto-encoder'):
+            model = train_cnn_classifier(
+                agent, self.dataset, self.mode, self.learning_rate, self.epochs, self.steps_per_epoch,
+                self.display_mode, self.on_eval, self.summary_writer, agent_name,
+            )
         else:
-            heads = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(50, data_iterator.nb_categories),
-                    nn.LogSoftmax(dim=1))
-                ]
-            ).to(device)
-            get_head_targets = (lambda cat: [data_iterator.category_idx(cat)])
+            model = train_cnn_autoencoder(
+                agent, self.dataset, deconvolution_factory=self.deconvolution_factory,
+                convolution_factory=self.convolution_factory, learning_rate=self.learning_rate,
+                epochs=self.epochs, steps_per_epoch=self.steps_per_epoch, display_mode=self.display_mode,
+                pretrain_CNNs_on_eval=self.on_eval, summary_writer=self.summary_writer, agent_name=agent_name,
+            )
 
-        optimizer = build_optimizer(it.chain(agent.image_encoder.parameters(), heads.parameters()), learning_rate)
-        n_heads = len(heads)
-
-        model = MultiHeadsClassifier(agent.image_encoder, optimizer, heads, n_heads, get_head_targets, device)
-
-        total_items = 0
-        for epoch_index in range(epochs):
-            # Optimization
-            pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch_index, logged_items={'L', 'acc'})
-            epoch_hits, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
-            with pbar:
-                for step_i in range(steps_per_epoch):
-                    batch = data_iterator.get_batch(data_type='train', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be used
-
-                    hits, loss = model.run_batch(batch)
-
-                    for x in hits: epoch_hits += x.sum().item()
-                    epoch_items += batch.size
-                    total_items += batch.size
-
-                    if(self.autologger.summary_writer is not None):
-                        self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch.size), total_items)
-                        self.autologger.summary_writer.add_scalar(acc_tag, (epoch_hits / (epoch_items * n_heads)), total_items)
-                    pbar.update(L=loss.item(), acc=(epoch_hits / (epoch_items * n_heads)))
-
-            # Evaluation
-            with torch.no_grad():
-                agent.image_encoder.eval()
-                heads.eval()
-                test_loss, test_epoch_hits, test_epoch_items =  0., 0, 0
-                for step_i in range(1 + (steps_per_epoch // 10)):
-                    batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[]) # For each instance of the batch, one original and one target image, but no distractor; only the target will be use
-                    hits, losses = model.forward(batch)
-                    for x in losses: test_loss += x.sum().item()
-                    for x in hits: test_epoch_hits += x.sum().item()
-                    test_epoch_items += batch.size
-                test_loss = test_loss / (test_epoch_items * n_heads)
-                test_acc = test_epoch_hits / (test_epoch_items * n_heads)
-                if(self.autologger.summary_writer is not None):
-                    self.autologger.summary_writer.writer.add_scalar('eval-' + loss_tag, test_loss, epoch_index)
-                    self.autologger.summary_writer.writer.add_scalar('eval-' + acc_tag, test_acc, epoch_index)
-                print(f"[eval-pretrain {agent_name} epoch {epoch_index}] L={test_loss}, acc={test_acc}")
-                agent.image_encoder.train()
-                heads.train()
+        if(self.freeze):
+            for module in self._kept_modules(agent):
+                for p in module.parameters(): p.requires_grad = False
 
         return model
 
-    # Pretrains the CNN of an agent in auto-encoder mode
-    def _pretrain_ae(self, agent, data_iterator, pretrain_CNN_mode='auto-encoder', deconvolution_factory=None, convolution_factory=None, learning_rate=0.0001, epochs=5, steps_per_epoch=1000, display_mode='', pretrain_CNNs_on_eval=False, agent_name="agent", _is_external_ae=False, device=None):
-        loss_tag = 'pretrain/loss_%s_%s' % (agent_name, pretrain_CNN_mode)
-        if device is None:
-            device = next(agent.parameters()).device
-
-        found = False
-        if agent is not None and hasattr(agent, 'image_encoder'):
-            encoder = agent.image_encoder
-            found = True
-        else:
-            encoder = convolution_factory()
-        if agent is not None and hasattr(agent, 'image_decoder'):
-            decoder = agent.image_decoder
-            found = True
-        else:
-            decoder = deconvolution_factory()
-
-        assert found or _is_external_ae, "Agent must have an image encoder or decoder!"
-
-        model = nn.Sequential(
-            encoder,
-            Unflatten(),
-            decoder,
-        ).to(device)
-
-        optimizer = build_optimizer(model.parameters(), learning_rate)
-
-        total_items = 0
-        data_type = 'any' if pretrain_CNNs_on_eval else 'train'
-
-
-        for epoch_index in range(epochs):
-            # Optimization
-            epoch_loss, epoch_items = 0., 0. # TODO Do they need to be floats instead of integers?
-            pbar = Progress.get_progress_cls(display_mode)(steps_per_epoch, epoch_index, logged_items={'L'})
-            with pbar:
-                for _ in range(steps_per_epoch):
-                    optimizer.zero_grad()
-
-                    batch = data_iterator.get_batch(data_type=data_type, keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
-                    batch_img = batch.target_img(stack=True)
-                    output = model(batch_img)
-
-                    loss = F.mse_loss(output, batch_img, reduction="sum")
-
-                    epoch_loss += loss.item()
-                    epoch_items += batch_img.size(0)
-                    total_items += batch_img.size(0)
-                    if(self.autologger.summary_writer is not None): self.autologger.summary_writer.add_scalar(loss_tag, (loss.item() / batch_img.size(0)), total_items)
-                    pbar.update(L=(epoch_loss / epoch_items))
-
-                    loss.backward()
-                    optimizer.step()
-
-            # Evaluation
-            with torch.no_grad():
-                model.eval()
-                test_epoch_loss, test_epoch_items = 0., 0.
-                for _ in range(1 + (steps_per_epoch // 10)):
-                    batch = data_iterator.get_batch(data_type='test', keep_category=True, no_evaluation=(not pretrain_CNNs_on_eval), sampling_strategies=[])
-                    batch_img = batch.target_img(stack=True)
-                    output = model(batch_img)
-                    loss = F.mse_loss(output, batch_img, reduction="sum")
-                    test_epoch_loss += loss.item()
-                    test_epoch_items += batch_img.size(0)
-                test_epoch_loss = test_epoch_loss / test_epoch_items
-                if(self.autologger.summary_writer is not None):
-                    self.autologger.summary_writer.writer.add_scalar('eval-' + loss_tag, test_epoch_loss, epoch_index)
-                print(f"[eval-pretrain {agent_name} epoch {epoch_index}] L={test_epoch_loss}")
-                model.train()
-
-        return {'model': model}
 
 # ---------------------------------------------------------------------------
-# AlexBeth pretraining (predicate/candidate satisfaction task)
+# AlexBeth pretrainer (predicate/candidate satisfaction task)
 # ---------------------------------------------------------------------------
-#
-# Unlike the image games, AlexBeth pretraining is *not* a mixin on the game. Instead a game owns a
-# `pretrainer` attribute that is either `None` (no pretraining) or an object encapsulating the whole
-# procedure. The training driver only has to check `if(game.pretrainer is not None): game.pretrainer.pretrain()`.
-# (This is the pattern that could eventually replace `CNNPretrainable` for the image games too.)
-#
 # The pretraining objective is, for each (predicate, candidate) pair, to predict whether the
 # candidate satisfies the predicate — i.e. exactly the retriever's task, but with the emergent
-# signal replaced by a direct encoding of the predicate. Concretely:
+# signal replaced by a direct encoding of the predicate:
 #   * an asker keeps its `predicate_encoder` and is temporarily given a candidate encoder
-#     (the same `--candidate_encoder` choice retrievers use);
+#     (the same --candidate_encoder choice retrievers use);
 #   * a retriever keeps its `candidate_encoder` and is temporarily given a predicate embedding
 #     ("as if it were an asker").
 # In both cases the temporary module is discarded once pretraining is over; only the encoder living
-# inside the agent retains its pretrained weights.
-
+# inside the agent retains its pretrained weights. In the shared case both encoders already exist and
+# are pretrained jointly in a single pass (no temporary module, and not once per role).
 
 class PredicateCandidateClassifier(nn.Module):
     """Scores (predicate, candidate) pairs exactly the way a retriever scores (signal, candidate)
@@ -250,31 +358,19 @@ class PredicateCandidateClassifier(nn.Module):
         return scores
 
 
-class AlexBethPretrainer:
-    """Pretraining procedure for AlexBeth / AlexBethPopulation.
-
-    A game holds either `None` (no pretraining) or one of these. It only needs a reference back to
-    the game (to reuse `_alex_input` / `_beth_input` / `_compute_truth_targets`, so pretraining feeds
-    the encoders *exactly* as the game does), the args (for the throwaway-module factories and the
-    hyperparameters) and the data loader.
-    """
+class AlexBethPretrainer(Pretrainer):
     def __init__(self, game, args, dataset):
-        self.game = game
-        self.args = args
-        self.dataset = dataset
-
-        self.device = args.device
         self.batch_size = args.batch_size
-        self.display_mode = args.display
-        self.epochs = getattr(args, 'pretrain_epochs', 5)
-        self.steps_per_epoch = getattr(args, 'pretrain_steps_per_epoch', None) or args.steps_per_epoch
-        self.learning_rate = getattr(args, 'pretrain_learning_rate', None) or args.learning_rate
-        self.freeze = getattr(args, 'freeze_pretrained_parameters', False)
+        super().__init__(game, args, dataset)
 
-    # Full pretraining, run once before training (and used by the driver). Pretrains every agent the
-    # game exposes; in the shared case there is a single joint pass over the (only) asker/retriever
-    # couple, with no temporary modules.
-    def pretrain(self):
+    def _describe(self):
+        return "predicate/candidate satisfaction pretraining"
+
+    def _frozen_description(self):
+        return "each agent's pretrained encoder (asker: predicate_encoder, retriever: candidate_encoder)"
+
+    # Overrides the default full pass to special-case the shared game.
+    def _pretrain_all(self):
         if(self.game.shared):
             # Shared AskerRetriever: the asker already owns the predicate encoder and the retriever
             # already owns the candidate encoder, so no temporary module is needed. Pretrain the two
@@ -287,12 +383,9 @@ class AlexBethPretrainer:
                 kept_modules=[asker.predicate_encoder, retriever.candidate_encoder],
                 agent_name="asker+retriever (shared)",
             )
-        else:
-            for agent, role in self.game.agents_for_pretraining():
-                self.pretrain_agent(agent, role)
+            return {}
+        return super()._pretrain_all()
 
-    # Pretrains a single agent. Used both by `pretrain` (initial pretraining of every agent) and by
-    # the population reset hook (to re-pretrain a reinitialized agent, as AliceBob does for the CNN).
     def pretrain_agent(self, agent, role, agent_name=None):
         if(agent_name is None): agent_name = role
 
@@ -317,13 +410,15 @@ class AlexBethPretrainer:
         else:
             raise ValueError(f"Cannot pretrain agent with unknown role {role!r} (expected 'asker' or 'retriever').")
 
+        return None
+
     # Runs the actual optimization. `kept_modules` are the modules that live inside an agent and must
     # therefore retain their pretrained weights; every other parameter of the classifier belongs to a
     # temporary module that is discarded when this method returns (its local `model` goes out of scope).
     def _run(self, predicate_encoder, candidate_encoder, kept_modules, agent_name):
         loss_tag = f'pretrain/loss_{agent_name}'
         acc_tag = f'pretrain/acc_{agent_name}'
-        summary_writer = self.game.autologger.summary_writer
+        summary_writer = self.summary_writer
 
         model = PredicateCandidateClassifier(predicate_encoder, candidate_encoder).to(self.device)
         optimizer = build_optimizer(model.parameters(), self.learning_rate)

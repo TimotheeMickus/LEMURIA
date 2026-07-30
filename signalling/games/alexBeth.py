@@ -123,10 +123,9 @@ class AlexBeth(SignallingEvalMixin, Game):
         self.signal_dump_dir = signal_dump_dir # str|None
 
         # Pretraining: either None (no pretraining) or an object encapsulating the whole procedure.
-        # `getattr` keeps old checkpoints (whose embedded hparams predate --pretrain) loadable. The
-        # driver runs it (game.pretrainer.pretrain()); load() never does, so loading a trained model
-        # does not re-pretrain.
-        self.pretrainer = AlexBethPretrainer(self, args, dataset) if(getattr(args, 'pretrain', False)) else None
+        # The driver runs it via game.run_pretraining(); load() never does, so loading a trained
+        # model does not re-pretrain.
+        self.pretrainer = AlexBethPretrainer(self, args, dataset) if(args.pretrain) else None
 
     @property
     def asker(self):
@@ -152,7 +151,7 @@ class AlexBeth(SignallingEvalMixin, Game):
     def autologger(self):
         return self._logger
 
-    # Lists the (agent, role) pairs to pretrain, mirroring AliceBob.agents_for_CNN_pretraining.
+    # Lists the (agent, role) pairs to pretrain, mirroring AliceBob.agents_for_pretraining.
     # The single non-shared game pretrains its one asker and its one retriever, each with its own
     # throwaway partner module. (In the shared case the pretrainer does a single joint pass instead
     # and does not call this; see AlexBethPretrainer.pretrain.)

@@ -5,6 +5,11 @@ import time
 import torch
 
 class Game(metaclass=ABCMeta):
+    # Either None (no pretraining) or a Pretrainer instance (set by concrete games that support it).
+    # Kept as a class-level default so that `run_pretraining` and PopulationMixin can reference it
+    # uniformly whether or not a given game ever sets one.
+    pretrainer = None
+
     @property
     @abstractmethod
     def current_agents(self):
@@ -241,6 +246,16 @@ class Game(metaclass=ABCMeta):
         Evaluates agents. (called at the end of each training epoch)
         """
         pass
+
+    def run_pretraining(self):
+        """
+        Runs pretraining if this game has a pretrainer configured (a no-op otherwise). Returns
+        whatever the pretrainer's `pretrain()` returns (e.g. the trained CNN classifiers, used by
+        --detect_outliers), or None when there is no pretrainer. Called by the training drivers.
+        """
+        if(self.pretrainer is None):
+            return None
+        return self.pretrainer.pretrain()
 
     def train_agents(self, epochs, steps_per_epoch, data_loader, run_models_dir=None, save_every=0, start_epoch_index=0):
         """

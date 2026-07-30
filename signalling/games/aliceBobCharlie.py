@@ -70,6 +70,7 @@ class AliceBobCharlie(AliceBob):
         self.log_img_every = args.log_img_every
         self._batch_for_img_gen = None
         self.signal_dump_dir = signal_dump_dir # str|None
+        self._init_cnn_pretrainer(args, dataset)
 
     @property
     def drawer(self):
@@ -85,10 +86,11 @@ class AliceBobCharlie(AliceBob):
     def optims(self):
         return [self._optim_sender, self._optim_receiver, self._optim_drawer]
 
-    # Overrides AliceBob.agents_for_CNN_pretraining.
-    def agents_for_CNN_pretraining(self):
+    # Overrides AliceBob.agents_for_pretraining: also pretrains the drawer (whose kept image module
+    # is its image_decoder). Roles are used only for naming/logging.
+    def agents_for_pretraining(self):
         if(self.shared): raise NotImplementedError
-        return self.all_agents
+        return [(self.sender, "sender"), (self.receiver, "receiver"), (self.drawer, "drawer")]
 
     # batch: Batch
     # forged_img: tensor of shape [args.batch_size, *IMG_SHAPE]

@@ -30,7 +30,7 @@ def dump_signals_csv(path, header, rows):
 
 
 # Evaluation helpers shared by the signalling games (AliceBob, AlexBeth, and their subclasses).
-# Mixed in *before* the base game, e.g. `class AliceBob(SignallingEvalMixin, CNNPretrainable, Game)`.
+# Mixed in *before* the base game, e.g. `class AliceBob(SignallingEvalMixin, Game)`.
 class SignallingEvalMixin:
     # Logs a scalar to the autologger and (unless display is 'minimal') prints it.
     def _log(self, name, value, epoch_index):

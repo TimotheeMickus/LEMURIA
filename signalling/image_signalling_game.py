@@ -11,10 +11,8 @@ import tqdm
 import numpy as np
 
 from .games import AliceBob, AliceBobPopulation, AliceBobCharlie
-from .games.pretraining import CNNPretrainable
 from .utils.image_data import get_data_loader, Batch
-from .utils.misc import build_optimizer, get_default_fn, path_replace
-from .utils.modules import build_cnn_decoder_from_args, build_cnn_encoder_from_args
+from .utils.misc import path_replace
 from .utils.log import AutoLogger
 
 def main(global_args=None, remaining_args=None):
@@ -67,60 +65,45 @@ def do(args):
         if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)
 
-        if(args.pretrain_CNNs): # Pretrains the agents.
-            if(not isinstance(model, CNNPretrainable)):
-                raise TypeError("--pretrain_CNNs was set, but %s does not support CNN pretraining." % type(model).__name__)
+        # Pretrains the agents' CNNs, if a pretrainer is configured (--pretrain_CNNs). No-op
+        # otherwise. Returns {name: pretrained_model} (or None), used by --detect_outliers.
+        pretrained_models = model.run_pretraining()
 
-            print(("[%s] pretraining start…" % datetime.now()), flush=True)
+        if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
+            if(pretrained_models is None):
+                raise ValueError("--detect_outliers requires pretraining; pass --pretrain_CNNs.")
+            (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())
+            print(pretrained_name)
 
-            dcnn_factory_fn = get_default_fn(build_cnn_decoder_from_args, args)
-            cnn_factory_fn = get_default_fn(build_cnn_encoder_from_args, args)
-            pretrained_models = model.pretrain_CNNs(
-                data_loader,
-                pretrain_CNN_mode=args.pretrain_CNNs,
-                freeze_pretrained_CNN=args.freeze_pretrained_parameters,
-                learning_rate=args.pretrain_learning_rate or args.learning_rate,
-                epochs=args.pretrain_epochs,
-                steps_per_epoch=args.steps_per_epoch,
-                display_mode=args.display,
-                pretrain_CNNs_on_eval=args.pretrain_CNNs_on_eval,
-                deconvolution_factory=dcnn_factory_fn,
-                convolution_factory=cnn_factory_fn
-            )
+            outliers = []
+            with torch.no_grad():
+                batch_size = args.batch_size
+                max_datapoints = 2 ** 15
+                n = data_loader.size(data_type='any', no_evaluation=False) # We would like to see all datapoints
+                if((n is None) or (n > max_datapoints)):
+                    print('The dataset is too big, so we are only going to be looking at %i datapoints.' % max_datapoints)
+                    n = max_datapoints
+                nb_batch = int(np.ceil(n / batch_size))
+                for batch_i in range(nb_batch):
+                    datapoints = [data_loader.get_datapoint(i) for i in range((batch_size * batch_i), min((batch_size * (batch_i + 1)), n))]
+                    batch = Batch(size=batch_size, original=[], target=[x.toInput(keep_category=True, device=args.device) for x in datapoints], base_distractors=[])
+                    hits, losses = pretrained_model.forward(batch)
 
-            if(args.detect_outliers): # Might not work for all pretraining methods (in fact, we are expecting a MultiHeadsClassifier). To have a more general method, record the loss for all instances, then select the ones that are far from the mean
-                (pretrained_name, pretrained_model), *_ = list(pretrained_models.items())
-                print(pretrained_name)
+                    misses = 0 # Will be a vector with one value (number of misses over all heads) per element in the batch
+                    for x in hits: misses += (1 - x.cpu().numpy())
 
-                outliers = []
-                with torch.no_grad():
-                    batch_size = args.batch_size
-                    max_datapoints = 2 ** 15
-                    n = data_loader.size(data_type='any', no_evaluation=False) # We would like to see all datapoints
-                    if((n is None) or (n > max_datapoints)):
-                        print('The dataset is too big, so we are only going to be looking at %i datapoints.' % max_datapoints)
-                        n = max_datapoints
-                    nb_batch = int(np.ceil(n / batch_size))
-                    for batch_i in range(nb_batch):
-                        datapoints = [data_loader.get_datapoint(i) for i in range((batch_size * batch_i), min((batch_size * (batch_i + 1)), n))]
-                        batch = Batch(size=batch_size, original=[], target=[x.toInput(keep_category=True, device=args.device) for x in datapoints], base_distractors=[])
-                        hits, losses = pretrained_model.forward(batch)
+                    for i, miss in enumerate(misses):
+                        if(miss == 0.0): continue
+                        outliers.append((miss, datapoints[i]))
+                        #print('Ahah! Datapoint idx=%i (category %s) has a high miss of %s!' % (datapoints[i].idx, datapoints[i].category, miss))
 
-                        misses = 0 # Will be a vector with one value (number of misses over all heads) per element in the batch
-                        for x in hits: misses += (1 - x.cpu().numpy())
+            outliers.sort(key=(lambda x: x[0]), reverse=True)
+            print('%i outliers (%s%%)' % (len(outliers), (100 * len(outliers) / n)))
+            for i in range(len(outliers)): #range(min(len(outliers), 1000)):
+                miss, datapoint = outliers[i]
+                print('%i - %i' % (datapoint.idx, miss))
 
-                        for i, miss in enumerate(misses):
-                            if(miss == 0.0): continue
-                            outliers.append((miss, datapoints[i]))
-                            #print('Ahah! Datapoint idx=%i (category %s) has a high miss of %s!' % (datapoints[i].idx, datapoints[i].category, miss))
-
-                outliers.sort(key=(lambda x: x[0]), reverse=True)
-                print('%i outliers (%s%%)' % (len(outliers), (100 * len(outliers) / n)))
-                for i in range(len(outliers)): #range(min(len(outliers), 1000)):
-                    miss, datapoint = outliers[i]
-                    print('%i - %i' % (datapoint.idx, miss))
-
-                sys.exit(0)
+            sys.exit(0)
 
         # Runs the run.
         if(args.save_every > 0): model.save(run_models_dir / ("model_e%i.pt" % -1))
@@ -238,6 +221,7 @@ def get_args(remaining_args=None):
     group.add_argument('--pretrain_CNNs', help='pretrain CNNs on specified task', type=str, choices=['category-wise', 'feature-wise', 'auto-encoder'])
     group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining', type=float)
     group.add_argument('--pretrain_epochs', help='number of epochs per agent for CNN pretraining', type=int, default=5)
+    group.add_argument('--pretrain_steps_per_epoch', help='number of steps per pretraining epoch (defaults to --steps_per_epoch)', type=int, default=None)
     group.add_argument('--pretrain_CNNs_on_eval', help='pretrain CNNs on classification', action='store_true')
     group.add_argument('--freeze_pretrained_parameters', help='after pretraining, freeze all pretrained parameters (here: the pretrained CNNs) so that they are not updated during the game', action='store_true')
     group.add_argument('--detect_outliers', help='if pretraining, then after, the trained model analyses the dataset in order to detect problems', action='store_true')

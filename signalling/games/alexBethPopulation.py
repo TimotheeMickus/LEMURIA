@@ -26,9 +26,3 @@ class AlexBethPopulation(PopulationMixin, AlexBeth):
     def agents_for_pretraining(self):
         return ([(agent, "asker") for agent in self._producers]
                 + [(agent, "retriever") for agent in self._consumers])
-
-    # Overrides PopulationMixin hook: re-pretrain a reinitialized agent, if pretraining is enabled
-    # (as AliceBobPopulation does for a reinitialized agent's CNN). `role` is "asker"/"retriever".
-    def _on_reinitialized(self, agent, role, epoch, data_iterator):
-        if(self.pretrainer is not None):
-            self.pretrainer.pretrain_agent(agent, role, agent_name=f"reborn {role} @epoch {epoch}")

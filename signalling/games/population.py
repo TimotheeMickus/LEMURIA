@@ -24,7 +24,7 @@ def parse_pop_pair(spec, default):
 # calls `self._init_population(args, ...)` at the end of its __init__ (after super().__init__), and provides these hooks:
 #   * _population_factories(args) -> (make_producer, make_consumer): zero-arg constructors.
 #   * _assign_current(producer, consumer): store the pair under the names the base game reads (e.g. self._sender/self._receiver, or self._asker/self._retriever).
-#   * _on_reinitialized(agent, role, epoch, data_iterator): optional post-reset hook (default no-op; the image game overrides it to re-pretrain the reinitialized agent's CNN).
+#   * _on_reinitialized(agent, role, epoch, data_iterator): post-reset hook. The default re-pretrains the reinitialized agent through the game's pretrainer (a no-op if there is none), so concrete games no longer need to override it.
 #
 # Equivalence (for either game):
 #   * the plain 1-agent game  == population(pop_size=1-1, pop_reset_period=0-0)
@@ -75,7 +75,11 @@ class PopulationMixin:
         raise NotImplementedError
 
     def _on_reinitialized(self, agent, role, epoch, data_iterator):
-        pass  # default: nothing to do after a reinitialization
+        # Default: re-pretrain the reinitialized agent if this game has a pretrainer (as AliceBob
+        # does for the CNN, and AlexBeth for its encoders). `role` is the group role string
+        # ("sender"/"receiver" or "asker"/"retriever").
+        if(self.pretrainer is not None):
+            self.pretrainer.pretrain_agent(agent, role, agent_name=f"reborn {role} @epoch {epoch}")
 
     @property
     def all_agents(self):

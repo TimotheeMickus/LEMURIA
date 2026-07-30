@@ -107,13 +107,10 @@ def do(args):
         if(args.detect_anomaly):
             torch.autograd.set_detect_anomaly(True)
 
-        # Pretrains the agents on the predicate/candidate satisfaction task, if enabled. Symmetric
-        # with AliceBob's CNN pretraining, but driven through the game's `pretrainer` object rather
-        # than a mixin: `None` means no pretraining. Reinitialized agents are re-pretrained by the
-        # population reset hook (see AlexBethPopulation._on_reinitialized).
-        if(model.pretrainer is not None):
-            print(f"[{datetime.now()}] pretraining start…", flush=True)
-            model.pretrainer.pretrain()
+        # Pretrains the agents on the predicate/candidate satisfaction task, if a pretrainer is
+        # configured (--pretrain). No-op otherwise. Reinitialized agents are re-pretrained by the
+        # population reset hook (PopulationMixin._on_reinitialized).
+        model.run_pretraining()
 
         # Runs the run.
         if(args.save_every > 0): model.save(run_models_dir / "model_e-1.pt")

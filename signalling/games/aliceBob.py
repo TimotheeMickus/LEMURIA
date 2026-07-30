@@ -18,13 +18,13 @@ from ..eval import compute_correlation
 from ..eval import decision_tree
 
 from .game import Game
-from .pretraining import CNNPretrainable
+from .pretraining import CNNPretrainer, train_cnn_autoencoder
 from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
-class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
+class AliceBob(SignallingEvalMixin, Game):
     # Builds the image dataset used by Game.load to rebuild the model.
     @classmethod
     def _data_loader_from_args(cls, args):
@@ -79,6 +79,12 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
         self.debug = args.debug
         self.signal_dump_dir = signal_dump_dir # str|None
         self._init_receiver_preprocessor(args, dataset)
+        self._init_cnn_pretrainer(args, dataset)
+
+    # Sets self.pretrainer to a CNNPretrainer when --pretrain_CNNs is given, else None. Factored out
+    # so that AliceBobCharlie (which does not call AliceBob.__init__) can reuse it.
+    def _init_cnn_pretrainer(self, args, dataset):
+        self.pretrainer = CNNPretrainer(self, args, dataset) if(args.pretrain_CNNs) else None
     
     #TODO: the preprocessor currently requires the dataloader to be passed as argument upon construction.
     # a cleaner fix would be to implement a flag to signal the preprocessor needs to be pretrained before actual training can start
@@ -87,7 +93,7 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
         dcnn_factory_fn = misc.get_default_fn(build_cnn_decoder_from_args, args)
         cnn_factory_fn = misc.get_default_fn(build_cnn_encoder_from_args, args)
         if args.autoencode_receiver_inputs:
-            self.receiver_preprocessor = self._pretrain_ae(
+            self.receiver_preprocessor = train_cnn_autoencoder(
                 None, # no agent
                 dataset, #
                 convolution_factory=cnn_factory_fn, 
@@ -96,10 +102,11 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
                 _is_external_ae=True,
                 device=args.device,
                 display_mode=args.display,
+                summary_writer=self.autologger.summary_writer,
                 agent_name='receiver preprocessor AE',
                 epochs=args.pretrain_epochs,
                 learning_rate=args.pretrain_learning_rate,
-            )['model']
+            )
             self.receiver_preprocessor.requires_grad_(False)
         else:
             self.receiver_preprocessor = nn.Identity()
@@ -129,9 +136,12 @@ class AliceBob(SignallingEvalMixin, CNNPretrainable, Game):
     def autologger(self):
         return self._logger
 
-    def agents_for_CNN_pretraining(self):
-        if(self.shared): return [self.sender] # Because the CNN is shared between Alice and Bob, no need to pretrain the CNN of both agents.
-        return self.all_agents
+    # Lists the (agent, role) pairs to pretrain. In the shared case only the sender is listed,
+    # because the CNN is shared between Alice and Bob (so pretraining the sender's CNN pretrains
+    # both). `role` is used only for naming/logging by the CNN pretrainer.
+    def agents_for_pretraining(self):
+        if(self.shared): return [(self.sender, "sender")]
+        return [(self.sender, "sender"), (self.receiver, "receiver")]
 
     # batch: Batch
     def _alice_input(self, batch):
