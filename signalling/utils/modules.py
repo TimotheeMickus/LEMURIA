@@ -678,6 +678,20 @@ def _dcgan_cnn(hidden_size, track_running_stats=True):
 #     return cnn
 
 # output: torch.nn.Module
+# Command-line arguments configuring the (de)convolutional stacks built by the factories below.
+# Kept next to those factories. Returns the argparse group.
+def add_cnn_args(parser):
+    group = parser.add_argument_group(title='Conv', description='arguments relative to convolutional structure')
+    group.add_argument('--img_size', help='Width/height of images', type=int, default=128)
+    group.add_argument('--decnn_channel_size', help="factor to determine number of channel features in deconvolutions (defaults to hidden size)", type=int, default=None)
+    group.add_argument('--cnn_channel_size', help="factor to determine number of channel features in convolutions (defaults to hidden size)", type=int, default=None)
+    group.add_argument('--local_batchnorm', help="indicates whether BatchNorme2D layers use global statistics (False) or not (True)", action="store_true")
+    group.add_argument('--use_legacy_convolutions', help="use old architectures for both CNN and DeCNN", action="store_true")
+    group.add_argument('--use_legacy_decnn', help="use old architecture for DeCNN", action="store_true")
+    group.add_argument('--use_legacy_cnn', help="use old architecture for CNN", action="store_true")
+    return group
+
+
 def build_cnn_encoder_from_args(args):
     """
     Factory for convolutionnal networks
@@ -768,6 +782,19 @@ def build_candidate_encoder_from_args(args):
             use_norm=(not args.graph_no_norm),
         )
     raise ValueError(f"Unknown candidate encoder: {args.candidate_encoder!r}.")
+
+# Command-line arguments selecting/configuring the candidate encoder (the graph-transformer knobs
+# only matter when --candidate_encoder=graph_transformer). Kept next to the encoder they configure.
+def add_graph_encoder_args(parser):
+    group = parser.add_argument_group(title='Candidate encoder', description='arguments relative to the candidate (graph) encoder')
+    group.add_argument('--candidate_encoder', help='candidate encoder type', choices=['node_averager', 'graph_transformer'], default='node_averager')
+    group.add_argument('--graph_num_layers', help='number of graph transformer layers', type=int, default=2)
+    group.add_argument('--graph_d_model', help='graph transformer model size (defaults to hidden_size)', type=int, default=None)
+    group.add_argument('--graph_num_heads', help='number of attention heads', type=int, default=4)
+    group.add_argument('--graph_d_hidden', help='graph transformer feed-forward size (defaults to 2*graph_d_model)', type=int, default=None)
+    group.add_argument('--graph_dropout', help='graph transformer dropout', type=float, default=0.1)
+    group.add_argument('--graph_no_norm', help='disable layer norm in graph encoder', action='store_true')
+    return group
 
 # output: torch.nn.Embedding (a predicate encoder)
 # Builds the predicate encoder used by an asker: one learnable embedding per predicate. Extracted

@@ -14,6 +14,16 @@ def parse_pop_pair(spec, default):
     return (int(parts[0]), int(parts[1]))
 
 
+# Command-line arguments that select/configure the population variant of a game.
+# `producers`/`consumers` are the plural role names used in the help (e.g.
+# "senders"/"receivers" or "askers"/"retrievers"). Returns the argparse group.
+def add_population_args(parser, producers, consumers):
+    group = parser.add_argument_group(title='Population', description='arguments relative to the population variant of the game')
+    group.add_argument('--pop_size', help=("population sizes as 'n-m' (n %s, m %s). Passing this (or --pop_reset_period) selects the population game; the omitted one defaults to 2-2 / 0-0." % (producers, consumers)), default=None, type=str)
+    group.add_argument('--pop_reset_period', help=("reset periods as 'a-b'; reinitialize %s every a epochs and %s every b epochs (0 = never); default 0-0" % (producers, consumers)), default=None, type=str)
+    return group
+
+
 # Shared logic for population games.
 # There is a group of `n` "producers" (senders / askers) and a group of `m` "consumers" (receivers / retrievers). For each training round a random producer and a random consumer are selected and trained together. During evaluation the oldest producer and the oldest consumer are used.
 # A single optimizer covers the whole population (but possibly with per agent parameters).

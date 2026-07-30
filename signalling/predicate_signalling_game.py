@@ -161,98 +161,57 @@ import pprint
 import socket # for `gethostname`
 
 def get_args(remaining_args=None):
+    from .utils import cli
+    from .utils.predicate_data import add_data_args
+    from .utils.modules import add_graph_encoder_args
+    from .games.population import add_population_args
+    from .games.pretraining import add_pretraining_args
+    from .eval.compositionality import add_compositionality_args
+
     arg_parser = argparse.ArgumentParser()
 
     default_data_set = pathlib.Path('data') / 'concon'
     default_models = pathlib.Path('[summary]') / 'models'
     default_summary = pathlib.Path('runs') / 'psg' / ('[now]_' + socket.gethostname())
 
-    group = arg_parser.add_argument_group(title='Data', description='arguments relative to data handling')
-    group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
-    group.add_argument('--max_depth', help='the depth limit of the predicates considered', default=3, type=int)
-    group.add_argument('--min_depth', help='minimum predicate depth to include', type=int, default=1)
-    group.add_argument('--nontrivial_only', help='whether to use only predicates that are both satisfiable and falsifiable', action='store_true')
-    group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
-    group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
-    group.add_argument('--allow_indeterminate', help='whether to allow indeterminate (neither true nor false) values in candidates', action='store_true')
-    group.add_argument('--overfit', help='use a fixed small predicate/candidate pool to test memorization', action='store_true')
-    group.add_argument('--batch_size', help='batch size', default=128, type=int)
-    group.add_argument('--num_candidates', help='number of candidates per predicate in a batch', default=10, type=int)
-    group.add_argument('--predicate_sampling', help='how candidates are sampled', choices=['random', 'difficulty'], default='random')
-    group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='balanced')
+    # Dataset, incl. the depth curriculum (defined in utils/predicate_data.py).
+    add_data_args(arg_parser)
 
-    group = arg_parser.add_argument_group(title='Save', description='arguments relative to saving models/logs')
-    group.add_argument('--summary', help='the path to the TensorBoard summary for this run (\'[now]\' will be intepreted as now in the Y-m-d_H-M-S format)', default=default_summary, type=pathlib.Path)
-    group.add_argument('--save_every', '-save_every', help='indicate to save the model after each __ epochs', type=int, default=0)
-    group.add_argument('--models', help='the path to the saved models (\'[summary]\' will be interpreted as the value of --summary)', default=default_models, type=pathlib.Path)
-    group.add_argument('--dump_signals', help='dump signals: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
-    group.add_argument('--name_with', help="build the run folder/W&B name from these argument names, e.g. --name_with [min_depth, max_depth]  ->  'mind=1__maxd=3__t=<timestamp>__run=0'. Accepts brackets/commas/spaces (quote it if it contains spaces, e.g. '[min_depth, max_depth]'). A launch timestamp and the run index are always appended. If unset, the name is generated automatically from the non-default arguments.", nargs='+', default=None)
+    # Saving/logging destinations (shared) + predicate-specific dump/naming knobs.
+    save = cli.add_save_args(arg_parser, default_summary, default_models)
+    save.add_argument('--dump_signals', help='dump signals: "last" (default), "all", "when_hike", or "when_hike_strict"', choices=['last', 'all', 'when_hike', 'when_hike_strict'], nargs='?', const='last', default=None)
+    save.add_argument('--name_with', help="build the run folder/W&B name from these argument names, e.g. --name_with [min_depth, max_depth]  ->  'mind=1__maxd=3__t=<timestamp>__run=0'. Accepts brackets/commas/spaces (quote it if it contains spaces, e.g. '[min_depth, max_depth]'). A launch timestamp and the run index are always appended. If unset, the name is generated automatically from the non-default arguments.", nargs='+', default=None)
 
-    group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
-    # TODO: refactor logging: --display tqdm should be inferred from the env
-    group.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
-    group.add_argument('--log_debug', '-ld', help='log more stuf', action='store_true')
-    group.add_argument('--detect_anomaly', help='autodetect grad anomalies', action='store_true')
-    group.add_argument('--no_summary', '-ns', help='do not write summaries', action='store_true')
-    group.add_argument('--log_lang_progress', '-llp', help='log metrics to evaluate progress and stability of language learned', action='store_true')
-    group.add_argument('--log_entropy', help='log evolution of entropy across epochs', action='store_true')
-    # TODO: refactor logging: --logging_period should control the frequency of step reports when --display minimal
-    group.add_argument('--logging_period', help='how often counts of logged variables are accumulated', type=int, default=10)
-    # TODO: refactor logging: --quiet vs. --display quiet?
-    group.add_argument('--quiet', help='display less information', action='store_true')
+    cli.add_display_args(arg_parser)
 
-    group = arg_parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
-    group.add_argument('--len_penalty', help='coefficient for the length penalty of the signals', default=0.0, type=float)
-    group.add_argument('--voc_penalty', help='coefficient for the vocabulary usage penalty', default=0.0, type=float)
-    group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
-    group.add_argument('--beta_asker', help='asker entropy penalty coefficient', type=float, default=0.01)
-    group.add_argument('--beta_retriever', help='retriever entropy penalty coefficient', type=float, default=0.0)
-    group.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
-    group.add_argument('--grad_clipping', help='threshold for gradient clipping', default=1, type=float)
-    group.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
+    # Reward (shared; --len_penalty default is game-specific) + the AlexBeth entropy betas.
+    reward = cli.add_reward_args(arg_parser, len_penalty_default=0.0)
+    reward.add_argument('--voc_penalty', help='coefficient for the vocabulary usage penalty', default=0.0, type=float)
+    reward.add_argument('--beta_asker', help='asker entropy penalty coefficient', type=float, default=0.01)
+    reward.add_argument('--beta_retriever', help='retriever entropy penalty coefficient', type=float, default=0.0)
 
-    group = arg_parser.add_argument_group(title='Language', description='arguments relative to language capacity')
-    group.add_argument('--base_alphabet_size', help='size of the alphabet (not including special symbols)', default=10, type=int) # Previously 64. There are 32 intuitive classes of images in the data set
-    group.add_argument('--max_len', help='maximum length of signals produced', default=10, type=int) # Previously 16.
-
-    group = arg_parser.add_argument_group(title='Perfs', description='arguments relative to performances')
-    # device_choices = ['cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'msnpu']
-    # group.add_argument('--device', help='what to run PyTorch on (potentially available: ' + ', '.join(device_choices) + ')', choices=device_choices, default='cpu')
-    group.add_argument('--device', help='what to run PyTorch on', type=torch.device, default=torch.device('cpu'))
+    cli.add_language_args(arg_parser)
+    cli.add_perf_args(arg_parser)
 
     group = arg_parser.add_argument_group(title='Architecture', description='arguments relative to model & game architecture')
-    group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice·s and Bob·s', action='store_true')
+    group.add_argument('--shared', '-s', help='share the image encoder and the symbol embeddings among each couple of Alice\u00b7s and Bob\u00b7s', action='store_true')
     group.add_argument('--hidden_size', help='dimension of hidden representations', type=int, default=50)
-    group.add_argument('--candidate_encoder', help='candidate encoder type', choices=['node_averager', 'graph_transformer'], default='node_averager')
-    # Graph encoder parameters (used when --candidate_encoder=graph)
-    group.add_argument('--graph_num_layers', help='number of graph transformer layers', type=int, default=2)
-    group.add_argument('--graph_d_model', help='graph transformer model size (defaults to hidden_size)', type=int, default=None)
-    group.add_argument('--graph_num_heads', help='number of attention heads', type=int, default=4)
-    group.add_argument('--graph_d_hidden', help='graph transformer feed-forward size (defaults to 2*graph_d_model)', type=int, default=None)
-    group.add_argument('--graph_dropout', help='graph transformer dropout', type=float, default=0.1)
-    group.add_argument('--graph_no_norm', help='disable layer norm in graph encoder', action='store_true')
     group.add_argument('--blind_candidates', help='debug: retriever ignores candidate features (scores become constant across candidates)', action='store_true')
     group.add_argument('--blind_signal', help='debug: retriever ignores signal embedding', action='store_true')
 
-    group = arg_parser.add_argument_group(title='Training', description='arguments relative to training')
-    group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')
-    group.add_argument('--epochs', help='number of epochs', default=100, type=int)
-    group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
-    group.add_argument('--runs', help='number of runs', default=1, type=int)
-    group.add_argument('--seed', help='base random seed; each run uses seed+run_idx', default=None, type=int)
-    group.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
-    group.add_argument('--no_spigot', help='whether to replace all GradSpigot·s with usual tensor', action='store_true')
-    group.add_argument('--loss_weight_temp', help='temperature parameter in the loss weighting system', default=1.0, type=float)
-    group.add_argument('--depth_curriculum_threshold', help='predicate-depth curriculum: start using only the shallowest predicates (depth = min_depth) for both training and evaluation, then unlock the next depth each time eval accuracy reaches this threshold. Default: None (disabled, all depths used from the start); a bare flag means 1.0.', nargs='?', const=1.0, default=None, type=float)
-    group.add_argument('--pop_size', help="AlexBethPopulation: population sizes as 'n-m' (n askers, m retrievers). Passing this (or --pop_reset_period) selects the population game; the omitted one defaults to 2-2 / 0-0.", default=None, type=str)
-    group.add_argument('--pop_reset_period', help="AlexBethPopulation: reset periods as 'a-b'; reinitialize askers every a epochs and retrievers every b epochs (0 = never).", default=None, type=str)
+    # Candidate (graph) encoder (defined in utils/modules.py, next to the encoder).
+    add_graph_encoder_args(arg_parser)
 
-    group = arg_parser.add_argument_group(title='Pretraining', description='arguments relative to pretraining agents on the predicate/candidate satisfaction task before the communication game')
-    group.add_argument('--pretrain', help='pretrain each agent on the predicate/candidate satisfaction task before training: askers keep their predicate encoder and are temporarily paired with a candidate encoder (same --candidate_encoder choice as retrievers), retrievers keep their candidate encoder and are temporarily paired with a predicate embedding. Temporary modules are discarded afterwards. Reinitialized agents (population reset) are pretrained again.', action='store_true')
-    group.add_argument('--pretrain_epochs', help='number of epochs per agent for pretraining', type=int, default=5)
-    group.add_argument('--pretrain_steps_per_epoch', help='number of steps per pretraining epoch (defaults to --steps_per_epoch)', type=int, default=None)
-    group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining (defaults to --learning_rate)', type=float, default=None)
-    group.add_argument('--freeze_pretrained_parameters', help='after pretraining, freeze all pretrained parameters (here: the asker predicate encoder / retriever candidate encoder) so that they are not updated during the communication game', action='store_true')
+    # Population variant (defined in games/population.py).
+    add_population_args(arg_parser, 'askers', 'retrievers')
+
+    # Training loop (shared) + a predicate-specific training knob.
+    training = cli.add_training_args(arg_parser)
+    training.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
+
+    # Pretraining: the shared knobs (defined in games/pretraining.py) + the predicate toggle.
+    pre = add_pretraining_args(arg_parser, frozen_desc='the asker predicate encoder / retriever candidate encoder')
+    pre.add_argument('--pretrain', help='pretrain each agent on the predicate/candidate satisfaction task before training: askers keep their predicate encoder and are temporarily paired with a candidate encoder (same --candidate_encoder choice as retrievers), retrievers keep their candidate encoder and are temporarily paired with a predicate embedding. Temporary modules are discarded afterwards. Reinitialized agents (population reset) are pretrained again.', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
     group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')
@@ -260,38 +219,27 @@ def get_args(remaining_args=None):
     group.add_argument('--eval_oracle_language', help="debug feature: during fancy evaluation, replace the emergent language with a known-compositional 'oracle'/control language (an upper-bound sanity check, not part of normal runs). In AlexBeth this is the reverse-Polish encoding of the predicate. Applied to the compositionality probe and topographic similarity; signal dumping and scrambling resistance keep using the emergent language.", action='store_true')
     group.add_argument('--dump_predicate_perf', help='dump per-predicate performance tables and log them as a W&B artifact', action='store_true')
     group.add_argument('--dump_eval_metrics', help='dump per-eval-call aggregate metrics CSV and log it as a W&B artifact', action='store_true')
-    
-    group.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
+
+    cli.add_debug_arg(arg_parser)
 
     group = arg_parser.add_argument_group(title='WandB', description='arguments relative to Weights & Biases logging')
     group.add_argument('--wandb', help='enable Weights & Biases logging', action='store_true')
     group.add_argument('--wandb_project', help='W&B project name', default='lemuria', type=str)
 
-    group = arg_parser.add_argument_group(title='Compositionality', description='compositionality probe (biLSTM encoder -> LSTM decoder) and its hyperparameter search')
-    group.add_argument('--eval_compositionality', help='during evaluation, measure the compositionality of the emergent language (5-fold CV exact-match) and log it as "compositionality"', action='store_true')
-    group.add_argument('--comp_embed_dim', help='probe: token embedding dimension', type=int, default=64)
-    group.add_argument('--comp_hidden_dim', help='probe: LSTM hidden dimension', type=int, default=64)
-    group.add_argument('--comp_num_layers', help='probe: number of LSTM layers (encoder and decoder)', type=int, default=1)
-    group.add_argument('--comp_dropout', help='probe: dropout', type=float, default=0.1)
-    group.add_argument('--comp_lr', help='probe: learning rate (Adam)', type=float, default=1e-3)
-    group.add_argument('--comp_batch_size', help='probe: batch size', type=int, default=512)
-    group.add_argument('--comp_max_epochs', help='probe: maximum training epochs per fold (early stopping usually stops earlier)', type=int, default=512)
-    group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
-    group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
-    group.add_argument('--comp_search_seed', help='compositionality_search / probe cross-validation: random seed', type=int, default=0)
-    group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
+    # Compositionality probe + search (defined in eval/compositionality.py).
+    add_compositionality_args(arg_parser)
 
     args = arg_parser.parse_args(remaining_args)
-    
+
     # Snapshot of the parser defaults, used by `build_run_name` so that a run name only advertises the arguments that were actually changed.
     args._arg_defaults = vars(arg_parser.parse_args([]))
-    
+
     if(args.debug and (not args.log_debug)): args.log_debug = True
-    
+
     if(not args.quiet):
         print("command-line arguments:")
         pprint.pprint(vars(args), indent=4)
-    
+
     return args
 
 

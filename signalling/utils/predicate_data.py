@@ -976,6 +976,27 @@ class Dataset(SeqAsyncDataset):
         return (candidates, truths)
 
 
+# Command-line arguments for the predicate dataset consumed by `get_data_loader`, including the
+# depth-curriculum knob (which drives which predicate depths this loader exposes over training).
+# Returns the argparse group.
+def add_data_args(parser):
+    group = parser.add_argument_group(title='Data', description='arguments relative to data handling')
+    group.add_argument('--properties', help='for each properties, the number of values', default='4-4', type=str)
+    group.add_argument('--max_depth', help='the depth limit of the predicates considered', default=3, type=int)
+    group.add_argument('--min_depth', help='minimum predicate depth to include', type=int, default=1)
+    group.add_argument('--nontrivial_only', help='whether to use only predicates that are both satisfiable and falsifiable', action='store_true')
+    group.add_argument('--no_negation', help='whether to allow negation in the predicates', action='store_true')
+    group.add_argument('--no_conjunction', help='whether to allow conjunction in the predicates', action='store_true')
+    group.add_argument('--allow_indeterminate', help='whether to allow indeterminate (neither true nor false) values in candidates', action='store_true')
+    group.add_argument('--overfit', help='use a fixed small predicate/candidate pool to test memorization', action='store_true')
+    group.add_argument('--batch_size', help='batch size', default=128, type=int)
+    group.add_argument('--num_candidates', help='number of candidates per predicate in a batch', default=10, type=int)
+    group.add_argument('--predicate_sampling', help='how candidates are sampled', choices=['random', 'difficulty'], default='random')
+    group.add_argument('--candidate_sampling', help='how candidates are sampled (in particular based on their truth value distribution)', choices=['random', 'balanced'], default='balanced')
+    group.add_argument('--depth_curriculum_threshold', help='predicate-depth curriculum: start using only the shallowest predicates (depth = min_depth) for both training and evaluation, then unlock the next depth each time eval accuracy reaches this threshold. Default: None (disabled, all depths used from the start); a bare flag means 1.0.', nargs='?', const=1.0, default=None, type=float)
+    return group
+
+
 def get_data_loader(args):
     dataset = Dataset(device=args.device, batch_size=args.batch_size, properties=args.properties, max_depth=args.max_depth, min_depth=args.min_depth, nontrivial_only=args.nontrivial_only, no_negation=args.no_negation, no_conjunction=args.no_conjunction, allow_indeterminate=args.allow_indeterminate, num_candidates=args.num_candidates, predicate_sampling=args.predicate_sampling, candidate_sampling=args.candidate_sampling, overfit=args.overfit)
     dataset.print_info()

@@ -723,6 +723,23 @@ class PairDataset(Dataset):
 
         return self.combine_datapoint(left_datapoint, right_datapoint)
 
+# Command-line arguments for the image dataset consumed by `get_data_loader`. `default_data_set`
+# is passed in because it is built from paths in the driver. Returns the argparse group.
+def add_data_args(parser, default_data_set):
+    import pathlib
+    group = parser.add_argument_group(title='Data', description='arguments relative to data handling')
+    group.add_argument('--data_set', help='the path to the data set', default=default_data_set, type=pathlib.Path)
+    group.add_argument('--binary_dataset', help='whether the data set contains binary or ternary images', action='store_true')
+    group.add_argument('--constrain_dim', help='restrict specific dimensions in dataset', nargs=5, choices=[1, 2, 3], default=None, type=int)
+    group.add_argument('--pair_images', '-pi', help='generates a new dataset by combining pairs of images', action='store_true')
+    group.add_argument('--batch_size', help='batch size', default=128, type=int)
+    group.add_argument('--noise', help='standard deviation of the normal random noise to apply to images', default=0.0, type=float)
+    group.add_argument('--sampling_strategies', help='sampling strategies for the distractors, separated with \'/\' (available: hamming1, different, difficulty, random)', default='difficulty', choices=['hamming1', 'different', 'difficulty', 'random'])
+    group.add_argument('--same_img', '-same_img', help='whether Bob sees Alice\'s image (or one of the same category)', action='store_true')
+    group.add_argument('--evaluation_categories', help='determines whether and which categories are kept for evaluation only', default=5, type=int)
+    return group
+
+
 def get_data_loader(args):
     sampling_strategies = args.sampling_strategies.split('/')
 

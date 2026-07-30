@@ -263,6 +263,18 @@ class Pretrainer:
         raise NotImplementedError
 
 
+# Command-line arguments common to every pretraining procedure. `frozen_desc` names, for the help
+# of --freeze_pretrained_parameters, what that flag would freeze in this game. Returns the argparse
+# group so a caller can append game-specific pretraining knobs (e.g. --pretrain / --pretrain_CNNs).
+def add_pretraining_args(parser, frozen_desc):
+    group = parser.add_argument_group(title='Pretraining', description='arguments relative to pretraining agents before the communication game')
+    group.add_argument('--pretrain_epochs', help='number of epochs per agent for pretraining', type=int, default=5)
+    group.add_argument('--pretrain_steps_per_epoch', help='number of steps per pretraining epoch (defaults to --steps_per_epoch)', type=int, default=None)
+    group.add_argument('--pretrain_learning_rate', help='learning rate for pretraining (defaults to --learning_rate)', type=float, default=None)
+    group.add_argument('--freeze_pretrained_parameters', help=('after pretraining, freeze all pretrained parameters (here: %s) so that they are not updated during the game' % frozen_desc), action='store_true')
+    return group
+
+
 # ---------------------------------------------------------------------------
 # CNN pretrainer (AliceBob family)
 # ---------------------------------------------------------------------------
