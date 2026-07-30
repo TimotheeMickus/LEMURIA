@@ -627,7 +627,7 @@ class Dataset(SeqAsyncDataset):
     
         # Prints information.
         print()
-        print("Predicate–candidate satisfaction matrix")
+        print("Predicate–candidate satisfaction matrix info:")
         print(f"  shape : {M.shape}")
         print(f"  values: {np.unique(M)}")
         print(f"  rank  : {np.linalg.matrix_rank(M)}")
