@@ -3,6 +3,9 @@ python -m signalling --learning_rate  0.0001 --sampling_strategies different --c
 // This illustrates how to use WandB and how to specificy the names of runs.
 python -m signalling --do predicate_signalling_game --device cpu --properties 8-8 --min_depth 1 --max_depth 3 --nontrivial_only --candidate_encoder node_averager --max_len 10 --base_alphabet_size 64 --candidate_sampling balanced --batch_size 1000 --beta_retriever 0 --steps_per_epoch 1000 --epochs 2 --use_baseline --runs 1 --hidden_size 128 --len_penalty 0.0 --voc_penalty 0.0 --num_candidates 2 --predicate_sampling random --learning_rate 0.01 --beta_asker 0.01 --wandb --wandb_project test_blip --name_with "[min_depth, max_depth]" --summary runs/psg/[now]_bloup
 
+//
+python -m signalling --do predicate_signalling_game --device cuda --properties 8-8 --min_depth 1 --max_depth 3 --nontrivial_only --candidate_encoder node_averager --max_len 10 --base_alphabet_size 64 --candidate_sampling balanced --batch_size 1000 --beta_retriever 0 --steps_per_epoch 1000 --epochs 32 --use_baseline --runs 1 --hidden_size 128 --len_penalty 0.0 --voc_penalty 0.0 --num_candidates 2 --predicate_sampling random --learning_rate 0.01 --beta_asker 0.01 --pop_size 4-1 --pop_reset_period 4-0 --eval_compositionality --pretrain --pretrain_epochs 1 --name_with [learning_rate, beta_asker, pop_size, pop_reset_period, voc_penalty, pretrain] --wandb --wandb_project SomeRun
+
 // AlexBethPopulation
 python -m signalling --do predicate_signalling_game --device cpu --properties 8-8 --min_depth 1 --max_depth 3 --nontrivial_only --candidate_encoder node_averager --max_len 10 --base_alphabet_size 64 --candidate_sampling balanced --batch_size 1000 --beta_retriever 0 --steps_per_epoch 1000 --epochs 8 --use_baseline --runs 1 --hidden_size 128 --len_penalty 0.0 --voc_penalty 0.0 --num_candidates 2 --predicate_sampling random --learning_rate 0.01 --beta_asker 0.01 --pop_size 1-2 --pop_reset_period 0-4
 
