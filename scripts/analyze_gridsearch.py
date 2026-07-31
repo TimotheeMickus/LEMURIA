@@ -7,13 +7,10 @@ Produces:
   (ii) One heatmap per pair of hyperparameters (average metric per cell).
   (iii) A top-10 ranking of hyperparameter combinations.
 
-Output is either a single combined PDF (default) or independent PNG figures,
-selected with --format.
+Output is either a single combined PDF (default) or independent PNG figures, selected with --format.
 
 The metric analyzed is configurable (--metric, default eval/perf).
-Runs can be filtered to the best fraction (--filter x): the worst x of runs,
-ranked by final eval/perf (always eval/perf, regardless of --metric), are
-dropped before any analysis.
+Runs can be filtered to the best fraction (--filter x): the worst x of runs, ranked by final eval/perf (always eval/perf, regardless of --metric), are dropped before any analysis.
 
 Usage:
     python analyze_gridsearch.py
@@ -35,9 +32,7 @@ import numpy as np
 import pandas as pd
 import wandb
 
-# We intentionally build every figure before emitting (the PDF path writes them
-# all into one file), so more than 20 are open at once. They are all closed at
-# emit time, so silence matplotlib's precautionary "too many open figures" warning.
+# We intentionally build every figure before emitting (the PDF path writes them all into one file), so more than 20 are open at once. They are all closed at emit time, so silence matplotlib's precautionary "too many open figures" warning.
 plt.rcParams["figure.max_open_warning"] = 0
 
 # Metric always used for filtering the worst runs, independent of --metric.
