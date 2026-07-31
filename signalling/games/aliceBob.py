@@ -56,13 +56,17 @@ class AliceBob(SignallingEvalMixin, Game):
             self._receiver = senderReceiver.receiver
 
             parameters = senderReceiver.parameters()
+            assert (args.learning_rate_a is None) and (args.learning_rate_b is None)
+            self._optim = build_optimizer(parameters, args.learning_rate)
         else:
             self._sender = Sender.from_args(args)
             self._receiver = Receiver.from_args(args)
 
-            parameters = it.chain(self.sender.parameters(), self.receiver.parameters())
-
-        self._optim = build_optimizer(parameters, args.learning_rate)
+            #parameters = it.chain(self.sender.parameters(), self.receiver.parameters()) 
+            self._optim = misc.build_optimizer_two_groups(
+                self.sender.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_a), 
+                self.receiver.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_b)
+            )
 
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.

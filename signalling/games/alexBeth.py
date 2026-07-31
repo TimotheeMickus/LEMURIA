@@ -63,14 +63,20 @@ class AlexBeth(SignallingEvalMixin, Game):
             self._retriever = askerRetriever.retriever
 
             parameters = askerRetriever.parameters()
+            assert (args.learning_rate_a is None) and (args.learning_rate_b is None)
+            self._optim = build_optimizer(parameters, args.learning_rate)
         
             assert (self._asker.alphabet_size == self._retriever.alphabet_size) # The asker and the retriever have the exact same vocabulary.
         else:
             self._asker = Asker.from_args(args)
             self._retriever = Retriever.from_args(args)
 
-            parameters = it.chain(self.asker.parameters(), self.retriever.parameters())
-            
+            #parameters = it.chain(self.asker.parameters(), self.retriever.parameters())
+            self._optim = misc.build_optimizer_two_groups(
+                self.asker.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_a), 
+                self.retriever.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_b)
+            )
+
             assert (self._asker.alphabet_size == (self._retriever.alphabet_size + 1)) # Only the asker has the BOS symbol in its vocabulary.
         
         self.full_alphabet_size = self._asker.alphabet_size - 1 # Number of symbols that can be found in the signals; this includes padding and EOS but excludes BOS.
@@ -78,8 +84,6 @@ class AlexBeth(SignallingEvalMixin, Game):
         
         self.max_len_signal = args.max_len
 
-        self._optim = build_optimizer(parameters, args.learning_rate)
-        
         self.use_baseline = args.use_baseline
         if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
             # Currently, the asker and retriever's rewards are the same, but we could imagine a setting in which they are different.

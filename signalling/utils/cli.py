@@ -48,6 +48,8 @@ def add_reward_args(parser, len_penalty_default):
     group.add_argument('--len_penalty', help='coefficient for the length penalty of the signals', default=len_penalty_default, type=float)
     group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
     group.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
+    group.add_argument("--learning_rate_a", help="learning rate for the sender/asker (overrides --learning_rate if set)", default=None, type=float)
+    group.add_argument("--learning_rate_b", help="learning rate for the receiver/retriever (overrides --learning_rate if set)", default=None, type=float)
     group.add_argument('--grad_clipping', help='threshold for gradient clipping', default=1, type=float)
     group.add_argument('--grad_scaling', help='threshold for gradient scaling', default=None, type=float)
     return group

@@ -45,8 +45,8 @@ class AliceBobCharlie(AliceBob):
         self.loss_weight_temp = args.loss_weight_temp
 
         # TODO Using different learning rates would probably prove beneficial.
-        self._optim_sender = build_optimizer(self.sender.parameters(), args.learning_rate)
-        self._optim_receiver = build_optimizer(self.receiver.parameters(), args.learning_rate)
+        self._optim_sender = build_optimizer(self.sender.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_a))
+        self._optim_receiver = build_optimizer(self.receiver.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_b))
         self._optim_drawer = build_optimizer(self.drawer.parameters(), args.learning_rate)
 
         self.score_trackers = {

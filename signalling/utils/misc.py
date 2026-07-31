@@ -296,6 +296,15 @@ def build_optimizer(θ, learning_rate):
     """
     return optim.RMSprop(θ, lr=learning_rate)
 
+def resolve_lr(default_lr, override):
+    return default_lr if (override is None) else override
+
+def build_optimizer_two_groups(params_a, lr_a, params_b, lr_b):
+    return optim.RMSprop([
+        {'params': list(params_a), 'lr': lr_a},
+        {'params': list(params_b), 'lr': lr_b},
+    ])
+
 # Builds a path by replacing `substring` with `replacement` in `path` (all converted to strings)
 # path, substring, replacement: any
 # The output is a PosixPath

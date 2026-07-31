@@ -2,7 +2,7 @@ import random
 
 import torch.nn as nn
 
-from ..utils.misc import build_optimizer
+from ..utils.misc import build_optimizer, resolve_lr, build_optimizer_two_groups
 
 
 # Parses a "x-y" string into an (x, y) pair of ints; None yields `default`.
@@ -59,8 +59,10 @@ class PopulationMixin:
         self._consumers = nn.ModuleList(consumers)
         self._agents = nn.ModuleList(producers + consumers)
 
-        # A single optimizer over the whole population.
-        self._optim = build_optimizer(self._agents.parameters(), args.learning_rate)
+        self._optim = build_optimizer_two_groups(
+            self._producers.parameters(), resolve_lr(args.learning_rate, args.learning_rate_a),
+            self._consumers.parameters(), resolve_lr(args.learning_rate, args.learning_rate_b)
+        )
 
         # Staggered schedule: birth = -offset with offset = floor(i * period / count), so agent i starts at age `offset` and is first reset at epoch period - offset. Hence the group's first reset is at ~period/count and every agent's lifespan is at most `period`.
         self._producer_birth = self._initial_births(n, a)
