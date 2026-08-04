@@ -45,7 +45,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         self._logger = logger
         self._dataset = dataset
 
-        self.use_expectation = args.use_expectation
+        self.reward_mode = args.reward
         self.grad_scaling = (args.grad_scaling or 0)
         self.grad_clipping = (args.grad_clipping or 0)
         self.beta_asker = args.beta_asker
@@ -354,12 +354,16 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         scores_right = torch.where((truth_targets > 0.5), retriever_scores, -retriever_scores) # Shape: (batch, candidates)
         selecting_right = misc.selecting(scores_right)
 
-        perf = selecting_right["dist"].probs.mean(dim=1).detach() # Shape: (batch,)
-        
-        if(self.use_expectation):
-            rewards = perf.clone() # Expected average accuracy of the retriever over the candidates. # Shape: (batch,)
-        else:
-            rewards = selecting_right["actions"].mean(dim=1) # Shape: (batch,)
+        probs = selecting_right["dist"].probs.detach() # per-candidate probability the retriever is correct. Shape: (batch, candidates)
+        perf = probs.mean(dim=1) # expected average accuracy over the candidates (the logged performance). Shape: (batch,)
+
+        if(self.reward_mode == "binary"):
+            rewards = selecting_right["actions"].mean(dim=1) # sampled average accuracy over the candidates. Shape: (batch,)
+        elif(self.reward_mode == "expectation"):
+            rewards = perf.clone() # Shape: (batch,)
+        else: # "log_expectation": mean over candidates of log P(correct) = -(retriever's mean cross-entropy),
+              # so the asker maximises the same per-candidate log-likelihood the retriever is trained on.
+            rewards = torch.log(probs.clamp_min(1e-9)).mean(dim=1) # Shape: (batch,)
 
         # Generates probabilities from the scores and selects candidates.
         #retriever_selecting = misc.selecting(retriever_scores)

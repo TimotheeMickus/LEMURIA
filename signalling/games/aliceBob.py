@@ -43,7 +43,7 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_signal = args.max_len
 
-        self.use_expectation = args.use_expectation
+        self.reward_mode = args.reward
         self.grad_scaling = (args.grad_scaling or 0)
         self.grad_clipping = (args.grad_clipping or 0)
         self.beta_sender = args.beta_sender
@@ -214,10 +214,11 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         # Generates a probability distribution from the scores and points at an image.
         receiver_pointing = misc.pointing(img_scores)
 
-        perf = receiver_pointing['dist'].probs[:, target_idx].detach() # Shape: (batch size)
+        perf = receiver_pointing['dist'].probs[:, target_idx].detach() # P(target) = probability the receiver is right. Shape: (batch size)
 
-        if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
-        else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
+        if(self.reward_mode == "binary"): rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
+        elif(self.reward_mode == "expectation"): rewards = perf.clone() # Shape: (batch size)
+        else: rewards = torch.log(perf.clamp_min(1e-9)) # "log_expectation": log P(target) = -cross-entropy, the receiver's own objective. Shape: (batch size)
 
         signal_lengths = sender_action[1].view(-1).float() # Shape: (batch size)
 
@@ -284,8 +285,9 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         if(use_REINFORCE): # REINFORCE
             log_prob = receiver_pointing['dist'].log_prob(receiver_pointing['action']) # The log-probabilities of the selected images. Shape: (batch size)
 
-            if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
-            else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
+            if(self.reward_mode == "binary"): rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
+            elif(self.reward_mode == "expectation"): rewards = perf.clone() # Shape: (batch size)
+            else: rewards = torch.log(perf.clamp_min(1e-9)) # "log_expectation": log P(target). Shape: (batch size)
 
             r_baseline = self._receiver_baseline(rewards, meanings) # 0.0, a float ('global'), or a (batch,) tensor ('per_meaning')
 

@@ -25,7 +25,7 @@ class AliceBobCharlie(AliceBob):
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_signal = args.max_len
 
-        self.use_expectation = args.use_expectation
+        self.reward_mode = args.reward
         self.grad_scaling = args.grad_scaling or 0
         self.grad_clipping = args.grad_clipping or 0
         self.beta_sender = args.beta_sender

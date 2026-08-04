@@ -46,7 +46,7 @@ def add_reward_args(parser, len_penalty_default):
     differently per game (sender/receiver vs asker/retriever), so callers add those."""
     group = parser.add_argument_group(title='Reward', description='arguments relative to reward shaping/gradient computation')
     group.add_argument('--len_penalty', help='coefficient for the length penalty of the signals', default=len_penalty_default, type=float)
-    group.add_argument('--use_expectation', help='use expectation of success instead of playing dice', action='store_true')
+    group.add_argument('--reward', help="reward for the sender/asker's REINFORCE: 'binary' (sampled success, 0/1 per candidate; the historical default), 'expectation' (the probability the retriever is right; the historical --use_expectation), or 'log_expectation' (the log of that probability, so the sender maximises the same log-likelihood the retriever is trained on).", choices=['binary', 'expectation', 'log_expectation'], default='binary')
     group.add_argument("--learning_rate", help="learning rate", default=0.0001, type=float)
     group.add_argument("--learning_rate_a", help="learning rate for the sender/asker (overrides --learning_rate if set)", default=None, type=float)
     group.add_argument("--learning_rate_b", help="learning rate for the receiver/retriever (overrides --learning_rate if set)", default=None, type=float)
