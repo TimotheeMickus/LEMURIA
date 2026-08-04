@@ -7,7 +7,10 @@ from .agent import Agent
 from ..utils.modules import SignalDecoder, build_predicate_encoder_from_args
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
+# `symbol_marginal` is the (differentiable) batch symbol marginal m_a = E_s[π(a|s)], of shape
+# (base_alphabet_size + 1,); it is only consumed by the group-sparsity vocabulary auxiliary loss
+# and defaults to None so nothing else depends on it.
+Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action", "symbol_marginal"], defaults=[None])
 
 # Produces a signal based on an predicate.
 class Asker(Agent):
@@ -39,7 +42,8 @@ class Asker(Agent):
         outcome = Outcome(
             entropy=outputs["entropy"], # Shape: (batch size, 1)
             log_prob=outputs["log_probs"], # Shape: (batch, max signal length)
-            action=(outputs["signal"], outputs["signal_len"]) # A list[list[Int]] and a tensor of shape (batch size, 1)
+            action=(outputs["signal"], outputs["signal_len"]), # A list[list[Int]] and a tensor of shape (batch size, 1)
+            symbol_marginal=outputs["symbol_marginal"] # Shape: (base_alphabet_size + 1,)
         )
 
         return outcome

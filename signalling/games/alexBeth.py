@@ -24,12 +24,13 @@ from .game import Game
 from .pretraining import AlexBethPretrainer
 from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
 from .depth_curriculum import DepthCurriculum
+from .vocab_penalty import VocabularyPenaltyMixin
 
 # In this game, there is one asker (Alex) and one retriever (Beth).
 # They are both trained to maximise either the probability assigned by Beth to an object (if the object satisfies the predicate), or its opposite (otherwise), in the following context: 
 # Alex is shown a predicate and produces a signal, Beth sees both the signal and an object, and produces a probability.
 # Alex is trained with REINFORCE; Beth is trained by log-likelihood maximization.
-class AlexBeth(SignallingEvalMixin, Game):
+class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
     # Builds the predicate dataset used by Game.load to rebuild the model.
     @classmethod
     def _data_loader_from_args(cls, args):
@@ -50,7 +51,7 @@ class AlexBeth(SignallingEvalMixin, Game):
         self.beta_asker = args.beta_asker
         self.beta_retriever = args.beta_retriever
         self.len_penalty = args.len_penalty
-        self.voc_penalty = args.voc_penalty
+        self._setup_vocab_penalty(args)
 
         self.base_alphabet_size = args.base_alphabet_size # Number of symbols excluding special ones (padding, EOS, etc.)
 
@@ -383,30 +384,8 @@ class AlexBeth(SignallingEvalMixin, Game):
 
             rewards = (rewards - length_penalties) # Shape: (batch,)
 
-        if(self.voc_penalty > 0.0):
-            # Each symbol of the base alphabet is associated with a total penalty equal to `batch_size` * `voc_penalty`, distributed over all signals in proportion of their use of the symbol (as if the total penalty were distributed equally over all occurrences of the symbol).
-            # Ex: If each signal uses a single symbol and at least once, and all signals use different symbols, each signal gets a penalty equal to `voc_penalty`.
-            # Ex: If all signal uses a single symbol overall, each signal gets a penalty equal to `voc_penalty` * its length * `batch_size` / sum of lengths, which is `voc_penalty` when the signals are of the same length ≥ 1.
-            # RMK: We could imagine a non-uniform penalty (that depends on the position of the token).
-            vocabulary_counts = torch.bincount(asker_action[0].view(-1), minlength=self.full_alphabet_size) # Shape: (full_alphabet_size,), includes padding and EOS
-            #vocabulary_counts[self.asker.eos_index] = 0 # no penalty for using EOS
-            #vocabulary_counts[self.asker.padding_idx] = 0 # no penalty for "using" padding
-
-            vocabulary_freqs = 1.0 / vocabulary_counts # Shape: (full_alphabet_size,)
-            vocabulary_freqs[self.asker.eos_index] = 0.0 # no penalty for using EOS
-            vocabulary_freqs[self.asker.padding_idx] = 0.0 # no penalty for "using" padding
-
-            batch_size = asker_action[0].shape[0]
-            symbol_penalty = (self.voc_penalty * batch_size) * vocabulary_freqs # Shape: (full_alphabet_size,)
-
-            vocabulary_penalties = symbol_penalty[asker_action[0]].sum(dim=1) # Shape (batch,)
-            
-            #print(asker_action[0])
-            #print(vocabulary_counts)
-            #print(symbol_penalty)
-            #input(vocabulary_penalties)
-
-            rewards = (rewards - vocabulary_penalties) # Shape: (batch,)
+        # Vocabulary penalty, 'reward' mode (a no-op in 'aux' mode; see compute_asker_loss). Shape: (batch,) or 0.0.
+        rewards = rewards - self.vocabulary_reward_penalty(asker_action[0], self.asker.eos_index, self.asker.padding_idx, self.full_alphabet_size)
 
         return (rewards, perf)
 
@@ -433,6 +412,10 @@ class AlexBeth(SignallingEvalMixin, Game):
         # Entropy penalty
         entropy_loss = -(self.beta_asker * asker_outcome.entropy.mean()) # Could be normalised (divided) by (base_alphabet_size + 1).
         loss += entropy_loss
+
+        # Vocabulary penalty, 'aux' mode: a direct, differentiable group-sparsity loss on the batch
+        # symbol marginal (the 'reward' mode counterpart lives in compute_asker_rewards instead).
+        loss += self.vocabulary_aux_loss(asker_outcome.symbol_marginal, self.asker.eos_index)
 
         return (loss, perf, rewards)
 

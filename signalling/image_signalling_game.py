@@ -3,6 +3,7 @@
 from datetime import datetime
 import sys
 import random
+import socket # for `gethostname`
 
 import torch
 import torch.nn as nn
@@ -156,6 +157,9 @@ def get_args(remaining_args=None):
 
     # Reward (shared; --len_penalty default is game-specific) + the AliceBob entropy betas.
     reward = cli.add_reward_args(arg_parser, len_penalty_default=0.01)
+    reward.add_argument('--voc_penalty', help='coefficient for the vocabulary usage penalty (meaning depends on --voc_penalty_mode; the two modes are on different scales and need separate tuning)', default=0.0, type=float)
+    reward.add_argument('--voc_penalty_mode', help="how the vocabulary penalty is applied: 'reward' is the amortised inverse-frequency penalty subtracted from the REINFORCE reward; 'aux' is a differentiable group-sparsity penalty on the batch symbol marginal, added directly to the sender loss", choices=['reward', 'aux'], default='reward')
+    reward.add_argument('--voc_penalty_p', help="exponent p in (0, 1] for the 'aux' group-sparsity penalty sum_a m_a**p over content symbols (smaller p -> closer to an L0 support count and more aggressive pruning; p=1 has no effect on the simplex). Unused when --voc_penalty_mode is 'reward'", default=0.5, type=float)
     reward.add_argument('--beta_sender', help='sender entropy penalty coefficient', type=float, default=0.01)
     reward.add_argument('--beta_receiver', help='sender entropy penalty coefficient', type=float, default=0.001)
 

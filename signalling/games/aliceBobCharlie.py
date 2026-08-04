@@ -30,6 +30,8 @@ class AliceBobCharlie(AliceBob):
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
         self.len_penalty = args.len_penalty
+        self._setup_vocab_penalty(args)
+        self.full_alphabet_size = self.base_alphabet_size + 2 # EOS + content + padding (excludes BOS); matches SignalDecoder's layout.
 
         self.shared = args.shared
         if(self.shared):

@@ -20,11 +20,12 @@ from ..eval import decision_tree
 from .game import Game
 from .pretraining import CNNPretrainer, train_cnn_autoencoder
 from .signalling_eval import SignallingEvalMixin, dump_signals_csv, topographic_similarity
+from .vocab_penalty import VocabularyPenaltyMixin
 
 # In this game, there is one sender (Alice) and one receiver (Bob).
 # They are both trained to maximise the probability assigned by Bob to a "target image" in the following context: Alice is shown an "original image" and produces a signal, Bob sees the signal and then the target image and a "distractor image".
 # Alice is trained with REINFORCE; Bob is trained by log-likelihood maximization.
-class AliceBob(SignallingEvalMixin, Game):
+class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
     # Builds the image dataset used by Game.load to rebuild the model.
     @classmethod
     def _data_loader_from_args(cls, args):
@@ -47,6 +48,8 @@ class AliceBob(SignallingEvalMixin, Game):
         self.beta_sender = args.beta_sender
         self.beta_receiver = args.beta_receiver
         self.len_penalty = args.len_penalty
+        self._setup_vocab_penalty(args)
+        self.full_alphabet_size = self.base_alphabet_size + 2 # EOS + content + padding (excludes BOS); matches SignalDecoder's layout.
 
         self.shared = args.shared
         if(self.shared):
@@ -222,6 +225,9 @@ class AliceBob(SignallingEvalMixin, Game):
 
             rewards = (rewards - length_penalties) # Shape: (batch size)
 
+        # Vocabulary penalty, 'reward' mode (a no-op in 'aux' mode; see compute_sender_loss). Shape: (batch,) or 0.0.
+        rewards = rewards - self.vocabulary_reward_penalty(sender_action[0], self.sender.eos_index, self.sender.padding_idx, self.full_alphabet_size)
+
         return (rewards, perf)
 
     # Returns a scalar tensor and two tensors of shape (batch size).
@@ -249,6 +255,10 @@ class AliceBob(SignallingEvalMixin, Game):
         # Entropy penalty
         entropy_loss = -(self.beta_sender * sender_outcome.entropy.mean()) # Could be normalised (divided) by (base_alphabet_size + 1).
         loss += entropy_loss
+
+        # Vocabulary penalty, 'aux' mode: a direct, differentiable group-sparsity loss on the batch
+        # symbol marginal (the 'reward' mode counterpart lives in compute_sender_rewards instead).
+        loss += self.vocabulary_aux_loss(sender_outcome.symbol_marginal, self.sender.eos_index)
 
         return (loss, perf, rewards)
 

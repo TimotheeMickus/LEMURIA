@@ -7,7 +7,10 @@ from .agent import Agent
 from ..utils.modules import SignalDecoder, build_cnn_encoder_from_args
 
 # Structure for outcomes
-Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action"])
+# `symbol_marginal` is the (differentiable) batch symbol marginal m_a = E_s[π(a|s)], of shape
+# (base_alphabet_size + 1,); it is only consumed by the group-sparsity vocabulary auxiliary loss
+# and defaults to None so nothing else depends on it.
+Outcome = namedtuple("Outcome", ["entropy", "log_prob", "action", "symbol_marginal"], defaults=[None])
 
 # Produces a signal based on an image.
 class Sender(Agent):
@@ -19,6 +22,11 @@ class Sender(Agent):
         
         self.args = args # Used to reinitialize the agent.
         self.has_shared_param = has_shared_param
+
+        self.alphabet_size = self.signal_decoder.alphabet_size
+        self.eos_index = self.signal_decoder.eos_index
+        self.padding_idx = self.signal_decoder.padding_idx
+        self.bos_index = self.signal_decoder.bos_index # not actually used in the signals produced
 
     def forward(self, image):
         """
@@ -34,7 +42,8 @@ class Sender(Agent):
         outcome = Outcome(
             entropy=outputs["entropy"], # Shape: (batch size, 1)
             log_prob=outputs["log_probs"], # Shape: (batch, max signal length)
-            action=(outputs["signal"], outputs["signal_len"]) # A list[list[Int]] and a tensor of shape (batch size, 1)
+            action=(outputs["signal"], outputs["signal_len"]), # A list[list[Int]] and a tensor of shape (batch size, 1)
+            symbol_marginal=outputs["symbol_marginal"] # Shape: (base_alphabet_size + 1,)
         )
 
         return outcome

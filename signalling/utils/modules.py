@@ -124,6 +124,14 @@ class SignalDecoder(nn.Module):
         # Used in the stopping mechanism (False·s become True·s when EOS is produced)
         has_stopped = torch.zeros(encoded.size(0), device=encoded.device, dtype=torch.bool)
 
+        # Accumulators for the batch symbol marginal m_a = E_s[π(a|s)], averaged over
+        # *active* emission steps (completed signals contribute nothing). Kept differentiable
+        # w.r.t. the decoder parameters (via `dist.probs`) so it can drive a direct auxiliary
+        # loss; the normaliser `active_total` carries no gradient. Shape: (base_alphabet_size + 1,),
+        # i.e. one entry per producible symbol (index `eos_index` for EOS, the rest for content).
+        symbol_probs_sum = torch.zeros(self.action_space_proj.out_features, device=encoded.device)
+        active_total = torch.zeros((), device=encoded.device)
+
         # Produces the signals.
         for step in range(self.max_signal_len):
             # Forces a final EOS for signals reaching the maximum length.
@@ -151,6 +159,10 @@ class SignalDecoder(nn.Module):
             log_probs.append(log_p)
             entropy.append(ent)
 
+            # Accumulate the (active) per-step symbol distribution towards the batch marginal.
+            symbol_probs_sum = symbol_probs_sum + (dist.probs * active.unsqueeze(-1)).sum(dim=0) # Shape: (alphabet_out,)
+            active_total = active_total + active.sum()
+
             action = action.masked_fill(has_stopped, self.padding_idx)
             signal.append(action)
 
@@ -171,11 +183,15 @@ class SignalDecoder(nn.Module):
         entropy = entropy.sum(dim=1, keepdim=True) # Shape: (batch size, 1)
         entropy = entropy / signal_len.float() # The average symbol distribution entropy over the signal. Shape: (batch size, 1)
 
+        # Batch symbol marginal (differentiable). `active_total` is 0 only for an empty batch.
+        symbol_marginal = symbol_probs_sum / active_total.clamp_min(1.0) # Shape: (alphabet_out,)
+
         outputs = {
             "entropy": entropy,
             "log_probs": log_probs,
             "signal": signal,
-            "signal_len": signal_len}
+            "signal_len": signal_len,
+            "symbol_marginal": symbol_marginal}
 
         return outputs
 
