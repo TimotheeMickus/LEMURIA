@@ -236,6 +236,13 @@ def setup_wandb_logging(autologger, enabled, project, run_name, args):
     import wandb
 
     wandb_run = wandb.init(project=project, name=run_name, config=_wandb_config_from_args(args))
+
+    # Summarise the compositionality metrics by their best value over the run (not the last epoch),
+    # so a W&B sweep optimising 'eval/compositionality_loss' targets the best language the run reached
+    # rather than a noisy final-epoch value. Harmless when these metrics are never logged.
+    wandb.define_metric("eval/compositionality_loss", summary="min")
+    wandb.define_metric("eval/compositionality_acc", summary="max")
+
     write_to_summary = autologger._write
 
     def _write_and_wandb(name, value, step, direct=False):
