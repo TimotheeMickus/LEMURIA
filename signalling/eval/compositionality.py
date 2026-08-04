@@ -38,6 +38,7 @@ Efficiency notes
 """
 
 import json
+import argparse
 from dataclasses import dataclass, asdict
 
 import numpy as np
@@ -45,6 +46,7 @@ import torch
 import torch.nn as nn
 
 from ..utils import predicate_data
+from ..utils import cli
 
 
 # ----------------------------------------------------------------------------- #
@@ -648,9 +650,24 @@ def _sample_hparams(rng, max_epochs, patience):
     )
 
 
+# Lean argument parser for `--do compositionality_search`. Unlike a training run, the search only
+# needs to build the control-language dataset (Data group; skipped entirely with --comp_signals_csv),
+# pick a device, and read the Compositionality knobs -- so it declares exactly those, rather than
+# reusing the whole predicate-game parser (which would document dozens of irrelevant training/model
+# arguments in --help).
+def get_args(remaining_args):
+    parser = argparse.ArgumentParser(
+        prog="signalling --do compositionality_search",
+        description="Random hyperparameter search for the compositionality probe. Tunes the probe on a "
+                    "compositional-by-construction language: the reverse-Polish control language built from the "
+                    "dataset, or a dumped emergent language via --comp_signals_csv (in which case no dataset is built).")
+    predicate_data.add_data_args(parser)   # the control-language dataset (unused when --comp_signals_csv is given)
+    cli.add_perf_args(parser)              # --device
+    add_compositionality_args(parser)      # the Compositionality group (--comp_* etc.)
+    return parser.parse_args(remaining_args)
+
+
 def main(global_args=None, remaining_args=None):
-    # Local imports to avoid an import cycle (predicate_signalling_game -> games -> alexBeth -> here).
-    from ..predicate_signalling_game import get_args
     from ..utils.predicate_data import get_data_loader
 
     args = get_args(remaining_args)
