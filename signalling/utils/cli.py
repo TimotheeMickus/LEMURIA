@@ -73,7 +73,8 @@ def add_training_args(parser):
     """Core training-loop knobs shared by both games. Callers may append
     game-specific training arguments (e.g. --keep_training) to the returned group."""
     group = parser.add_argument_group(title='Training', description='arguments relative to training')
-    group.add_argument('--use_baseline', help='use a baseline term in REINFORCE', action='store_true')
+    group.add_argument('--baseline', help="REINFORCE reward baseline: 'none', 'global' (a single windowed running mean of recent rewards, the historical --use_baseline behaviour), or 'per_meaning' (one running mean per meaning: predicate index in the predicate game, image category in the image game)", choices=['none', 'global', 'per_meaning'], default='none')
+    group.add_argument('--baseline_momentum', help="EMA momentum for the 'per_meaning' baseline (higher = slower, smoother updates). Unused for the other modes.", type=float, default=0.9)
     group.add_argument('--epochs', help='number of epochs', default=100, type=int)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', default=1000, type=int)
     group.add_argument('--runs', help='number of runs', default=1, type=int)

@@ -85,11 +85,10 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         
         self.max_len_signal = args.max_len
 
-        self.use_baseline = args.use_baseline
-        if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
-            # Currently, the asker and retriever's rewards are the same, but we could imagine a setting in which they are different.
-            self._asker_avg_reward = misc.Averager(size=12800)
-            self._retriever_avg_reward = misc.Averager(size=12800)
+        self.baseline_mode = args.baseline
+        # REINFORCE baseline for the asker (the retriever is trained by log-likelihood, not REINFORCE).
+        # 'per_meaning' keys on the predicate index.
+        self._asker_baseline = misc.RewardBaseline(self.baseline_mode, n_meanings=len(self._dataset.predicates), momentum=args.baseline_momentum)
 
         self.dump_signal_mode = args.dump_signals
         self.dump_predicate_perf = args.dump_predicate_perf
@@ -320,7 +319,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         truth_targets = batch.candidate_truth
 
         # Alex's part
-        (asker_loss, asker_perf, asker_rewards) = self.compute_asker_loss(asker_outcome, retriever_outcome.scores, truth_targets)
+        (asker_loss, asker_perf, asker_rewards) = self.compute_asker_loss(asker_outcome, retriever_outcome.scores, truth_targets, meanings=batch.predicate_idx)
         asker_entropy = asker_outcome.entropy.mean()
 
         # Beth's part
@@ -393,7 +392,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
     # asker_outcome: (log_prob tensor of shape (batch, max signal len), entropy tensor of shape (batch, 1))
     # retriever_scores: tensor of shape (batch size, number of candidates)
     # truth_targets: tensor of shape (batch size, number of candidates)
-    def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets):
+    def compute_asker_loss(self, asker_outcome, retriever_scores, truth_targets, meanings=None):
         (rewards, perf) = self.compute_asker_rewards(asker_outcome.action, retriever_scores, truth_targets)
 
         loss = 0.0
@@ -401,10 +400,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         # REINFORCE loss
         log_prob = asker_outcome.log_prob.sum(dim=1) # The per-episode sum of the log-probabilies of the selection actions (they all get the same reward). Shape: (batch size)
 
-        if(self.use_baseline):
-            r_baseline = self._asker_avg_reward.get(default=0.0)
-            self._asker_avg_reward.update_batch(rewards.cpu().numpy())
-        else: r_baseline = 0.0
+        r_baseline = self._asker_baseline(rewards, meanings) # 0.0, a float ('global'), or a (batch,) tensor ('per_meaning')
 
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
         loss += reinforce_loss

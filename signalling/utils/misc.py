@@ -115,6 +115,69 @@ class Averager:
 
         return self._buffer[(self._i-l):self._i].mean()
 
+
+class RewardBaseline:
+    """
+    REINFORCE reward baseline (a control variate subtracted from the reward). Three modes:
+      * 'none'        : no baseline (returns 0.0).
+      * 'global'      : a single windowed running mean of recent rewards (the historical behaviour).
+      * 'per_meaning' : one exponential moving average per meaning id, so the baseline is conditioned
+                        on the meaning (predicate index in the predicate game, image category in the
+                        image game). Conditioning on the state keeps REINFORCE unbiased while reducing
+                        variance more than a global constant when rewards differ systematically across
+                        meanings (easy vs. hard predicates/categories).
+
+    Calling the object returns the baseline to subtract *and then* folds the current rewards in
+    (get-then-update, matching the historical order so a batch never baselines against itself).
+    Returns a Python float ('none'/'global') or a per-item tensor on the rewards' device ('per_meaning').
+    """
+    def __init__(self, mode, n_meanings=None, window=12800, momentum=0.9):
+        self.mode = mode
+        if(mode == 'global'):
+            self._avg = Averager(size=window)
+        elif(mode == 'per_meaning'):
+            if(n_meanings is None): raise ValueError("per_meaning baseline requires n_meanings.")
+            self._b = np.zeros(int(n_meanings), dtype=np.float64)      # running EMA per meaning
+            self._seen = np.zeros(int(n_meanings), dtype=bool)         # whether a meaning has been observed yet
+            self.momentum = momentum
+        elif(mode != 'none'):
+            raise ValueError(f"Unknown baseline mode: {mode!r}.")
+
+    # rewards: 1D tensor of shape (batch,). meanings: per-item integer meaning ids (tensor or array),
+    # required for 'per_meaning'. Returns 0.0, a float, or a (batch,) tensor.
+    @torch.no_grad()
+    def __call__(self, rewards, meanings=None):
+        if(self.mode == 'none'):
+            return 0.0
+
+        r = rewards.detach().cpu().numpy()
+
+        if(self.mode == 'global'):
+            b = self._avg.get(default=0.0)
+            self._avg.update_batch(r)
+            return float(b)
+
+        # per_meaning
+        if(meanings is None): raise ValueError("per_meaning baseline requires per-item meaning ids.")
+        m = meanings.detach().cpu().numpy() if torch.is_tensor(meanings) else np.asarray(meanings)
+        m = m.astype(np.int64).reshape(-1)
+
+        baseline = np.where(self._seen[m], self._b[m], 0.0) # per-item baseline (0 for meanings not yet seen)
+
+        # EMA update, aggregated per distinct meaning within the batch (order-independent).
+        uniq, inv = np.unique(m, return_inverse=True)
+        sums = np.zeros(uniq.shape[0], dtype=np.float64)
+        counts = np.zeros(uniq.shape[0], dtype=np.float64)
+        np.add.at(sums, inv, r)
+        np.add.at(counts, inv, 1.0)
+        batch_mean = sums / counts
+        for k, mu in zip(uniq.tolist(), batch_mean.tolist()):
+            if(self._seen[k]): self._b[k] = (self.momentum * self._b[k]) + ((1.0 - self.momentum) * mu)
+            else: self._b[k] = mu; self._seen[k] = True
+
+        return torch.as_tensor(baseline, dtype=rewards.dtype, device=rewards.device)
+
+
 def h_compress(img):
     shape = img.shape
     width = shape[-1]

@@ -21,6 +21,7 @@ class AliceBobCharlie(AliceBob):
         self.max_perf = 0.0
 
         self._logger = logger
+        self._dataset = dataset # kept for meaning (image category) lookups in the per-meaning baseline
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_signal = args.max_len
 
@@ -61,9 +62,11 @@ class AliceBobCharlie(AliceBob):
         self.weights_average_log_frequency = 10
         self.weights_average_log_counter = 0
 
-        self.use_baseline = args.use_baseline
-        if(self.use_baseline): # In that case, the sender loss will take into account the "baseline term" into the average recent reward.
-            self._sender_avg_reward = misc.Averager(size=12800)
+        self.baseline_mode = args.baseline
+        # REINFORCE baselines; 'per_meaning' keys on the target image category. Charlie trains its
+        # receiver without REINFORCE, so the receiver baseline is defensive (kept for parity with AliceBob).
+        self._sender_baseline = misc.RewardBaseline(self.baseline_mode, n_meanings=dataset.nb_categories, momentum=args.baseline_momentum)
+        self._receiver_baseline = misc.RewardBaseline(self.baseline_mode, n_meanings=dataset.nb_categories, momentum=args.baseline_momentum)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
 
@@ -133,7 +136,8 @@ class AliceBobCharlie(AliceBob):
         (sender_outcome, drawer_outcome, receiver_outcome) = self(batch, use_spigot=self.use_spigot)
 
         # Alice's loss.
-        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contending_imgs=[0, 1])
+        meanings = batch.target_category(stack=True, f=self._dataset.category_idx)
+        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, contending_imgs=[0, 1], meanings=meanings)
         sender_entropy = sender_outcome.entropy.mean()
 
         # Bob's loss.

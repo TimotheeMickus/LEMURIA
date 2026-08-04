@@ -39,6 +39,7 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         self._args = args
 
         self._logger = logger
+        self._dataset = dataset # kept for meaning (image category) lookups in the per-meaning baseline
         self.base_alphabet_size = args.base_alphabet_size
         self.max_len_signal = args.max_len
 
@@ -71,11 +72,11 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
                 self.receiver.parameters(), misc.resolve_lr(args.learning_rate, args.learning_rate_b)
             )
 
-        self.use_baseline = args.use_baseline
-        if(self.use_baseline): # In that case, the loss will take into account the "baseline term" into the average recent reward.
-            # Currently, the sender and receiver's rewards are the same, but we could imagine a setting in which they are different.
-            self._sender_avg_reward = misc.Averager(size=12800)
-            self._receiver_avg_reward = misc.Averager(size=12800)
+        self.baseline_mode = args.baseline
+        # REINFORCE baselines; 'per_meaning' keys on the target image category. The receiver baseline
+        # is only exercised when the receiver is trained by REINFORCE (compute_receiver_loss).
+        self._sender_baseline = misc.RewardBaseline(self.baseline_mode, n_meanings=dataset.nb_categories, momentum=args.baseline_momentum)
+        self._receiver_baseline = misc.RewardBaseline(self.baseline_mode, n_meanings=dataset.nb_categories, momentum=args.baseline_momentum)
 
         self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
@@ -186,12 +187,15 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
 
         sender_outcome, receiver_outcome = self(batch)
 
+        # Per-item meaning ids (target image category) for the per-meaning REINFORCE baseline.
+        meanings = batch.target_category(stack=True, f=self._dataset.category_idx)
+
         # Alice's part
-        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores)
+        (sender_loss, sender_perf, sender_rewards) = self.compute_sender_loss(sender_outcome, receiver_outcome.scores, meanings=meanings)
         sender_entropy = sender_outcome.entropy.mean()
 
         # Bob's part
-        (receiver_loss, _, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True)
+        (receiver_loss, _, receiver_entropy) = self.compute_receiver_loss(receiver_outcome.scores, return_entropy=True, meanings=meanings)
 
         loss = sender_loss + receiver_loss
         optimization = [(self._optim, loss.detach(), misc.get_backward_f(loss))]
@@ -233,7 +237,7 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
     # Returns a scalar tensor and two tensors of shape (batch size).
     # receiver_scores: tensor of shape (batch size, nb img)
     # contending_imgs: None or a list[int] containing the indices of the contending images
-    def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contending_imgs=None):
+    def compute_sender_loss(self, sender_outcome, receiver_scores, target_idx=0, contending_imgs=None, meanings=None):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
 
@@ -244,10 +248,7 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         # REINFORCE loss
         log_prob = sender_outcome.log_prob.sum(dim=1) # The per-episode sum of the log-probabilies of the selection actions (they all get the same reward). Shape: (batch size)
 
-        if(self.use_baseline):
-            r_baseline = self._sender_avg_reward.get(default=0.0)
-            self._sender_avg_reward.update_batch(rewards.cpu().numpy())
-        else: r_baseline = 0.0
+        r_baseline = self._sender_baseline(rewards, meanings) # 0.0, a float ('global'), or a (batch,) tensor ('per_meaning')
 
         reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
         loss += reinforce_loss
@@ -266,7 +267,7 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
     # receiver_scores: tensor of shape (batch size, nb img)
     # use_REINFORCE: if true, the REINFORCE loss is used, otherwise, the cross-entropy loss is used
     # contending_imgs: None or a list[int] containing the indices of the contending images
-    def compute_receiver_loss(self, receiver_scores, use_REINFORCE=False, target_idx=0, contending_imgs=None, return_entropy=False):
+    def compute_receiver_loss(self, receiver_scores, use_REINFORCE=False, target_idx=0, contending_imgs=None, return_entropy=False, meanings=None):
         if(contending_imgs is None): img_scores = receiver_scores # Shape: (batch size, nb img)
         else: img_scores = torch.stack([receiver_scores[:,i] for i in contending_imgs], dim=1) # Shape: (batch size, len(contending_imgs))
 
@@ -286,10 +287,7 @@ class AliceBob(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             if(self.use_expectation): rewards = perf.clone() # Shape: (batch size)
             else: rewards = (receiver_pointing['action'] == target_idx).float() # Shape: (batch size)
 
-            if(self.use_baseline):
-                r_baseline = self._receiver_avg_reward.get(default=0.0)
-                self._receiver_avg_reward.update_batch(rewards.cpu().numpy())
-            else: r_baseline = 0.0
+            r_baseline = self._receiver_baseline(rewards, meanings) # 0.0, a float ('global'), or a (batch,) tensor ('per_meaning')
 
             reinforce_loss = -((rewards - r_baseline) * log_prob).mean()
             loss += reinforce_loss
