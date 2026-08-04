@@ -120,26 +120,31 @@ class RewardBaseline:
     """
     REINFORCE reward baseline (a control variate subtracted from the reward). Three modes:
       * 'none'        : no baseline (returns 0.0).
-      * 'global'      : a single windowed running mean of recent rewards (the historical behaviour).
+      * 'global'      : one exponential moving average of the batch-mean reward.
       * 'per_meaning' : one exponential moving average per meaning id, so the baseline is conditioned
                         on the meaning (predicate index in the predicate game, image category in the
                         image game). Conditioning on the state keeps REINFORCE unbiased while reducing
                         variance more than a global constant when rewards differ systematically across
                         meanings (easy vs. hard predicates/categories).
 
+    Both averaging modes are the SAME mechanism -- an EMA updated once per batch, with the same
+    `momentum` (effective window ~ 1/(1-momentum) batches) -- so a single knob governs both.
+    'global' is exactly the single-bucket (n_meanings == 1) case of 'per_meaning'.
+
     Calling the object returns the baseline to subtract *and then* folds the current rewards in
-    (get-then-update, matching the historical order so a batch never baselines against itself).
+    (get-then-update, so a batch never baselines against itself). Unseen buckets baseline at 0.
     Returns a Python float ('none'/'global') or a per-item tensor on the rewards' device ('per_meaning').
     """
-    def __init__(self, mode, n_meanings=None, window=12800, momentum=0.9):
+    def __init__(self, mode, n_meanings=None, momentum=0.9):
         self.mode = mode
+        self.momentum = momentum
         if(mode == 'global'):
-            self._avg = Averager(size=window)
+            self._b = 0.0                                              # running EMA of the batch-mean reward
+            self._seen = False                                        # whether any batch has been observed yet
         elif(mode == 'per_meaning'):
             if(n_meanings is None): raise ValueError("per_meaning baseline requires n_meanings.")
             self._b = np.zeros(int(n_meanings), dtype=np.float64)      # running EMA per meaning
             self._seen = np.zeros(int(n_meanings), dtype=bool)         # whether a meaning has been observed yet
-            self.momentum = momentum
         elif(mode != 'none'):
             raise ValueError(f"Unknown baseline mode: {mode!r}.")
 
@@ -153,9 +158,11 @@ class RewardBaseline:
         r = rewards.detach().cpu().numpy()
 
         if(self.mode == 'global'):
-            b = self._avg.get(default=0.0)
-            self._avg.update_batch(r)
-            return float(b)
+            baseline = self._b if self._seen else 0.0                 # pre-update baseline (0 before the first batch)
+            mu = float(r.mean())
+            self._b = ((self.momentum * self._b) + ((1.0 - self.momentum) * mu)) if self._seen else mu
+            self._seen = True
+            return float(baseline)
 
         # per_meaning
         if(meanings is None): raise ValueError("per_meaning baseline requires per-item meaning ids.")
