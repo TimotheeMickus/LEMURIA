@@ -113,6 +113,8 @@ def add_compositionality_args(parser):
     group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
     group.add_argument('--comp_search_seed', help='compositionality_search / probe cross-validation: random seed', type=int, default=0)
     group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
+    group.add_argument('--comp_signals_csv', help="compositionality_search: read the emergent language from a dumped-signals CSV (columns 'signal' and 'pred_str', the kind produced by --dump_signals) instead of the synthetic control language. When set, no dataset parameters are needed and the dataset is not built.", type=pathlib.Path, default=None)
+    group.add_argument('--comp_target_notation', help="compositionality_search: predicate serialisation used as the probe target when --comp_signals_csv is given", choices=['polish', 'reverse_polish'], default='polish')
     return group
 
 
@@ -441,6 +443,155 @@ def reverse_polish_pairs(dataset):
 
 
 # ----------------------------------------------------------------------------- #
+# Reading an emergent language from a dumped-signals CSV ( --comp_signals_csv )
+# ----------------------------------------------------------------------------- #
+
+# Predicate.__str__ is fully-parenthesised infix: a value is a bare name, negation is "(¬X)",
+# conjunction is "(X∧Y)". Value names are "P{i}-v{j}" and never contain the structural characters
+# below, so tokenisation is unambiguous and a tiny recursive-descent parser recovers the structure.
+_STRUCT_CHARS = frozenset("()¬∧")
+
+
+def _peek(s, i):
+    if(i >= len(s)):
+        raise ValueError(f"unexpected end of {s!r}")
+    return s[i]
+
+
+# Parses s[i:] into a small AST: ('val', name) | ('neg', child) | ('conj', left, right).
+# Returns (ast, next_index).
+def _parse_pred_ast(s, i):
+    if(_peek(s, i) == '('):
+        i += 1
+        if(_peek(s, i) == '¬'):
+            child, i = _parse_pred_ast(s, i + 1)
+            if(_peek(s, i) != ')'): raise ValueError(f"expected ')' at {i} in {s!r}")
+            return ('neg', child), (i + 1)
+        left, i = _parse_pred_ast(s, i)
+        if(_peek(s, i) != '∧'): raise ValueError(f"expected '∧' at {i} in {s!r}")
+        right, i = _parse_pred_ast(s, i + 1)
+        if(_peek(s, i) != ')'): raise ValueError(f"expected ')' at {i} in {s!r}")
+        return ('conj', left, right), (i + 1)
+
+    # Atom: read up to the next structural character.
+    j = i
+    while((j < len(s)) and (s[j] not in _STRUCT_CHARS)):
+        j += 1
+    if(j == i): raise ValueError(f"empty atom at {i} in {s!r}")
+    return ('val', s[i:j]), j
+
+
+# Parses a predicate's __str__ into an AST (raises ValueError on malformed input).
+def parse_pred_str(s):
+    s = s.strip()
+    ast, i = _parse_pred_ast(s, 0)
+    if(i != len(s)): raise ValueError(f"trailing characters after position {i} in {s!r}")
+    return ast
+
+
+# Serialises an AST exactly like Predicate.serialize: Polish (prefix) by default, reverse-Polish
+# (postfix) when reverse=True. Kept identical to predicate_data so the result matches
+# .polish()/.reverse_polish() token-for-token (see selfcheck_parser).
+def _serialize_ast(ast, reverse=False):
+    kind = ast[0]
+    if(kind == 'val'):
+        return [ast[1]]
+    if(kind == 'neg'):
+        inner = _serialize_ast(ast[1], reverse=reverse)
+        return (inner + [predicate_data.NEGATION_TOKEN]) if reverse else ([predicate_data.NEGATION_TOKEN] + inner)
+    # 'conj'
+    left = _serialize_ast(ast[1], reverse=reverse)
+    right = _serialize_ast(ast[2], reverse=reverse)
+    return (left + right + [predicate_data.CONJUNCTION_TOKEN]) if reverse else ([predicate_data.CONJUNCTION_TOKEN] + left + right)
+
+
+# Faithfulness self-check: for every predicate in `dataset`, parsing its string and re-serialising
+# must reproduce .polish() and .reverse_polish(). Not used on the CSV path (which has no dataset);
+# handy as a test that the parser tracks Predicate.__str__. Returns the number of predicates checked.
+def selfcheck_parser(dataset):
+    for pred in dataset.predicates:
+        ast = parse_pred_str(str(pred))
+        got_p, want_p = _serialize_ast(ast, reverse=False), pred.polish()
+        if(got_p != want_p): raise AssertionError(f"polish mismatch for {str(pred)!r}: {got_p} != {want_p}")
+        got_r, want_r = _serialize_ast(ast, reverse=True), pred.reverse_polish()
+        if(got_r != want_r): raise AssertionError(f"reverse-polish mismatch for {str(pred)!r}: {got_r} != {want_r}")
+    return len(dataset.predicates)
+
+
+# Builds (pairs, spec) from a dumped-signals CSV (columns: signal, pred_idx, pred_str), with NO
+# dataset parameters. src = the signal token ids (verbatim, including the trailing EOS, as the
+# emergent probe uses them); tgt = the predicate in `notation` ('polish' | 'reverse_polish'),
+# obtained by parsing the pred_str column. Both vocabularies are inferred from the file, so nothing
+# about the original dataset (properties, depth, negation/conjunction toggles) has to be specified.
+def csv_pairs(path, notation="polish"):
+    import csv as _csv
+
+    reverse = (notation == "reverse_polish")
+    NEG, CONJ = predicate_data.NEGATION_TOKEN, predicate_data.CONJUNCTION_TOKEN
+
+    with open(str(path), newline="", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        fields = reader.fieldnames
+        if((fields is None) or ("signal" not in fields) or ("pred_str" not in fields)):
+            raise ValueError(f"{path}: expected a dumped-signals CSV with at least 'signal' and 'pred_str' columns, got header {fields}.")
+        rows = list(reader)
+    if(len(rows) == 0):
+        raise ValueError(f"{path}: no rows.")
+
+    # Source: parse the space-separated signal ids.
+    src_seqs = []
+    for k, r in enumerate(rows):
+        try:
+            src_seqs.append([int(t) for t in r["signal"].split()])
+        except ValueError as e:
+            raise ValueError(f"{path}: row {k}: could not parse 'signal' field {r['signal']!r} as space-separated integers ({e}).")
+
+    # Cheap internal consistency check on the file (not on any dataset parameters): rows sharing a
+    # pred_idx must carry the same pred_str.
+    if("pred_idx" in fields):
+        by_idx = {}
+        for k, r in enumerate(rows):
+            pi, ps = r["pred_idx"], r["pred_str"]
+            if((pi in by_idx) and (by_idx[pi] != ps)):
+                raise ValueError(f"{path}: pred_idx {pi} maps to two different predicates ({by_idx[pi]!r} vs {ps!r}); the file looks inconsistent.")
+            by_idx[pi] = ps
+
+    # Target: parse each predicate and serialise in the requested notation.
+    tgt_token_seqs = []
+    for k, r in enumerate(rows):
+        try:
+            ast = parse_pred_str(r["pred_str"])
+        except ValueError as e:
+            raise ValueError(f"{path}: row {k}: could not parse 'pred_str' field {r['pred_str']!r} ({e}).")
+        tgt_token_seqs.append(_serialize_ast(ast, reverse=reverse))
+
+    # Target vocabulary inferred from the file, mirroring PredicateVocab's layout (sorted value
+    # tokens, then the two operators, then PAD/BOS/EOS). Sorting keeps the ids deterministic.
+    atoms = sorted({tok for seq in tgt_token_seqs for tok in seq if tok not in (NEG, CONJ)})
+    tokens = atoms + [NEG, CONJ]
+    s2i = {t: i for i, t in enumerate(tokens)}
+    tgt_seqs = [[s2i[t] for t in seq] for seq in tgt_token_seqs]
+
+    base = len(tokens)
+    tgt_pad_id, tgt_bos_id, tgt_eos_id, tgt_vocab_size = base, base + 1, base + 2, base + 3
+
+    # Source vocabulary inferred from the file; a fresh id above every observed symbol is the pad id.
+    max_src = max((t for seq in src_seqs for t in seq), default=0)
+    src_pad_id, src_vocab_size = max_src + 1, max_src + 2
+
+    pairs = list(zip(src_seqs, tgt_seqs))
+    spec = Spec(
+        src_vocab_size=src_vocab_size,
+        src_pad_id=src_pad_id,
+        tgt_vocab_size=tgt_vocab_size,
+        tgt_pad_id=tgt_pad_id,
+        tgt_bos_id=tgt_bos_id,
+        tgt_eos_id=tgt_eos_id,
+    )
+    return pairs, spec
+
+
+# ----------------------------------------------------------------------------- #
 # Random hyperparameter search ( --do compositionality_search )
 # ----------------------------------------------------------------------------- #
 
@@ -486,9 +637,16 @@ def main(global_args=None, remaining_args=None):
     args = get_args(remaining_args)
     device = args.device
 
-    dataset = get_data_loader(args)
-    pairs, spec = reverse_polish_pairs(dataset)
-    print(f"[comp-search] {len(pairs)} predicates; tuning on the reverse-Polish control language.", flush=True)
+    if(args.comp_signals_csv is not None):
+        # Param-free: the CSV fully determines both the signals and the target predicates.
+        dataset = None
+        pairs, spec = csv_pairs(args.comp_signals_csv, notation=args.comp_target_notation)
+        print(f"[comp-search] {len(pairs)} signals from {args.comp_signals_csv}; "
+              f"src vocab {spec.src_vocab_size}, tgt vocab {spec.tgt_vocab_size}; target = {args.comp_target_notation}.", flush=True)
+    else:
+        dataset = get_data_loader(args)
+        pairs, spec = reverse_polish_pairs(dataset)
+        print(f"[comp-search] {len(pairs)} predicates; tuning on the reverse-Polish control language.", flush=True)
 
     rng = np.random.default_rng(args.comp_search_seed)
     best_score, best_h = None, None
@@ -513,9 +671,10 @@ def main(global_args=None, remaining_args=None):
             json.dump(payload, f, indent=2)
         print(f"[comp-search] wrote results to {args.comp_search_out}")
 
-    try:
-        dataset.close()
-    except Exception:
-        pass
+    if(dataset is not None):
+        try:
+            dataset.close()
+        except Exception:
+            pass
 
     return best_score, best_h
