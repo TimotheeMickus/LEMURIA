@@ -10,9 +10,11 @@ import pprint
 import sys
 
 # The subcommands that own a full argument parser of their own (built in their get_args). For these,
-# `--help` is handed through so that the *game's* arguments are shown; every other subcommand's
-# arguments live on this top-level parser, so its help is shown instead.
-GAME_SUBCOMMANDS = {'image_signalling_game', 'predicate_signalling_game'}
+# `--help` is handed through so that the subcommand's own arguments are shown; every other subcommand's
+# arguments live on this top-level parser, so its help is shown instead. `compositionality_search`
+# reuses the predicate game's parser (see eval/compositionality.main), so its --help shows the
+# predicate-game arguments plus the Compositionality section.
+SUBCOMMANDS_WITH_OWN_PARSER = {'image_signalling_game', 'predicate_signalling_game', 'compositionality_search'}
 
 def get_args():
     # add_help=False: we register --help ourselves (below) so that its eager argparse action does not
@@ -45,8 +47,8 @@ def get_args():
     (args, remaining_args) = arg_parser.parse_known_args()
 
     if(args.help):
-        if(args.do in GAME_SUBCOMMANDS):
-            # Re-inject --help so the selected game's parser renders its own (sectioned) help.
+        if(args.do in SUBCOMMANDS_WITH_OWN_PARSER):
+            # Re-inject --help so the selected subcommand's parser renders its own (sectioned) help.
             remaining_args = list(remaining_args) + ['--help']
         else:
             arg_parser.print_help()
