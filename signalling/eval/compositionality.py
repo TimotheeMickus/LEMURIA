@@ -538,31 +538,50 @@ def csv_pairs(path, notation="polish"):
     if(len(rows) == 0):
         raise ValueError(f"{path}: no rows.")
 
-    # Source: parse the space-separated signal ids.
-    src_seqs = []
+    # Deduplicate by predicate. A dumped-signals CSV typically contains the SAME predicate many
+    # times, because evaluation samples predicates with replacement and every eval item is written
+    # out. The emergent language is a *function* meaning -> signal, so each predicate should
+    # contribute exactly one (signal, target) pair -- matching emergent_pairs. Keeping the duplicate
+    # rows would let the probe's k-fold cross-validation place identical (signal, target) pairs in
+    # both the training and held-out folds, leaking the answer and greatly inflating the reported
+    # compositionality. We therefore keep the first occurrence of each predicate.
+    seen_signal = {}   # pred_str -> signal ids (first occurrence)
+    by_idx = {}        # pred_idx -> pred_str (file-consistency check)
+    src_seqs, pred_strs = [], []
+    n_dup = 0
     for k, r in enumerate(rows):
+        ps = r["pred_str"]
         try:
-            src_seqs.append([int(t) for t in r["signal"].split()])
+            sig = [int(t) for t in r["signal"].split()]
         except ValueError as e:
             raise ValueError(f"{path}: row {k}: could not parse 'signal' field {r['signal']!r} as space-separated integers ({e}).")
 
-    # Cheap internal consistency check on the file (not on any dataset parameters): rows sharing a
-    # pred_idx must carry the same pred_str.
-    if("pred_idx" in fields):
-        by_idx = {}
-        for k, r in enumerate(rows):
-            pi, ps = r["pred_idx"], r["pred_str"]
+        if("pred_idx" in fields):
+            pi = r["pred_idx"]
             if((pi in by_idx) and (by_idx[pi] != ps)):
                 raise ValueError(f"{path}: pred_idx {pi} maps to two different predicates ({by_idx[pi]!r} vs {ps!r}); the file looks inconsistent.")
             by_idx[pi] = ps
 
-    # Target: parse each predicate and serialise in the requested notation.
+        if(ps in seen_signal):
+            n_dup += 1
+            if(seen_signal[ps] != sig):
+                raise ValueError(f"{path}: predicate {ps!r} appears with two different signals ({seen_signal[ps]} vs {sig}). A single dump file (one epoch) maps each predicate to one argmax signal; this looks like several epochs/languages concatenated, which is not a single language to probe.")
+            continue
+
+        seen_signal[ps] = sig
+        src_seqs.append(sig)
+        pred_strs.append(ps)
+
+    if(n_dup > 0):
+        print(f"[comp-csv] {path}: {len(rows)} rows -> {len(src_seqs)} distinct predicates ({n_dup} duplicate rows dropped to avoid cross-validation leakage).", flush=True)
+
+    # Target: parse each (distinct) predicate and serialise in the requested notation.
     tgt_token_seqs = []
-    for k, r in enumerate(rows):
+    for ps in pred_strs:
         try:
-            ast = parse_pred_str(r["pred_str"])
+            ast = parse_pred_str(ps)
         except ValueError as e:
-            raise ValueError(f"{path}: row {k}: could not parse 'pred_str' field {r['pred_str']!r} ({e}).")
+            raise ValueError(f"{path}: could not parse 'pred_str' field {ps!r} ({e}).")
         tgt_token_seqs.append(_serialize_ast(ast, reverse=reverse))
 
     # Target vocabulary inferred from the file, mirroring PredicateVocab's layout (sorted value
