@@ -142,7 +142,7 @@ def get_args(remaining_args=None):
 
     default_data_set = pathlib.Path('data') / 'concon'
     default_models = pathlib.Path('[summary]') / 'models'
-    default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + cocket.gethostname())
+    default_summary = pathlib.Path('runs') / 'cbc' / ('[now]_' + socket.gethostname())
 
     # Dataset (defined in utils/image_data.py, next to the loader that reads these).
     add_data_args(arg_parser, default_data_set)
