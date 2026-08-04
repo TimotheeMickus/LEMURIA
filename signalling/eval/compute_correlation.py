@@ -3,6 +3,8 @@ import functools as ft
 import csv
 import collections
 import random
+import argparse
+import pathlib
 
 import torch
 from scipy.stats import pearsonr as spearman
@@ -13,6 +15,7 @@ import numpy as np
 import Levenshtein
 
 from ..utils.Mantel import test as mantel_test
+from ..utils import cli
 from .decision_tree import decision_tree
 
 # The output values `signals` and `categories` are both lists of tuples of integers.
@@ -324,7 +327,18 @@ def mantel(signals, categories, signal_distance=levenshtein, meaning_distance=ha
 
     return mantel_test(tM, sM, method=method, perms=perms, correl_only=correl_only)
 
-def main(args):
+# Own argument parser for `--do compute_correlation` (see evaluate_language.get_args for the
+# shared-arg convention). `--signal_dump_file` was previously read but never declared anywhere.
+def get_args(global_args, remaining_args):
+    parser = argparse.ArgumentParser(prog="signalling --do compute_correlation", description="Topographic-similarity (Mantel) analysis of a dumped-signals CSV.")
+    parser.add_argument('--signal_dump_file', help='path to the dumped-signals CSV to analyse', type=pathlib.Path, default=None)
+    parser.add_argument('--string_signals', help='treat signals as strings rather than sequences of integer symbols', action='store_true')
+    args = parser.parse_args(remaining_args)
+    return cli.inherit_top_level(args, global_args, ['string_signals'])
+
+
+def main(global_args, remaining_args):
+    args = get_args(global_args, remaining_args)
     assert args.signal_dump_file is not None, "'signal_dump_file' is required."
 
     signals, categories, alphabet_size, concepts = read_csv(args.signal_dump_file, string_signals=args.string_signals)

@@ -86,3 +86,14 @@ def add_training_args(parser):
 def add_debug_arg(parser):
     """The single --debug flag (kept identical across games)."""
     parser.add_argument('--debug', '-d', help='use this flag to change the behavior of the code to debug stuff', action='store_true')
+
+
+def inherit_top_level(sub_args, global_args, names):
+    """Copy shared arguments that the top-level (__main__) parser already consumed (via
+    parse_known_args, so they are absent from a subcommand's remaining_args) onto the subcommand's
+    own namespace. A subcommand still declares these arguments in its own parser -- so they appear in
+    its --help and are documented in one place -- but takes their values from `global_args`."""
+    for name in names:
+        if(hasattr(global_args, name)):
+            setattr(sub_args, name, getattr(global_args, name))
+    return sub_args

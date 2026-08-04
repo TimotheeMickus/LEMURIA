@@ -10,11 +10,13 @@ import pprint
 import sys
 
 # The subcommands that own a full argument parser of their own (built in their get_args). For these,
-# `--help` is handed through so that the subcommand's own arguments are shown; every other subcommand's
-# arguments live on this top-level parser, so its help is shown instead. `compositionality_search`
-# reuses the predicate game's parser (see eval/compositionality.main), so its --help shows the
-# predicate-game arguments plus the Compositionality section.
-SUBCOMMANDS_WITH_OWN_PARSER = {'image_signalling_game', 'predicate_signalling_game', 'compositionality_search'}
+# `--help` is handed through so that the subcommand's own arguments are shown. `compositionality_search`
+# reuses the predicate game's parser (see eval/compositionality.main); the eval subcommands declare the
+# arguments they use (and inherit the shared top-level ones via cli.inherit_top_level).
+SUBCOMMANDS_WITH_OWN_PARSER = {
+    'image_signalling_game', 'predicate_signalling_game', 'compositionality_search',
+    'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation',
+}
 
 def get_args():
     # add_help=False: we register --help ourselves (below) so that its eager argparse action does not
@@ -66,16 +68,16 @@ if(__name__ == "__main__"):
     args, remaining_args = get_args()
     if(args.do == 'evaluate_language'):
         from .eval.evaluate_language import main
-        main(args) # maybe switch to main(args, remaining_args)
+        main(args, remaining_args)
     elif(args.do == 'visualize'):
         from .eval.visualize import main
-        main(args) # maybe switch to main(args, remaining_args)
+        main(args, remaining_args)
     elif(args.do == 'compute_correlation'):
         from .eval.compute_correlation import main
-        main(args) # maybe switch to main(args, remaining_args)
+        main(args, remaining_args)
     elif(args.do == 'threeway_correlation'):
         from .eval.three_way_correlation import main
-        main(args) # maybe switch to main(args, remaining_args)
+        main(args, remaining_args)
     elif(args.do == 'image_signalling_game'):
         from .image_signalling_game import main
         main(args, remaining_args)

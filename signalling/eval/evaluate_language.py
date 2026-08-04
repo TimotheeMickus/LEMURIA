@@ -2,6 +2,9 @@
 
 from datetime import datetime
 import os
+import sys
+import argparse
+import pathlib
 
 import torch
 import torch.nn as nn
@@ -15,10 +18,31 @@ from .decision_tree import decision_tree
 
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
-from ..utils import misc
+from ..utils import misc, cli
 from ..utils.image_data import get_data_loader
 
-def main(args):
+
+# Own argument parser for `--do evaluate_language`, so `--do evaluate_language --help` documents the
+# arguments this subcommand actually uses. Arguments shared with the top-level parser (load_model,
+# load_other_model, analysis_*) are declared here for the help listing but take their value from
+# `global_args` (the top-level parser consumed them already).
+def get_args(global_args, remaining_args):
+    parser = argparse.ArgumentParser(prog="signalling --do evaluate_language", description="Evaluate (and optionally compare) the emergent language of saved model(s).")
+    parser.add_argument('--data_set', help='the path to the data set', type=pathlib.Path, default=None)
+    parser.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path, default=None)
+    parser.add_argument('--load_other_model', help='path to a second model to load (for comparison)', type=pathlib.Path, default=None)
+    parser.add_argument('--base_alphabet_size', help='size of the alphabet (not including special symbols)', type=int, default=10)
+    parser.add_argument('--correct_only', help='analyse the language consisting of the signals produced in successful rounds only', action='store_true')
+    parser.add_argument('--device', help='what to run PyTorch on', type=torch.device, default=torch.device('cpu'))
+    parser.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
+    parser.add_argument('--analysis_gram_size', help='size of the n-grams considered during language analysis', type=int, default=1)
+    parser.add_argument('--analysis_disj_size', help='size of the disjunctions considered during language analysis', type=int, default=1)
+    args = parser.parse_args(remaining_args)
+    return cli.inherit_top_level(args, global_args, ['load_model', 'load_other_model', 'analysis_gram_size', 'analysis_disj_size'])
+
+
+def main(global_args, remaining_args):
+    args = get_args(global_args, remaining_args)
     if(not os.path.isdir(args.data_set)):
         print("Directory '%s' not found." % args.data_set)
         sys.exit()

@@ -4,6 +4,9 @@ import csv
 import collections
 import random
 import os
+import sys
+import argparse
+import pathlib
 
 import torch
 from scipy.stats import pearsonr as spearman
@@ -19,6 +22,7 @@ from .decision_tree import decision_tree
 
 from ..games import AliceBob, AliceBobPopulation
 from ..utils.misc import build_optimizer, compute_entropy
+from ..utils import cli
 from ..utils.image_data import get_data_loader
 
 # The output values `signals` and `categories` are both lists of tuples of integers.
@@ -264,7 +268,18 @@ def mantel(signals, categories, signal_distance=levenshtein, meaning_distance=ha
 
     return mantel_test(tM, sM, method=method, perms=perms)
 
-def main(args):
+# Own argument parser for `--do threeway_correlation` (see evaluate_language.get_args for the shared-arg convention).
+def get_args(global_args, remaining_args):
+    parser = argparse.ArgumentParser(prog="signalling --do threeway_correlation", description="Three-way topographic-similarity analysis of a saved model's language.")
+    parser.add_argument('--data_set', help='the path to the data set', type=pathlib.Path, default=None)
+    parser.add_argument('--load_model', help='the path to the model to load', type=pathlib.Path, default=None)
+    parser.add_argument('--display', help='how to display the information', choices=['minimal', 'simple', 'tqdm'], default='tqdm')
+    args = parser.parse_args(remaining_args)
+    return cli.inherit_top_level(args, global_args, ['load_model'])
+
+
+def main(global_args, remaining_args):
+    args = get_args(global_args, remaining_args)
     if(not os.path.isdir(args.data_set)):
         print("Directory '%s' not found." % args.data_set)
         sys.exit()
