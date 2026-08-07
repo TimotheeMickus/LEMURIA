@@ -41,6 +41,7 @@ The CSV must have one row per run: metric column + one column per hyperparameter
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -311,6 +312,90 @@ def resolve_log_params(
 
 
 # --------------------------------------------------------------------------- #
+# Group-by resolution (stratified analysis)
+# --------------------------------------------------------------------------- #
+GROUP_MAX_CARD = 8   # suggest params with <= this many distinct values as candidates
+GROUP_HARD_CARD = 25  # refuse to group by a param with more distinct values than this
+
+
+def resolve_group_params(
+    df: pd.DataFrame, numeric: list[str], categorical: list[str],
+    explicit, assume_yes: bool,
+) -> list[str]:
+    """
+    Decide which params to stratify the analysis by.
+      - explicit is not None (--group-by given): use verbatim (validated).
+      - else: prompt with a candidate list; DEFAULT IS NONE (no grouping).
+    Candidates = categoricals + low-cardinality numerics. High-cardinality /
+    continuous params are rejected (would create a group per run).
+    """
+    def _validate(names, source):
+        ok = []
+        for p in names:
+            if p not in numeric and p not in categorical:
+                print(f"    (note: group-by '{p}' not a varying param; ignored)")
+                continue
+            card = df[p].nunique(dropna=True)
+            if card > GROUP_HARD_CARD:
+                print(f"    (note: group-by '{p}' has {card} distinct values "
+                      f"(> {GROUP_HARD_CARD}); too many groups — ignored)")
+                continue
+            ok.append(p)
+        return ok
+
+    if explicit is not None:
+        return _validate(explicit, "explicit")
+
+    candidates = list(categorical) + [
+        n for n in numeric if df[n].nunique(dropna=True) <= GROUP_MAX_CARD
+    ]
+    if not candidates:
+        print("\nGroup-by: no low-cardinality categorical candidates; analysing all runs together.")
+        return []
+
+    print("\n=== Stratified analysis (no --group-by given) ===")
+    print("    run the analysis independently for each combination of these params.")
+    rows = [{"param": c,
+             "n_values": df[c].nunique(dropna=True),
+             "values": ", ".join(map(str, sorted(df[c].dropna().unique())[:6]))
+                       + (" ..." if df[c].nunique() > 6 else "")}
+            for c in candidates]
+    with pd.option_context("display.width", 120, "display.max_colwidth", 60):
+        print(pd.DataFrame(rows).to_string(index=False))
+    print("\n    default: None (analyse all runs together)")
+
+    if assume_yes or not sys.stdin.isatty():
+        why = "--yes" if assume_yes else "non-interactive shell"
+        print(f"    {why}: no grouping.")
+        return []
+
+    prompt = ("\nStratify analysis by which param(s)? "
+              "[N]one (default) / type a space-separated subset: ")
+    try:
+        resp = input(prompt).strip()
+    except EOFError:
+        return []
+    if resp == "" or resp.lower() in ("n", "no", "none"):
+        return []
+    valid = set(candidates)
+    chosen = [t for t in resp.split() if t in valid]
+    unknown = [t for t in resp.split() if t not in valid]
+    if unknown:
+        print(f"    (ignored — not a candidate: {unknown})")
+    return _validate(chosen, "prompt")
+
+
+def _group_label(cols: list[str], key) -> str:
+    if not isinstance(key, tuple):
+        key = (key,)
+    return ",".join(f"{c}={v}" for c, v in zip(cols, key))
+
+
+def _safe_dirname(label: str) -> str:
+    return re.sub(r"[^A-Za-z0-9=._,+-]+", "_", label)
+
+
+# --------------------------------------------------------------------------- #
 # 1. Top-k summary
 # --------------------------------------------------------------------------- #
 def top_k_summary(
@@ -530,9 +615,13 @@ def main():
                     help="params to treat in log10 space. If omitted, the script "
                          "auto-detects candidates and asks for confirmation. Pass with "
                          "no names (just --log-params) to force NONE.")
+    ap.add_argument("--group-by", nargs="*", default=None, metavar="PARAM",
+                    help="stratify: run the analysis independently for each combination "
+                         "of these (categorical / low-cardinality) params. If omitted, "
+                         "you're prompted (default None). Pass with no names to force None.")
     ap.add_argument("-y", "--yes", action="store_true",
-                    help="skip the log-param confirmation prompt; accept detected set "
-                         "(use in SLURM / non-interactive jobs)")
+                    help="skip the log-param and group-by prompts; accept detected log "
+                         "params and no grouping (use in SLURM / non-interactive jobs)")
     ap.add_argument("--limit", type=int, default=None, metavar="N",
                     help="DEBUG: only load the first N runs. Useful because pulling "
                          "history for hundreds of runs is slow. Results are partial — "
@@ -563,25 +652,71 @@ def main():
     if not numeric and not categorical:
         sys.exit("No varying hyperparameters found — nothing to analyse.")
 
+    group_params = resolve_group_params(df, numeric, categorical, args.group_by, args.yes)
     log_params = resolve_log_params(df, numeric, args.log_params, args.yes)
     print(f"\nLog-scale params in use: {log_params or '(none)'}")
+    print(f"Stratify by:             {group_params or '(none — all runs together)'}")
 
-    summary = top_k_summary(df, args.metric, args.goal, args.top_frac, numeric, categorical)
-    summary.to_csv(out / "top_k_summary.csv", index=False)
-
-    y = df[args.metric].to_numpy(dtype=float)
-    # RF regresses the raw metric; for 'minimize' the shapes are just read inverted,
-    # but we keep sign so PD y-axis matches the real metric.
-    X, names, meta = build_design_matrix(df, numeric, categorical, log_params)
-    rf = fit_surrogate(X, y)
-    imp = importance(rf, X, y, names)
-    imp.to_csv(out / "importance.csv", index=False)
-
-    partial_dependence_plots(rf, X, names, meta, imp, args.metric, args.goal, out)
+    if not group_params:
+        run_analysis(df, args.metric, args.goal, args.top_frac, log_params, out)
+    else:
+        groups = list(df.groupby(group_params, dropna=False, sort=True))
+        print(f"\nStratified into {len(groups)} group(s) by {group_params}.")
+        for key, sub in groups:
+            label = _group_label(group_params, key)
+            sub_out = out / _safe_dirname(label)
+            sub_out.mkdir(parents=True, exist_ok=True)
+            print("\n" + "=" * 72)
+            print(f"GROUP  {label}   (n = {len(sub)} runs)")
+            print("=" * 72)
+            run_analysis(sub.copy(), args.metric, args.goal, args.top_frac,
+                         log_params, sub_out, group_cols=group_params)
 
     print(f"\nDone. Report written to {out.resolve()}/")
     print("Reminder: confirm any candidate region by re-running its configs across "
           "several seeds before trusting it.")
+
+
+MIN_GROUP_ROWS = 12   # below this, skip the RF surrogate (importance/PD) — too few runs
+MIN_TOPK_ROWS = 4     # below this, skip the group entirely
+
+
+def run_analysis(df, metric, goal, top_frac, log_params, out: Path,
+                 group_cols: list[str] | None = None):
+    """Run top-k + surrogate importance + partial dependence on one (sub)set of runs."""
+    n = len(df)
+    if n < MIN_TOPK_ROWS:
+        print(f"  Only {n} run(s) — too few to analyse; skipping this group.")
+        return
+
+    numeric, categorical, dropped = classify_params(df, metric)
+    # params we stratified on are constant here and get dropped automatically
+    if group_cols:
+        numeric = [c for c in numeric if c not in group_cols]
+        categorical = [c for c in categorical if c not in group_cols]
+    if not numeric and not categorical:
+        print("  No varying params left within this group; skipping.")
+        return
+
+    summary = top_k_summary(df, metric, goal, top_frac, numeric, categorical)
+    summary.to_csv(out / "top_k_summary.csv", index=False)
+
+    if n < MIN_GROUP_ROWS:
+        print(f"  Only {n} runs (< {MIN_GROUP_ROWS}) — skipping surrogate "
+              f"importance/partial-dependence for this group (would be unreliable).")
+        return
+
+    y = df[metric].to_numpy(dtype=float)
+    # RF regresses the raw metric; for 'minimize' the shapes are just read inverted,
+    # but we keep sign so PD y-axis matches the real metric.
+    X, names, meta = build_design_matrix(df, numeric, categorical, log_params)
+    if X.shape[1] == 0:
+        print("  No usable features; skipping surrogate.")
+        return
+    rf = fit_surrogate(X, y)
+    imp = importance(rf, X, y, names)
+    imp.to_csv(out / "importance.csv", index=False)
+    partial_dependence_plots(rf, X, names, meta, imp, metric, goal, out)
 
 
 if __name__ == "__main__":
