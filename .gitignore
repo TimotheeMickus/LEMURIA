@@ -21,4 +21,5 @@ concon/eval/predicate/backup
 concon/eval/predicate/negation.py
 scripts/cluster
 scripts/gridsearch_figs
+scripts/sweep_reports
 thesis

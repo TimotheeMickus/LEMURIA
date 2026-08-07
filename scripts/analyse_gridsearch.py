@@ -85,6 +85,7 @@ def fetch_runs(project, metric, point, maximize):
 
     records = []
     for i, run in enumerate(runs):
+        #if(i == 16): break # DEBUG
         print(f"fetching run {i}...", flush=True)
         if point == "best":
             perf = _best_over_history(run, metric, maximize)
