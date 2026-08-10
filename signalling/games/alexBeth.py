@@ -102,7 +102,6 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-compositional "control"/oracle language (the reverse-Polish encoding of the predicate during fancy evaluation. This is a debugging/diagnostic aid; it shows what the language metrics report for a language that is compositional by construction (an upper-bound sanity check). Applied to the compositionality probe and topographic similarity.
         self.eval_oracle_language = args.eval_oracle_language
         self._oracle_signals_cache = None  # list[list[int]] indexed by predicate index; built lazily
-        self._comp_seed = args.comp_search_seed
         self.epochs = args.epochs
         # Negation metrics only run when negation exists.
         self.no_negation = args.no_negation
@@ -455,7 +454,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             pairs, spec = compositionality.reverse_polish_pairs(self._dataset)
         else:
             pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
-        return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._comp_seed)
+        return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._args.run_seed)
 
     # Reverse-Polish "oracle" signal for each predicate, as a list of int symbols, indexed by predicate index (parallel to self._dataset.predicates). Built once and cached. Used only when self.eval_oracle_language is set, to replace the emergent signals during fancy eval.
     def _oracle_signals_by_predicate(self):

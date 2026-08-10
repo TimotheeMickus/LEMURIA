@@ -304,7 +304,7 @@ def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
     that transition. Loss-based stopping tracks real convergence; we still *report* the
     best exact-match, the quantity of interest.
     """
-    torch.manual_seed(seed)
+    if(seed is not None): torch.manual_seed(seed)
     model = Seq2Seq(spec, h).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=h.lr)
     criterion = nn.CrossEntropyLoss(ignore_index=spec.tgt_pad_id)
@@ -371,7 +371,7 @@ def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=Fa
     for f in range(n_folds):
         test_idx = folds[f]
         train_idx = np.concatenate([folds[j] for j in range(n_folds) if j != f])
-        score, val_loss, stopped_epoch = _run_one_fold(data, train_idx, test_idx, spec, hparams, device, seed=(seed + f))
+        score, val_loss, stopped_epoch = _run_one_fold(data, train_idx, test_idx, spec, hparams, device, seed=(None if (seed is None) else (seed + f)))
         scores.append(score)
         losses.append(val_loss)
         epochs.append(stopped_epoch)

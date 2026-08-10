@@ -31,14 +31,16 @@ def do(args):
 
     for run in range(args.runs):
         print(f'Run {run}', flush=True)
-        if args.seed is not None:
-            run_seed = int(args.seed) + int(run)
+        
+        run_seed = (int(args.seed) + int(run)) if(args.seed is not None) else None
+        if(args.seed is not None):
             random.seed(run_seed)
             np.random.seed(run_seed)
             torch.manual_seed(run_seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(run_seed)
             print(f"[seed] run={run} seed={run_seed}", flush=True)
+        args.run_seed = run_seed
 
         run_name = build_run_name(name_args, run, name_with=args.name_with, defaults=name_defaults)
         run_summary_dir = summary_dir / run_name
