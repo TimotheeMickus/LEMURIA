@@ -113,7 +113,6 @@ def add_compositionality_args(parser):
     group.add_argument('--comp_max_epochs', help='probe: maximum training epochs per fold (early stopping usually stops earlier)', type=int, default=512)
     group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
     group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
-    group.add_argument('--comp_search_seed', help='compositionality_search / probe cross-validation: random seed', type=int, default=0)
     group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
     group.add_argument('--comp_signals_csv', help="compositionality_search: read the emergent language from a dumped-signals CSV (columns 'signal' and 'pred_str', the kind produced by --dump_signals) instead of the synthetic control language. When set, no dataset parameters are needed and the dataset is not built.", type=pathlib.Path, default=None)
     group.add_argument('--comp_target_notation', help="compositionality_search: predicate serialisation used as the probe target when --comp_signals_csv is given", choices=['polish', 'reverse_polish'], default='polish')
@@ -343,7 +342,7 @@ def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
     return best_acc, best_val, stopped_epoch
 
 
-def compositionality(pairs, spec, hparams, device, seed=0, n_folds=5, verbose=False, return_epochs=False):
+def compositionality(pairs, spec, hparams, device, seed=None, n_folds=5, verbose=False, return_epochs=False):
     """
     Single-shuffle `n_folds`-fold cross-validation of the exact-match probe.
 
@@ -664,6 +663,7 @@ def get_args(remaining_args):
     predicate_data.add_data_args(parser)   # the control-language dataset (unused when --comp_signals_csv is given)
     cli.add_perf_args(parser)              # --device
     add_compositionality_args(parser)      # the Compositionality group (--comp_* etc.)
+    parser.add_argument('--seed', help='random seed for the search (probe init, CV splits, and hyperparameter sampling); unset => everything random', type=int, default=None)
     return parser.parse_args(remaining_args)
 
 
@@ -684,12 +684,12 @@ def main(global_args=None, remaining_args=None):
         pairs, spec = reverse_polish_pairs(dataset)
         print(f"[comp-search] {len(pairs)} predicates; tuning on the reverse-Polish control language.", flush=True)
 
-    rng = np.random.default_rng(args.comp_search_seed)
+    rng = np.random.default_rng(args.seed)
     best_score, best_h = None, None
     history = []
     for trial in range(args.comp_search_trials):
         h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience)
-        score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.comp_search_seed, return_epochs=True)
+        score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.seed, return_epochs=True)
         history.append({"score": score, "loss": loss, "stopped_epochs": stopped_epochs, **asdict(h)})
         if (best_score is None) or (score > best_score):
             best_score, best_h = score, h
