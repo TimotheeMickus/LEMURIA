@@ -617,8 +617,8 @@ def csv_pairs(path, notation="polish"):
 
 # Reasonable bounds for the probe.
 SEARCH_SPACE = {
-    "embed_dim":  [64],
-    "hidden_dim": [64],
+    "embed_dim":  [64, 128, 256],
+    "hidden_dim": [64, 128, 256],
     "num_layers": [1],
     "dropout":    ("uniform", 0.0, 0.4),
     "lr":         ("loguniform", 3e-4, 3e-3),
