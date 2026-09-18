@@ -13,19 +13,37 @@ still.
 
 `--do capacity_probe` isolates exactly that sub-problem: it builds the predicate/
 candidate dataset (the same --properties/--max_depth/... knobs as
-`predicate_signalling_game`) and trains *only* the PredicateCandidateClassifier --
-no sender/receiver game, no communication bottleneck, no population -- directly on the
-satisfaction task. If train/test accuracy plateaus below ~1.0, `--hidden_size` is too
-small for this dataset regardless of what the communication game could otherwise
-achieve; if it reaches ~1.0, hidden_size is not the bottleneck and any remaining
-learning failure in the full game lies elsewhere (the discrete channel, the training
-dynamics, ...).
+`predicate_signalling_game`) and trains *only* a (predicate, candidate) satisfaction
+classifier -- no sender/receiver game, no communication bottleneck, no population --
+directly on the satisfaction task. If train/test accuracy plateaus below ~1.0,
+`--hidden_size` is too small for this dataset regardless of what the communication
+game could otherwise achieve; if it reaches ~1.0, hidden_size is not the bottleneck
+and any remaining learning failure in the full game lies elsewhere (the discrete
+channel, the training dynamics, ...).
+
+`--scorer` selects how the encoded predicate `p` and candidate `o` (each in R^H) are
+combined into a logit:
+  * 'dot' (default) -- PredicateCandidateClassifier's plain dot product `p . o`, i.e.
+    the retriever's own scoring rule (see `Retriever.aux_forward` / `games/pretraining.py`).
+    This is a bilinear form of `p` and `o`; note that since `o` is itself freely learned
+    by the candidate encoder, *any* bilinear form `p^T M o` collapses back to a plain dot
+    product (the encoder just absorbs `M` into its last layer) -- so 'dot' already speaks
+    for that whole family, and there is no separate 'bilinear' option.
+  * 'mlp' -- `u . ReLU(... ReLU(W_1 [p, o] + b_1) ...) + b` (an MLP of `--scorer_layers`
+    hidden layers of width `--scorer_hidden_size` over the concatenation `[p, o]`).
+    Strictly more expressive than 'dot' (a universal approximator given enough width),
+    so it separates two possible causes of low accuracy: not enough embedding dimension
+    (both scorers would then struggle) vs. the dot product's bilinear form itself being
+    the wrong inductive bias for this dataset (only 'dot' would struggle).
+In both cases the returned score is a logit (sigmoid applied by the loss/accuracy code,
+not inside the model).
 """
 
 import argparse
 from datetime import datetime
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from ..utils import cli
@@ -40,16 +58,54 @@ from ..utils.log import Progress
 from ..games.pretraining import PredicateCandidateClassifier
 
 
+class MLPScorer(nn.Module):
+    """Scores (predicate, candidate) pairs with an MLP over their concatenation, instead of
+    `PredicateCandidateClassifier`'s dot product:
+        u . ReLU(... ReLU(W_1 [p, o] + b_1) ...) + b
+    (`num_layers` hidden ReLU layers of width `mlp_hidden_size`, then a linear readout to a scalar
+    logit). See the module docstring for why this is a strictly richer scorer family than the dot
+    product, given that `p` and `o` are themselves freely learned.
+
+    predicate_encoder: predicate_idx (batch,)               -> (batch, H)
+    candidate_encoder: candidate tensors                    -> (batch, num_candidates, H)
+    forward:                                                -> (batch, num_candidates) logits
+    """
+    def __init__(self, predicate_encoder, candidate_encoder, hidden_size, mlp_hidden_size, num_layers):
+        super().__init__()
+        self.predicate_encoder = predicate_encoder
+        self.candidate_encoder = candidate_encoder
+
+        assert num_layers >= 1, "MLPScorer needs at least one hidden layer (otherwise it is just a bilinear/dot scorer)."
+        layers = []
+        in_size = 2 * hidden_size
+        for _ in range(num_layers):
+            layers += [nn.Linear(in_size, mlp_hidden_size), nn.ReLU()]
+            in_size = mlp_hidden_size
+        layers.append(nn.Linear(in_size, 1))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, predicate_idx, candidate_tensors):
+        encoded_predicate = self.predicate_encoder(predicate_idx)          # (batch, H)
+        encoded_candidates = self.candidate_encoder(**candidate_tensors)   # (batch, num_candidates, H)
+        num_candidates = encoded_candidates.size(1)
+        expanded_predicate = encoded_predicate.unsqueeze(1).expand(-1, num_candidates, -1) # (batch, num_candidates, H)
+        pair = torch.cat([expanded_predicate, encoded_candidates], dim=-1)                 # (batch, num_candidates, 2H)
+        return self.mlp(pair).squeeze(-1)                                                  # (batch, num_candidates)
+
+
 # Command-line arguments specific to the capacity probe. Kept next to the probe code
 # that reads them. Returns the argparse group.
 def add_capacity_probe_args(parser):
     group = parser.add_argument_group(
         title='Capacity probe',
-        description="knobs for `--do capacity_probe`, which trains only the predicate/candidate "
-                    "satisfaction classifier (predicate embedding <-> candidate encoder, dot product, "
-                    "sigmoid), without any communication game.",
+        description="knobs for `--do capacity_probe`, which trains only a predicate/candidate "
+                    "satisfaction classifier (predicate embedding <-> candidate encoder, --scorer), "
+                    "without any communication game.",
     )
-    group.add_argument('--hidden_size', help='dimension of the shared predicate/candidate embedding space', type=int, default=50)
+    group.add_argument('--hidden_size', help='dimension of the predicate/candidate embedding space', type=int, default=50)
+    group.add_argument('--scorer', help="how the encoded predicate and candidate are combined into a logit: 'dot' (plain dot product, the retriever's own rule) or 'mlp' (MLP over their concatenation; see --scorer_hidden_size / --scorer_layers)", choices=['dot', 'mlp'], default='dot')
+    group.add_argument('--scorer_hidden_size', help="hidden layer width for --scorer mlp (defaults to --hidden_size)", type=int, default=None)
+    group.add_argument('--scorer_layers', help="number of hidden layers for --scorer mlp", type=int, default=1)
     group.add_argument('--epochs', help='number of epochs', type=int, default=100)
     group.add_argument('--steps_per_epoch', help='number of steps per epoch', type=int, default=1000)
     group.add_argument('--learning_rate', help='learning rate', type=float, default=0.01)
@@ -112,11 +168,17 @@ def do(args):
 
     predicate_encoder = build_predicate_encoder_from_args(args).to(args.device)
     candidate_encoder = build_candidate_encoder_from_args(args).to(args.device)
-    model = PredicateCandidateClassifier(predicate_encoder, candidate_encoder).to(args.device)
+    if(args.scorer == 'dot'):
+        model = PredicateCandidateClassifier(predicate_encoder, candidate_encoder).to(args.device)
+        scorer_desc = "dot"
+    else:
+        scorer_hidden_size = args.scorer_hidden_size or args.hidden_size
+        model = MLPScorer(predicate_encoder, candidate_encoder, args.hidden_size, scorer_hidden_size, args.scorer_layers).to(args.device)
+        scorer_desc = f"mlp(hidden_size={scorer_hidden_size}, layers={args.scorer_layers})"
     optimizer = build_optimizer(model.parameters(), args.learning_rate)
 
     print(
-        f"[{datetime.now()}] capacity probe: hidden_size={args.hidden_size}, "
+        f"[{datetime.now()}] capacity probe: hidden_size={args.hidden_size}, scorer={scorer_desc}, "
         f"{args.num_predicates} predicates, candidate_encoder={args.candidate_encoder!r}.",
         flush=True,
     )

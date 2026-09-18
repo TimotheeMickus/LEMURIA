@@ -22,7 +22,8 @@ python -m signalling --do predicate_signalling_game --candidate_sampling balance
 
 python -m signalling --do predicate_signalling_game --candidate_sampling balanced --properties 16 --max_depth 2 --baseline global --batch_size 1024 --device cuda --steps_per_epoch 100 --epochs 15  --nontrivial_only --num_candidates 2 --candidate_encoder node_averager --learning_rate 0.008 --hidden_size 48 --predicate_sampling difficulty --dump_eval_metrics
 
-// Capacity probe: trains only the predicate/candidate satisfaction classifier (predicate embedding
-// <-> candidate encoder, dot product, sigmoid), no communication game, to check whether --hidden_size
-// is large enough to represent the (predicate, candidate) truth table at all.
-python -m signalling --do capacity_probe --properties 8-8 --min_depth 1 --max_depth 3 --nontrivial_only --candidate_encoder node_averager --candidate_sampling balanced --batch_size 1000 --num_candidates 2 --predicate_sampling random --hidden_size 128 --learning_rate 0.01 --epochs 15 --steps_per_epoch 1000 --device cuda
+// Capacity probe: trains only the predicate/candidate satisfaction classifier (predicate embedding <-> candidate encoder, dot product, sigmoid), no communication game, to check whether --hidden_size is large enough to represent the (predicate, candidate) truth table at all.
+python -m signalling --do capacity_probe --properties 8-8 --min_depth 1 --max_depth 3 --nontrivial_only --candidate_encoder node_averager --batch_size 1000 --hidden_size 128 --learning_rate 0.01 --epochs 15 --steps_per_epoch 1000
+
+// Same, but with the MLP scorer (--scorer mlp) instead of the dot product, to check whether the dot product's bilinear form -- rather than --hidden_size itself -- is the bottleneck.
+python -m signalling --do capacity_probe --properties 8-8 --min_depth 1 --max_depth 3 --nontrivial_only --candidate_encoder node_averager --batch_size 1000 --hidden_size 128 --scorer mlp --learning_rate 0.01 --epochs 15 --steps_per_epoch 1000
