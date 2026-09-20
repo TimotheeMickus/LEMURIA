@@ -110,6 +110,7 @@ class PopulationMixin:
 
     # Overrides Game.start_episode.
     # Selects the agents used for this round. Training: a random producer and a random consumer. Evaluation: the oldest producer and the oldest consumer.
+    # Also puts the newly-selected pair into train/eval mode.
     def start_episode(self, train_episode=True):
         if(train_episode):
             self._cur_producer = random.choice(self._producers)
@@ -118,6 +119,9 @@ class PopulationMixin:
             self._cur_producer = self._oldest(self._producers, self._producer_birth)
             self._cur_consumer = self._oldest(self._consumers, self._consumer_birth)
         self._assign_current(self._cur_producer, self._cur_consumer)
+
+        if(train_episode): self.train()
+        else: self.eval()
 
     # Overrides Game.start_epoch: apply the reinitialization schedule.
     def start_epoch(self, data_iterator, summary_writer):
