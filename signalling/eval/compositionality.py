@@ -17,6 +17,14 @@ compositionality(pairs, spec, hparams, device, seed) -> float in [0, 1]
     `hparams.patience` epochs; the fold contributes its best held-out accuracy.
     The returned score is the mean over the 5 folds.
 
+compositionality_per_item(pairs, spec, hparams, device, seed, n_folds, n_runs) -> (mean_acc, mean_loss, per_item)
+    Like `compositionality`, but additionally reports a per-item score: the
+    fraction of `n_runs` independent repeats in which that item was exactly
+    recovered. With `n_folds=None` (the default), each fold holds out exactly
+    one item (leave-one-out), which both sharpens the aggregate estimate (no
+    partial-fold averaging) and identifies exactly which signals the probe
+    fails to recover.
+
 emergent_pairs(asker, dataset, device) -> (pairs, spec)
     Runs the asker (eval/argmax) once per predicate to obtain the emergent
     signal, and pairs it with the Polish-notation encoding of the predicate.
@@ -27,6 +35,11 @@ main(global_args, remaining_args)
     signal for a predicate is its reverse-Polish encoding), a language that is
     compositional by construction, so the search rewards hyperparameters that let
     the probe recover composition when it is present.
+
+main_loo(global_args, remaining_args)
+    `--do compositionality_loo`: leave-one-out (or n-fold, user-specified)
+    cross-validated compositionality probe on a dumped emergent language
+    (--comp_signals_csv). Writes a per-signal CSV alongside the aggregate score.
 
 Efficiency notes
 ----------------
@@ -114,8 +127,11 @@ def add_compositionality_args(parser):
     group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
     group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
     group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
-    group.add_argument('--comp_signals_csv', help="compositionality_search: read the emergent language from a dumped-signals CSV (columns 'signal' and 'pred_str', the kind produced by --dump_signals) instead of the synthetic control language. When set, no dataset parameters are needed and the dataset is not built.", type=pathlib.Path, default=None)
-    group.add_argument('--comp_target_notation', help="compositionality_search: predicate serialisation used as the probe target when --comp_signals_csv is given", choices=['polish', 'reverse_polish'], default='polish')
+    group.add_argument('--comp_signals_csv', help="compositionality_search / compositionality_loo: read the emergent language from a dumped-signals CSV (columns 'signal' and 'pred_str', the kind produced by --dump_signals) instead of the synthetic control language. When set, no dataset parameters are needed and the dataset is not built.", type=pathlib.Path, default=None)
+    group.add_argument('--comp_target_notation', help="compositionality_search / compositionality_loo: predicate serialisation used as the probe target when --comp_signals_csv is given", choices=['polish', 'reverse_polish'], default='polish')
+    group.add_argument('--comp_n_folds', help="compositionality_loo: number of CV folds. Omit for leave-one-out (n_folds = number of distinct signals), the default and most precise setting; pass a smaller number to trade precision for speed.", type=int, default=None)
+    group.add_argument('--comp_runs_per_item', help="compositionality_loo: number of independent repeats of the whole CV procedure (fresh fold shuffle and probe init each time). Each signal's reported score is the fraction of runs in which it was exactly recovered, which smooths out the noise of any single stochastic training run.", type=int, default=1)
+    group.add_argument('--comp_out_csv', help="compositionality_loo: path to write the per-signal results CSV. Defaults to '<comp_signals_csv stem>.comp_loo.csv' next to the input file.", type=pathlib.Path, default=None)
     return group
 
 
@@ -246,25 +262,34 @@ class _Data:
 
 
 @torch.no_grad()
-def _exact_match(model, data, idx, spec, decode_batch=256):
-    """Fraction of `idx` whose greedy decoding equals the gold token sequence exactly."""
+def _exact_match_per_item(model, data, idx, spec, decode_batch=256):
+    """Per-item exact-match correctness and greedy-decoded predictions for `idx` (lists aligned with `idx`)."""
     model.eval()
     device = data.src.device
     eos, pad = spec.tgt_eos_id, spec.tgt_pad_id
-    correct = 0
+    correct = [False] * len(idx)
+    predicted = [None] * len(idx)
     for start in range(0, len(idx), decode_batch):
         rows = idx[start:start + decode_batch]
         rows_t = torch.as_tensor(rows, dtype=torch.long, device=device)
         produced = model.greedy_decode(data.src[rows_t], data.src_len[rows_t], data.max_decode_len).tolist()
-        for row, seq in zip(rows, produced):
+        for offset, (row, seq) in enumerate(zip(rows, produced)):
             out = []
             for tok in seq:
                 if tok == eos or tok == pad:
                     break
                 out.append(tok)
-            if out == data.gold[int(row)]:
-                correct += 1
-    return correct / len(idx) if len(idx) > 0 else 0.0
+            j = start + offset
+            predicted[j] = out
+            correct[j] = (out == data.gold[int(row)])
+    return correct, predicted
+
+
+@torch.no_grad()
+def _exact_match(model, data, idx, spec, decode_batch=256):
+    """Fraction of `idx` whose greedy decoding equals the gold token sequence exactly."""
+    correct, _ = _exact_match_per_item(model, data, idx, spec, decode_batch=decode_batch)
+    return sum(correct) / len(idx) if len(idx) > 0 else 0.0
 
 
 # Minimum decrease in held-out loss to count as an improvement (avoids stopping being driven
@@ -292,16 +317,22 @@ def _val_loss(model, data, idx, spec, batch=512):
     return total_loss / max(1, total_tokens)
 
 
-def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
+def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
     """
     Trains one seq2seq on `train_idx` and returns
-    (best held-out exact-match, best held-out loss, stopping epoch).
+    (best held-out exact-match, best held-out loss, stopping epoch, ever_correct, last_predicted).
 
     Early stopping watches the held-out *loss* (which decreases smoothly from the first
     epoch) rather than exact-match: exact-match sits at exactly 0 during warm-up until it
     jumps, so a patience clock on exact-match would kill any run that has not yet crossed
     that transition. Loss-based stopping tracks real convergence; we still *report* the
     best exact-match, the quantity of interest.
+
+    `ever_correct` (aligned with `test_idx`) is True for an item iff its greedy decoding matched
+    the gold sequence at *some* epoch (mirroring how `best_acc` is the running max, over epochs, of
+    the fold's exact-match fraction). `last_predicted` holds the most recent *wrong* decoding seen
+    for each item (None if it was correct at the last epoch it was wrong, or never wrong) -- handy
+    to inspect what the probe guessed instead of the gold predicate.
     """
     if(seed is not None): torch.manual_seed(seed)
     model = Seq2Seq(spec, h).to(device)
@@ -316,6 +347,8 @@ def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
     best_val = float("inf")
     stale = 0
     stopped_epoch = 0
+    ever_correct = [False] * len(test_idx)
+    last_predicted = [None] * len(test_idx)
     with torch.enable_grad():  # evaluate() runs under torch.no_grad(); training needs gradients
         for epoch in range(h.max_epochs):
             stopped_epoch = epoch + 1
@@ -329,7 +362,13 @@ def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
                 loss.backward()
                 optimizer.step()
 
-            best_acc = max(best_acc, _exact_match(model, data, test_idx, spec, decode_batch=eval_batch))
+            correct, predicted = _exact_match_per_item(model, data, test_idx, spec, decode_batch=eval_batch)
+            best_acc = max(best_acc, sum(correct) / len(test_idx) if len(test_idx) > 0 else 0.0)
+            for i, ok in enumerate(correct):
+                if ok:
+                    ever_correct[i] = True
+                else:
+                    last_predicted[i] = predicted[i]
 
             val = _val_loss(model, data, test_idx, spec, batch=eval_batch)
             if val < (best_val - _MIN_DELTA):
@@ -339,6 +378,12 @@ def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
                 stale += 1
                 if stale >= h.patience:
                     break
+    return best_acc, best_val, stopped_epoch, ever_correct, last_predicted
+
+
+def _run_one_fold(data, train_idx, test_idx, spec, h, device, seed):
+    """Trains one seq2seq on `train_idx` and returns (best held-out exact-match, best held-out loss, stopping epoch)."""
+    best_acc, best_val, stopped_epoch, _, _ = _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed)
     return best_acc, best_val, stopped_epoch
 
 
@@ -380,6 +425,79 @@ def compositionality(pairs, spec, hparams, device, seed=None, n_folds=5, verbose
     mean_score = float(np.mean(scores))
     mean_loss = float(np.mean(losses))
     return (mean_score, mean_loss, epochs) if return_epochs else (mean_score, mean_loss)
+
+
+def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=None, n_runs=1, verbose=False):
+    """
+    Repeated cross-validation that additionally reports a per-item score (see module docstring).
+
+    n_folds: number of CV folds; None (the default) means leave-one-out (n_folds = len(pairs)),
+        which both sharpens the aggregate estimate (no partial-fold averaging) and lets every item
+        be individually diagnosed. A smaller number trades precision for speed, as in `compositionality`.
+    n_runs: number of independent repeats of the whole (shuffle, fold, train) procedure, each with
+        its own seed. An item's score is the fraction of runs in which it was exactly recovered.
+
+    Returns (mean_acc, mean_loss, per_item). mean_acc/mean_loss are the mean over runs of the
+    per-run fold-averaged score/loss, exactly as `compositionality` computes them (so the two
+    functions' aggregate numbers are directly comparable). per_item is a list aligned with `pairs`,
+    each entry a dict: {'index': i, 'score': float in [0, 1], 'n_correct': int, 'n_runs': int,
+    'predicted': list[int] or None}. 'predicted' is the most recent wrong decoding seen for that
+    item (None if it was recovered in every run).
+    """
+    n = len(pairs)
+    n_folds = n if (n_folds is None) else n_folds
+    print(f"[comp-loo] hparams={hparams}; n_folds={n_folds}{' (leave-one-out)' if n_folds == n else ''}; n_runs={n_runs}")
+    if(n < n_folds):
+        print(f"[comp-loo] Aborted (n < n_folds; {n} < {n_folds}).")
+        return float("nan"), float("nan"), []
+
+    data = _Data(pairs, spec, device)
+    correct_counts = [0] * n
+    last_predicted = [None] * n
+    run_scores, run_losses = [], []
+    progress_every = max(1, n_folds // 20)
+
+    for run in range(n_runs):
+        run_seed = None if (seed is None) else (seed + run * 1_000_003)
+        perm = np.random.default_rng(run_seed).permutation(n)
+        folds = np.array_split(perm, n_folds)
+
+        fold_scores, fold_losses = [], []
+        for f in range(n_folds):
+            test_idx = folds[f]
+            train_idx = np.concatenate([folds[j] for j in range(n_folds) if j != f])
+            fold_seed = None if (run_seed is None) else (run_seed + f)
+            score, val_loss, stopped_epoch, ever_correct, predicted = _run_one_fold_detailed(
+                data, train_idx, test_idx, spec, hparams, device, seed=fold_seed)
+            fold_scores.append(score)
+            fold_losses.append(val_loss)
+            for local_i, global_i in enumerate(test_idx):
+                global_i = int(global_i)
+                if ever_correct[local_i]:
+                    correct_counts[global_i] += 1
+                else:
+                    last_predicted[global_i] = predicted[local_i]
+            if(verbose or (f % progress_every == 0) or (f == n_folds - 1)):
+                print(f"    [comp-loo] run {run + 1}/{n_runs} fold {f + 1}/{n_folds}: exact-match = {score:.4f}, "
+                      f"loss = {val_loss:.4f} (stopped at epoch {stopped_epoch}, {len(test_idx)} held out)", flush=True)
+
+        run_scores.append(float(np.mean(fold_scores)))
+        run_losses.append(float(np.mean(fold_losses)))
+        print(f"[comp-loo] run {run + 1}/{n_runs}: mean exact-match = {run_scores[-1]:.4f}, mean loss = {run_losses[-1]:.4f}", flush=True)
+
+    per_item = [
+        {
+            'index': i,
+            'score': correct_counts[i] / n_runs,
+            'n_correct': correct_counts[i],
+            'n_runs': n_runs,
+            'predicted': (None if (correct_counts[i] == n_runs) else last_predicted[i]),
+        }
+        for i in range(n)
+    ]
+    mean_score = float(np.mean(run_scores))
+    mean_loss = float(np.mean(run_losses))
+    return mean_score, mean_loss, per_item
 
 
 # ----------------------------------------------------------------------------- #
@@ -524,7 +642,7 @@ def selfcheck_parser(dataset):
 # emergent probe uses them); tgt = the predicate in `notation` ('polish' | 'reverse_polish'),
 # obtained by parsing the pred_str column. Both vocabularies are inferred from the file, so nothing
 # about the original dataset (properties, depth, negation/conjunction toggles) has to be specified.
-def csv_pairs(path, notation="polish"):
+def csv_pairs(path, notation="polish", return_strs=False):
     import csv as _csv
 
     reverse = (notation == "reverse_polish")
@@ -548,7 +666,7 @@ def csv_pairs(path, notation="polish"):
     # compositionality. We therefore keep the first occurrence of each predicate.
     seen_signal = {}   # pred_str -> signal ids (first occurrence)
     by_idx = {}        # pred_idx -> pred_str (file-consistency check)
-    src_seqs, pred_strs = [], []
+    src_seqs, pred_strs, pred_idxs = [], [], []
     n_dup = 0
     for k, r in enumerate(rows):
         ps = r["pred_str"]
@@ -557,8 +675,8 @@ def csv_pairs(path, notation="polish"):
         except ValueError as e:
             raise ValueError(f"{path}: row {k}: could not parse 'signal' field {r['signal']!r} as space-separated integers ({e}).")
 
-        if("pred_idx" in fields):
-            pi = r["pred_idx"]
+        pi = r["pred_idx"] if ("pred_idx" in fields) else None
+        if(pi is not None):
             if((pi in by_idx) and (by_idx[pi] != ps)):
                 raise ValueError(f"{path}: pred_idx {pi} maps to two different predicates ({by_idx[pi]!r} vs {ps!r}); the file looks inconsistent.")
             by_idx[pi] = ps
@@ -572,6 +690,7 @@ def csv_pairs(path, notation="polish"):
         seen_signal[ps] = sig
         src_seqs.append(sig)
         pred_strs.append(ps)
+        pred_idxs.append(pi)
 
     if(n_dup > 0):
         print(f"[comp-csv] {path}: {len(rows)} rows -> {len(src_seqs)} distinct predicates ({n_dup} duplicate rows dropped to avoid cross-validation leakage).", flush=True)
@@ -608,6 +727,12 @@ def csv_pairs(path, notation="polish"):
         tgt_bos_id=tgt_bos_id,
         tgt_eos_id=tgt_eos_id,
     )
+    if(return_strs):
+        # id2tok: maps a target token id back to its string, for rendering a predicted sequence (see
+        # main_loo). Ids above `base` (PAD/BOS/EOS) have no token string and are never emitted by the
+        # probe as content, but greedy decoding could in principle predict them before hitting EOS/PAD.
+        id2tok = list(tokens) + [None, None, None]
+        return pairs, spec, pred_strs, pred_idxs, id2tok
     return pairs, spec
 
 
@@ -714,3 +839,79 @@ def main(global_args=None, remaining_args=None):
             pass
 
     return best_score, best_h
+
+
+# ----------------------------------------------------------------------------- #
+# Leave-one-out / n-fold diagnostic probe ( --do compositionality_loo )
+# ----------------------------------------------------------------------------- #
+
+def _render_tokens(ids, id2tok):
+    return " ".join((id2tok[i] if ((i is not None) and (0 <= i < len(id2tok)) and (id2tok[i] is not None)) else str(i)) for i in ids)
+
+
+def _write_per_item_csv(path, pred_strs, pred_idxs, src_seqs, per_item, id2tok, notation):
+    import csv as _csv
+    with open(str(path), "w", newline="", encoding="utf-8") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["pred_idx", "pred_str", "signal", "target_notation", "score", "n_correct", "n_runs", "predicted"])
+        for it in per_item:
+            i = it['index']
+            predicted = "" if (it['predicted'] is None) else _render_tokens(it['predicted'], id2tok)
+            writer.writerow([
+                "" if (pred_idxs[i] is None) else pred_idxs[i],
+                pred_strs[i],
+                " ".join(map(str, src_seqs[i])),
+                notation,
+                f"{it['score']:.4f}",
+                it['n_correct'],
+                it['n_runs'],
+                predicted,
+            ])
+
+
+# Lean argument parser for `--do compositionality_loo`: only the Compositionality knobs plus
+# --device are needed -- the signals and target predicates come entirely from --comp_signals_csv,
+# so (unlike compositionality_search) no dataset arguments are declared at all.
+def get_args_loo(remaining_args):
+    parser = argparse.ArgumentParser(
+        prog="signalling --do compositionality_loo",
+        description="Leave-one-out (or n-fold, user-chosen) cross-validated compositionality probe on a "
+                    "saved emergent language (a dumped-signals CSV, see --dump_signals). Reports both an "
+                    "aggregate compositionality estimate and, per signal, whether the probe could recover "
+                    "it from the others -- i.e. which individual signals are compositional and which are not.")
+    cli.add_perf_args(parser)              # --device
+    add_compositionality_args(parser)      # the Compositionality group (--comp_* etc.)
+    parser.add_argument('--seed', help='random seed (probe init and CV splits); unset => everything random', type=int, default=None)
+    return parser.parse_args(remaining_args)
+
+
+def main_loo(global_args=None, remaining_args=None):
+    args = get_args_loo(remaining_args)
+    device = args.device
+
+    if(args.comp_signals_csv is None):
+        raise SystemExit("--do compositionality_loo requires --comp_signals_csv <path to a dumped-signals CSV, see --dump_signals>.")
+
+    pairs, spec, pred_strs, pred_idxs, id2tok = csv_pairs(args.comp_signals_csv, notation=args.comp_target_notation, return_strs=True)
+    n = len(pairs)
+    n_folds = n if (args.comp_n_folds is None) else args.comp_n_folds
+    print(f"[comp-loo] {n} signals from {args.comp_signals_csv}; "
+          f"src vocab {spec.src_vocab_size}, tgt vocab {spec.tgt_vocab_size}; target = {args.comp_target_notation}.", flush=True)
+
+    hparams = hparams_from_args(args)
+    mean_acc, mean_loss, per_item = compositionality_per_item(
+        pairs, spec, hparams, device, seed=args.seed, n_folds=args.comp_n_folds, n_runs=args.comp_runs_per_item)
+
+    n_always = sum(1 for it in per_item if it['score'] == 1.0)
+    n_never = sum(1 for it in per_item if it['score'] == 0.0)
+    print(f"\n[comp-loo] aggregate exact-match = {mean_acc:.4f} (mean held-out loss = {mean_loss:.4f}) over {n} signals "
+          f"(n_folds={n_folds}{' = leave-one-out' if (n_folds == n) else ''}, {args.comp_runs_per_item} run(s)/item).")
+    print(f"[comp-loo] {n_always}/{n} signals always recovered, {n_never}/{n} never recovered.")
+
+    out_csv = args.comp_out_csv
+    if out_csv is None:
+        out_csv = args.comp_signals_csv.with_name(args.comp_signals_csv.stem + ".comp_loo.csv")
+    _write_per_item_csv(out_csv, pred_strs, pred_idxs, [p[0] for p in pairs], per_item, id2tok, args.comp_target_notation)
+    print(f"[comp-loo] wrote per-signal results to {out_csv}")
+
+    return mean_acc, mean_loss, per_item

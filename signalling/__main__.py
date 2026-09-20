@@ -16,7 +16,7 @@ import sys
 SUBCOMMANDS_WITH_OWN_PARSER = {
     'image_signalling_game', 'predicate_signalling_game', 'compositionality_search',
     'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation',
-    'capacity_probe',
+    'capacity_probe', 'compositionality_loo',
 }
 
 def get_args():
@@ -26,7 +26,7 @@ def get_args():
 
     arg_parser.add_argument('-h', '--help', action='store_true', help="show this help message and exit (with --do <game>, shows that game's own arguments)")
 
-    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'predicate_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation', 'compositionality_search', 'capacity_probe'])
+    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'predicate_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation', 'compositionality_search', 'compositionality_loo', 'capacity_probe'])
     
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --quiet vs. --display quiet?
@@ -87,6 +87,9 @@ if(__name__ == "__main__"):
         main(args, remaining_args)
     elif(args.do == 'compositionality_search'):
         from .eval.compositionality import main
+        main(args, remaining_args)
+    elif(args.do == 'compositionality_loo'):
+        from .eval.compositionality import main_loo as main
         main(args, remaining_args)
     elif(args.do == 'capacity_probe'):
         from .eval.capacity_probe import main
