@@ -2,8 +2,8 @@
 Compositionality probe for the predicate signalling game.
 
 Given (predicate, signal) pairs, we train a small sequence-to-sequence model
-(bidirectional-LSTM encoder + LSTM decoder) to reconstruct the predicate
-written in Polish (prefix) notation from the signal, and we measure the
+(encoder + LSTM decoder) to reconstruct the predicate written in Polish
+(prefix) notation from the signal, and we measure the
 fraction of held-out predicates that are reconstructed *exactly*. This is a
 standard "can a learner recover the meaning from the signal?" probe: a language
 is compositional to the extent that a generic learner generalises the
@@ -109,14 +109,21 @@ class HParams:
     batch_size: int = 512
     max_epochs: int = 512
     patience: int = 2
+    encoder: str = "bilstm"   # "bilstm" or "transformer" -- see Seq2Seq
 
 
 # Command-line arguments for the compositionality probe and its hyperparameter search. Kept next to
 # the probe code that reads them (see `hparams_from_args`). Returns the argparse group.
 def add_compositionality_args(parser):
     import pathlib
-    group = parser.add_argument_group(title='Compositionality', description='compositionality probe (biLSTM encoder -> LSTM decoder) and its hyperparameter search')
+    group = parser.add_argument_group(title='Compositionality', description='compositionality probe (encoder -> LSTM decoder) and its hyperparameter search')
     group.add_argument('--eval_compositionality', help='during evaluation, measure the compositionality of the emergent language (5-fold CV exact-match) and log it as "compositionality"', action='store_true')
+    group.add_argument('--comp_encoder', help='probe: encoder architecture. "bilstm" (default) is inherently order-sensitive '
+                        '(a signal and its reverse generally encode to different states). "transformer" is a self-attention '
+                        'encoder with learned positional embeddings: attention is permutation-EQUIVARIANT and position only '
+                        'enters additively, so it is not structurally biased either way and can learn an order-sensitive or '
+                        'an order-insensitive signal->meaning mapping, whichever the language actually uses.',
+                        choices=['bilstm', 'transformer'], default='bilstm')
     group.add_argument('--comp_embed_dim', help='probe: token embedding dimension', type=int, default=64)
     group.add_argument('--comp_hidden_dim', help='probe: LSTM hidden dimension', type=int, default=64)
     group.add_argument('--comp_num_layers', help='probe: number of LSTM layers (encoder and decoder)', type=int, default=1)
@@ -145,6 +152,7 @@ def hparams_from_args(args):
         batch_size=args.comp_batch_size,
         max_epochs=args.comp_max_epochs,
         patience=args.comp_patience,
+        encoder=args.comp_encoder,
     )
 
 
@@ -153,42 +161,85 @@ def hparams_from_args(args):
 # ----------------------------------------------------------------------------- #
 
 class Seq2Seq(nn.Module):
-    """Bidirectional-LSTM encoder followed by an LSTM decoder."""
-    def __init__(self, spec, h):
+    """Encoder (biLSTM or self-attention, see `h.encoder`) followed by an LSTM decoder.
+
+    biLSTM: inherently order-sensitive -- a signal and its reverse generally produce different
+    final states, so the model must actively learn any order-invariance it needs from examples.
+
+    transformer: self-attention is permutation-EQUIVARIANT; position enters only as an additive
+    embedding, so nothing about the architecture favours order-sensitivity over order-invariance
+    (or vice versa) -- whichever the data calls for is equally easy to learn, in principle.
+    """
+    _TF_HEADS = 4  # requires h.embed_dim % _TF_HEADS == 0; the default embed_dim=64 satisfies this.
+
+    def __init__(self, spec, h, max_signal_len=256):
         super().__init__()
         self.spec = spec
         self.num_layers = h.num_layers
         self.hidden_dim = h.hidden_dim
+        self.encoder_kind = h.encoder
 
         rnn_dropout = h.dropout if (h.num_layers > 1) else 0.0
 
         self.src_emb = nn.Embedding(spec.src_vocab_size, h.embed_dim, padding_idx=spec.src_pad_id)
-        self.encoder = nn.LSTM(h.embed_dim, h.hidden_dim, num_layers=h.num_layers,
-                               batch_first=True, bidirectional=True, dropout=rnn_dropout)
+
+        if(self.encoder_kind == "bilstm"):
+            self.encoder = nn.LSTM(h.embed_dim, h.hidden_dim, num_layers=h.num_layers,
+                                   batch_first=True, bidirectional=True, dropout=rnn_dropout)
+            # Bridges the (bidirectional) encoder final state to the decoder initial state.
+            self.bridge_h = nn.Linear(2 * h.hidden_dim, h.hidden_dim)
+            self.bridge_c = nn.Linear(2 * h.hidden_dim, h.hidden_dim)
+        elif(self.encoder_kind == "transformer"):
+            assert (h.embed_dim % self._TF_HEADS == 0), (
+                f"--comp_encoder transformer needs --comp_embed_dim divisible by {self._TF_HEADS} "
+                f"(got {h.embed_dim}).")
+            self.pos_emb = nn.Embedding(max_signal_len, h.embed_dim)
+            layer = nn.TransformerEncoderLayer(
+                d_model=h.embed_dim, nhead=self._TF_HEADS, dim_feedforward=4 * h.embed_dim,
+                dropout=h.dropout, batch_first=True)
+            self.encoder = nn.TransformerEncoder(layer, num_layers=h.num_layers)
+            # Bridges the (mean-pooled) encoder output to the decoder initial state.
+            self.bridge_h = nn.Linear(h.embed_dim, h.hidden_dim)
+            self.bridge_c = nn.Linear(h.embed_dim, h.hidden_dim)
+        else:
+            raise ValueError(f"unknown --comp_encoder {self.encoder_kind!r} (expected 'bilstm' or 'transformer').")
 
         self.tgt_emb = nn.Embedding(spec.tgt_vocab_size, h.embed_dim, padding_idx=spec.tgt_pad_id)
         self.decoder = nn.LSTM(h.embed_dim, h.hidden_dim, num_layers=h.num_layers,
                                batch_first=True, dropout=rnn_dropout)
-
-        # Bridges the (bidirectional) encoder final state to the decoder initial state.
-        self.bridge_h = nn.Linear(2 * h.hidden_dim, h.hidden_dim)
-        self.bridge_c = nn.Linear(2 * h.hidden_dim, h.hidden_dim)
 
         self.out = nn.Linear(h.hidden_dim, spec.tgt_vocab_size)
         self.dropout = nn.Dropout(h.dropout)
 
     # src: (B, S) long ; src_len: (B,) long -> decoder initial state (h, c), each (num_layers, B, hidden)
     def encode(self, src, src_len):
-        emb = self.dropout(self.src_emb(src))
-        packed = nn.utils.rnn.pack_padded_sequence(emb, src_len.cpu(), batch_first=True, enforce_sorted=False)
-        _, (h_n, c_n) = self.encoder(packed)  # (num_layers * 2, B, hidden)
+        if(self.encoder_kind == "bilstm"):
+            emb = self.dropout(self.src_emb(src))
+            packed = nn.utils.rnn.pack_padded_sequence(emb, src_len.cpu(), batch_first=True, enforce_sorted=False)
+            _, (h_n, c_n) = self.encoder(packed)  # (num_layers * 2, B, hidden)
 
-        def combine(state):
-            state = state.view(self.num_layers, 2, state.size(1), self.hidden_dim)  # (L, 2, B, H)
-            return torch.cat([state[:, 0], state[:, 1]], dim=-1)                     # (L, B, 2H)
+            def combine(state):
+                state = state.view(self.num_layers, 2, state.size(1), self.hidden_dim)  # (L, 2, B, H)
+                return torch.cat([state[:, 0], state[:, 1]], dim=-1)                     # (L, B, 2H)
 
-        h0 = torch.tanh(self.bridge_h(combine(h_n))).contiguous()  # (L, B, H)
-        c0 = torch.tanh(self.bridge_c(combine(c_n))).contiguous()  # (L, B, H)
+            h0 = torch.tanh(self.bridge_h(combine(h_n))).contiguous()  # (L, B, H)
+            c0 = torch.tanh(self.bridge_c(combine(c_n))).contiguous()  # (L, B, H)
+            return (h0, c0)
+
+        # "transformer": mean-pool the (masked) encoder output into a single vector, then bridge
+        # it to the decoder's initial state -- the attention/pooling combination has no encoder
+        # "layers" to seed individually the way the biLSTM's stacked states do, so the same
+        # pooled+bridged vector is tiled across all `num_layers` of the LSTM decoder.
+        B, S = src.shape
+        positions = torch.arange(S, device=src.device).unsqueeze(0).expand(B, S)
+        emb = self.dropout(self.src_emb(src) + self.pos_emb(positions))
+        pad_mask = torch.arange(S, device=src.device).unsqueeze(0) >= src_len.unsqueeze(1)  # (B, S), True = pad
+        enc = self.encoder(emb, src_key_padding_mask=pad_mask)  # (B, S, embed_dim)
+        keep = (~pad_mask).unsqueeze(-1).float()
+        pooled = (enc * keep).sum(dim=1) / keep.sum(dim=1).clamp(min=1.0)  # (B, embed_dim), mean over real tokens
+
+        h0 = torch.tanh(self.bridge_h(pooled)).unsqueeze(0).expand(self.num_layers, -1, -1).contiguous()
+        c0 = torch.tanh(self.bridge_c(pooled)).unsqueeze(0).expand(self.num_layers, -1, -1).contiguous()
         return (h0, c0)
 
     # Teacher-forced training pass. tgt_in: (B, T) -> logits (B, T, V)
@@ -335,7 +386,7 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
     to inspect what the probe guessed instead of the gold predicate.
     """
     if(seed is not None): torch.manual_seed(seed)
-    model = Seq2Seq(spec, h).to(device)
+    model = Seq2Seq(spec, h, max_signal_len=data.src.size(1)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=h.lr)
     criterion = nn.CrossEntropyLoss(ignore_index=spec.tgt_pad_id)
 
@@ -427,7 +478,7 @@ def compositionality(pairs, spec, hparams, device, seed=None, n_folds=5, verbose
     return (mean_score, mean_loss, epochs) if return_epochs else (mean_score, mean_loss)
 
 
-def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=None, n_runs=1, verbose=False):
+def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=None, n_runs=1, pred_strs=None):
     """
     Repeated cross-validation that additionally reports a per-item score (see module docstring).
 
@@ -436,6 +487,8 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
         be individually diagnosed. A smaller number trades precision for speed, as in `compositionality`.
     n_runs: number of independent repeats of the whole (shuffle, fold, train) procedure, each with
         its own seed. An item's score is the fraction of runs in which it was exactly recovered.
+    pred_strs: optional, aligned with `pairs`; when given, each fold's progress line also shows the
+        held-out predicate(s) and their signal.
 
     Returns (mean_acc, mean_loss, per_item). mean_acc/mean_loss are the mean over runs of the
     per-run fold-averaged score/loss, exactly as `compositionality` computes them (so the two
@@ -455,11 +508,16 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
     correct_counts = [0] * n
     last_predicted = [None] * n
     run_scores, run_losses = [], []
-    progress_every = max(1, n_folds // 20)
 
     for run in range(n_runs):
         run_seed = None if (seed is None) else (seed + run * 1_000_003)
-        perm = np.random.default_rng(run_seed).permutation(n)
+        if(n_folds == n):
+            # True leave-one-out: each fold is a single item, so shuffling only changes the order
+            # items are processed/printed in, not which items are grouped -- use the natural (id)
+            # order instead, so LOO progress is easy to follow/compare across runs.
+            perm = np.arange(n)
+        else:
+            perm = np.random.default_rng(run_seed).permutation(n)
         folds = np.array_split(perm, n_folds)
 
         fold_scores, fold_losses = [], []
@@ -477,9 +535,13 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
                     correct_counts[global_i] += 1
                 else:
                     last_predicted[global_i] = predicted[local_i]
-            if(verbose or (f % progress_every == 0) or (f == n_folds - 1)):
-                print(f"    [comp-loo] run {run + 1}/{n_runs} fold {f + 1}/{n_folds}: exact-match = {score:.4f}, "
-                      f"loss = {val_loss:.4f} (stopped at epoch {stopped_epoch}, {len(test_idx)} held out)", flush=True)
+            if(pred_strs is None):
+                detail = ""
+            else:
+                detail = " | " + "; ".join(
+                    f"{pred_strs[int(gi)]!r} <- [{' '.join(map(str, pairs[int(gi)][0]))}]" for gi in test_idx)
+            print(f"    [comp-loo] run {run + 1}/{n_runs} fold {f + 1}/{n_folds}: exact-match = {score:.4f}, "
+                  f"loss = {val_loss:.4f} (stopped at epoch {stopped_epoch}, {len(test_idx)} held out){detail}", flush=True)
 
         run_scores.append(float(np.mean(fold_scores)))
         run_losses.append(float(np.mean(fold_losses)))
@@ -663,11 +725,16 @@ def csv_pairs(path, notation="polish", return_strs=False):
     # contribute exactly one (signal, target) pair -- matching emergent_pairs. Keeping the duplicate
     # rows would let the probe's k-fold cross-validation place identical (signal, target) pairs in
     # both the training and held-out folds, leaking the answer and greatly inflating the reported
-    # compositionality. We therefore keep the first occurrence of each predicate.
-    seen_signal = {}   # pred_str -> signal ids (first occurrence)
-    by_idx = {}        # pred_idx -> pred_str (file-consistency check)
+    # compositionality. We therefore keep the first occurrence of each predicate. A later occurrence
+    # with a DIFFERENT signal (the source language isn't actually a pure function of the predicate
+    # in this file -- e.g. several epochs/languages concatenated, or non-deterministic decoding)
+    # is not fatal: we warn and keep the first-seen signal.
+    seen_signal = {}      # pred_str -> signal ids (first occurrence)
+    by_idx = {}           # pred_idx -> pred_str (file-consistency check)
     src_seqs, pred_strs, pred_idxs = [], [], []
     n_dup = 0
+    n_conflict = 0         # duplicate rows whose signal disagrees with the first occurrence
+    conflict_preds = set() # distinct predicates affected by at least one such conflict
     for k, r in enumerate(rows):
         ps = r["pred_str"]
         try:
@@ -684,7 +751,8 @@ def csv_pairs(path, notation="polish", return_strs=False):
         if(ps in seen_signal):
             n_dup += 1
             if(seen_signal[ps] != sig):
-                raise ValueError(f"{path}: predicate {ps!r} appears with two different signals ({seen_signal[ps]} vs {sig}). A single dump file (one epoch) maps each predicate to one argmax signal; this looks like several epochs/languages concatenated, which is not a single language to probe.")
+                n_conflict += 1
+                conflict_preds.add(ps)
             continue
 
         seen_signal[ps] = sig
@@ -693,7 +761,13 @@ def csv_pairs(path, notation="polish", return_strs=False):
         pred_idxs.append(pi)
 
     if(n_dup > 0):
-        print(f"[comp-csv] {path}: {len(rows)} rows -> {len(src_seqs)} distinct predicates ({n_dup} duplicate rows dropped to avoid cross-validation leakage).", flush=True)
+        msg = (f"[comp-csv] {path}: {len(rows)} rows -> {len(src_seqs)} distinct predicates "
+               f"({n_dup} duplicate rows dropped to avoid cross-validation leakage")
+        if(n_conflict > 0):
+            msg += (f"; {n_conflict} of those rows disagreed with their predicate's first-seen signal, "
+                    f"affecting {len(conflict_preds)}/{len(src_seqs)} predicates (first-seen signal kept for each)")
+        msg += ").";
+        print(msg, flush=True)
 
     # Target: parse each (distinct) predicate and serialise in the requested notation.
     tgt_token_seqs = []
@@ -751,7 +825,7 @@ SEARCH_SPACE = {
 }
 
 
-def _sample_hparams(rng, max_epochs, patience):
+def _sample_hparams(rng, max_epochs, patience, encoder):
     def pick(space):
         if isinstance(space, list):
             return space[int(rng.integers(len(space)))]
@@ -771,6 +845,7 @@ def _sample_hparams(rng, max_epochs, patience):
         batch_size=int(pick(SEARCH_SPACE["batch_size"])),
         max_epochs=max_epochs,
         patience=patience,
+        encoder=encoder,   # fixed for the whole search, like max_epochs/patience -- not sampled
     )
 
 
@@ -813,7 +888,7 @@ def main(global_args=None, remaining_args=None):
     best_score, best_h = None, None
     history = []
     for trial in range(args.comp_search_trials):
-        h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience)
+        h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience, args.comp_encoder)
         score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.seed, return_epochs=True)
         history.append({"score": score, "loss": loss, "stopped_epochs": stopped_epochs, **asdict(h)})
         if (best_score is None) or (score > best_score):
@@ -885,6 +960,17 @@ def get_args_loo(remaining_args):
     return parser.parse_args(remaining_args)
 
 
+# Length (in symbols, EOS included) and vocabulary size (EOS excluded) of a (deduplicated) set of
+# (signal, target) pairs -- comparable to eval/signal_length and eval/vocab_used respectively. EOS
+# is always the last symbol of a dumped signal (SignalDecoder stops right after producing it), so
+# it is dropped structurally here rather than by assuming a specific eos_index.
+def _language_stats(pairs):
+    lengths = [len(sig) for sig, _ in pairs]
+    avg_len = (sum(lengths) / len(lengths)) if lengths else float("nan")
+    vocab = {tok for sig, _ in pairs for tok in sig[:-1]}
+    return avg_len, len(vocab)
+
+
 def main_loo(global_args=None, remaining_args=None):
     args = get_args_loo(remaining_args)
     device = args.device
@@ -893,14 +979,30 @@ def main_loo(global_args=None, remaining_args=None):
         raise SystemExit("--do compositionality_loo requires --comp_signals_csv <path to a dumped-signals CSV, see --dump_signals>.")
 
     pairs, spec, pred_strs, pred_idxs, id2tok = csv_pairs(args.comp_signals_csv, notation=args.comp_target_notation, return_strs=True)
+
+    # Sort by predicate id (natural order). Together with compositionality_per_item's own
+    # n_folds == n check, this makes a true leave-one-out run process items in id order instead of
+    # CSV-appearance order. Harmless otherwise: a non-LOO run's fold composition is randomly
+    # permuted regardless of the input order, so sorting it first changes nothing there.
+    if(all(pi is not None for pi in pred_idxs)):
+        order = sorted(range(len(pairs)), key=(lambda i: int(pred_idxs[i])))
+        pairs = [pairs[i] for i in order]
+        pred_strs = [pred_strs[i] for i in order]
+        pred_idxs = [pred_idxs[i] for i in order]
+
     n = len(pairs)
     n_folds = n if (args.comp_n_folds is None) else args.comp_n_folds
     print(f"[comp-loo] {n} signals from {args.comp_signals_csv}; "
           f"src vocab {spec.src_vocab_size}, tgt vocab {spec.tgt_vocab_size}; target = {args.comp_target_notation}.", flush=True)
+    avg_len, vocab_used = _language_stats(pairs)
+    print(f"[comp-loo] language stats: avg signal length = {avg_len:.3f} symbols (EOS included; "
+          f"compare eval/signal_length), vocab used = {vocab_used} symbol types (EOS excluded; "
+          f"compare eval/vocab_used).", flush=True)
 
     hparams = hparams_from_args(args)
     mean_acc, mean_loss, per_item = compositionality_per_item(
-        pairs, spec, hparams, device, seed=args.seed, n_folds=args.comp_n_folds, n_runs=args.comp_runs_per_item)
+        pairs, spec, hparams, device, seed=args.seed, n_folds=args.comp_n_folds, n_runs=args.comp_runs_per_item,
+        pred_strs=pred_strs)
 
     n_always = sum(1 for it in per_item if it['score'] == 1.0)
     n_never = sum(1 for it in per_item if it['score'] == 0.0)
