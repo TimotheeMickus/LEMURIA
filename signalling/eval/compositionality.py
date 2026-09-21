@@ -111,6 +111,8 @@ class HParams:
     patience: int = 2
     encoder: str = "bilstm"   # "bilstm" or "transformer" -- see Seq2Seq
     loss_per_example: bool = False  # False: per-token loss (default); True: per-example -- see _seq_loss
+    focal_gamma: float = 0.0  # 0.0: plain cross-entropy (default); >0: focal-loss down-weighting of
+                               # already-confident tokens -- see _token_losses / --comp_focal_gamma
 
 
 # Command-line arguments for the compositionality probe and its hyperparameter search. Kept next to
@@ -131,6 +133,14 @@ def add_compositionality_args(parser):
                         'short ones, e.g. atomic predicates, are under-weighted both by their rarity and by their '
                         'shorter targets). Affects both the training loss and the reported/early-stopping held-out loss.',
                         action='store_true')
+    group.add_argument('--comp_focal_gamma', help='probe: focal-loss exponent gamma >= 0 (default 0.0 = plain '
+                        'cross-entropy, i.e. off). Multiplies each token\'s loss by (1 - p_t)^gamma, where p_t is '
+                        'the probability the model assigns the correct token: this shrinks the loss (and gradient) '
+                        'from tokens the probe is already confident about, so a large easy majority (e.g. compound '
+                        'predicates) stops drowning out the gradient signal from rare hard cases (e.g. atomic '
+                        'predicates) simply by outnumbering them. Larger gamma downweights easy tokens more '
+                        'aggressively; 2.0 is the typical default from the original focal-loss paper.',
+                        type=float, default=0.0)
     group.add_argument('--comp_embed_dim', help='probe: token embedding dimension', type=int, default=64)
     group.add_argument('--comp_hidden_dim', help='probe: LSTM hidden dimension', type=int, default=64)
     group.add_argument('--comp_num_layers', help='probe: number of LSTM layers (encoder and decoder)', type=int, default=1)
@@ -161,6 +171,7 @@ def hparams_from_args(args):
         patience=args.comp_patience,
         encoder=args.comp_encoder,
         loss_per_example=args.comp_loss_per_example,
+        focal_gamma=args.comp_focal_gamma,
     )
 
 
@@ -356,30 +367,56 @@ def _exact_match(model, data, idx, spec, decode_batch=256):
 _MIN_DELTA = 1e-4
 
 
-# Per-example reconstruction loss: for each row, the mean cross-entropy over that row's own
-# (non-pad) tokens, then averaged across rows -- so a 1-token target (e.g. an atomic predicate) and
-# a 5-token one count equally, unlike plain per-token averaging where the longer target dominates.
-# logits: (B, T, V) ; target: (B, T) -> (B,)
-def _per_example_losses(logits, target, pad_id):
+# Per-token cross-entropy (B, T), masked to 0 at padding positions, optionally scaled by the
+# focal-loss modulating factor (1 - p_t)^gamma -- see --comp_focal_gamma. p_t = exp(-per_token_loss)
+# is the model's probability for the correct token, so the factor shrinks toward 0 for
+# already-confident (easy) tokens and stays near 1 for hard/wrong ones: an easy majority of
+# examples (e.g. compound predicates) stops dominating the (averaged) loss and gradient just by
+# outnumbering the hard minority (e.g. atomic predicates). gamma=0.0 (the default) is a no-op --
+# returned as-is, so callers that only need the gamma=0 case can skip this function entirely and
+# use the exact original fused computation instead (kept for bit-identical default behaviour).
+# logits: (B, T, V) ; target: (B, T) -> ((B, T), (B, T))  (masked per-token loss, mask)
+def _token_losses(logits, target, pad_id, gamma):
     per_token = nn.functional.cross_entropy(logits.transpose(1, 2), target, ignore_index=pad_id, reduction="none") # (B, T)
     mask = (target != pad_id).float()
-    return (per_token * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0) # (B,)
+    if(gamma != 0.0):
+        p_t = torch.exp(-per_token)
+        per_token = per_token * (1.0 - p_t).clamp(min=0.0).pow(gamma)
+    return per_token * mask, mask
+
+
+# Per-example reconstruction loss: for each row, the mean (optionally focal-scaled) cross-entropy
+# over that row's own (non-pad) tokens -- so a 1-token target (e.g. an atomic predicate) and a
+# 5-token one count equally, unlike plain per-token averaging where the longer target dominates.
+# logits: (B, T, V) ; target: (B, T) -> (B,)
+def _per_example_losses(logits, target, pad_id, gamma=0.0):
+    per_token, mask = _token_losses(logits, target, pad_id, gamma)
+    return per_token.sum(dim=1) / mask.sum(dim=1).clamp(min=1.0) # (B,)
 
 
 # The probe's reconstruction loss for one forward pass, per TOKEN (default) or per EXAMPLE (see
-# --comp_loss_per_example / HParams.loss_per_example) -- the single place both the training loss
-# and _val_loss's held-out loss go through, so the two stay consistent with each other.
+# --comp_loss_per_example / HParams.loss_per_example), optionally focal-scaled (--comp_focal_gamma)
+# -- the single place both the training loss and _val_loss's held-out loss go through, so the two
+# stay consistent with each other.
 # logits: (B, T, V) ; target: (B, T) -> scalar tensor.
-def _seq_loss(logits, target, pad_id, per_example):
+def _seq_loss(logits, target, pad_id, per_example, gamma=0.0):
     if(per_example):
-        return _per_example_losses(logits, target, pad_id).mean()
-    return nn.functional.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1), ignore_index=pad_id)
+        return _per_example_losses(logits, target, pad_id, gamma).mean()
+    if(gamma == 0.0):
+        # Exact original computation (a single fused library call) -- kept bit-identical to
+        # pre-focal-loss behaviour when the feature is off, rather than reimplemented via
+        # _token_losses's separate sum/count (mathematically equivalent, but not guaranteed to be
+        # bit-for-bit identical due to a different floating-point summation path).
+        return nn.functional.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1), ignore_index=pad_id)
+    per_token, mask = _token_losses(logits, target, pad_id, gamma)
+    return per_token.sum() / mask.sum().clamp(min=1.0)
 
 
 @torch.no_grad()
-def _val_loss(model, data, idx, spec, batch=512, per_example=False):
+def _val_loss(model, data, idx, spec, batch=512, per_example=False, focal_gamma=0.0):
     """Mean cross-entropy on `idx` (teacher forcing), aggregated across batches -- per TOKEN
-    (default) or per EXAMPLE (see --comp_loss_per_example), matching the training loss."""
+    (default) or per EXAMPLE (see --comp_loss_per_example), optionally focal-scaled
+    (--comp_focal_gamma), matching the training loss."""
     model.eval()
     device = data.src.device
     idx_t = torch.as_tensor(idx, dtype=torch.long, device=device)
@@ -389,15 +426,20 @@ def _val_loss(model, data, idx, spec, batch=512, per_example=False):
         logits = model(data.src[rows], data.src_len[rows], data.tgt_in[rows])
         target = data.tgt_out[rows]
         if(per_example):
-            total_loss += _per_example_losses(logits, target, spec.tgt_pad_id).sum().item()
+            total_loss += _per_example_losses(logits, target, spec.tgt_pad_id, focal_gamma).sum().item()
             total_count += rows.numel()
-        else:
+        elif(focal_gamma == 0.0):
+            # Exact original computation -- see the matching comment in _seq_loss.
             loss = nn.functional.cross_entropy(
                 logits.reshape(-1, logits.size(-1)), target.reshape(-1),
                 ignore_index=spec.tgt_pad_id, reduction="sum",
             )
             total_loss += loss.item()
             total_count += int((target != spec.tgt_pad_id).sum().item())
+        else:
+            per_token, mask = _token_losses(logits, target, spec.tgt_pad_id, focal_gamma)
+            total_loss += per_token.sum().item()
+            total_count += int(mask.sum().item())
     return total_loss / max(1, total_count)
 
 
@@ -447,7 +489,7 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
             for start in range(0, n_train, h.batch_size):
                 rows = order[start:start + h.batch_size]
                 logits = model(data.src[rows], data.src_len[rows], data.tgt_in[rows])
-                loss = _seq_loss(logits, data.tgt_out[rows], spec.tgt_pad_id, h.loss_per_example)
+                loss = _seq_loss(logits, data.tgt_out[rows], spec.tgt_pad_id, h.loss_per_example, h.focal_gamma)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -460,7 +502,7 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
                 else:
                     last_predicted[i] = predicted[i]
 
-            val = _val_loss(model, data, test_idx, spec, batch=eval_batch, per_example=h.loss_per_example)
+            val = _val_loss(model, data, test_idx, spec, batch=eval_batch, per_example=h.loss_per_example, focal_gamma=h.focal_gamma)
             if val < (best_val - _MIN_DELTA):
                 best_val = val
                 stale = 0
@@ -870,7 +912,7 @@ SEARCH_SPACE = {
 }
 
 
-def _sample_hparams(rng, max_epochs, patience, encoder, loss_per_example):
+def _sample_hparams(rng, max_epochs, patience, encoder, loss_per_example, focal_gamma):
     def pick(space):
         if isinstance(space, list):
             return space[int(rng.integers(len(space)))]
@@ -892,6 +934,7 @@ def _sample_hparams(rng, max_epochs, patience, encoder, loss_per_example):
         patience=patience,
         encoder=encoder,                     # fixed for the whole search, like max_epochs/patience -- not sampled
         loss_per_example=loss_per_example,   # ditto
+        focal_gamma=focal_gamma,             # ditto
     )
 
 
@@ -934,7 +977,7 @@ def main(global_args=None, remaining_args=None):
     best_score, best_h = None, None
     history = []
     for trial in range(args.comp_search_trials):
-        h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience, args.comp_encoder, args.comp_loss_per_example)
+        h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience, args.comp_encoder, args.comp_loss_per_example, args.comp_focal_gamma)
         score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.seed, return_epochs=True)
         history.append({"score": score, "loss": loss, "stopped_epochs": stopped_epochs, **asdict(h)})
         if (best_score is None) or (score > best_score):
