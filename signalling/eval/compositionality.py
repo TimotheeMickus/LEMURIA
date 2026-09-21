@@ -107,6 +107,7 @@ class HParams:
     dropout: float = 0.033
     lr: float = 3.3e-4
     batch_size: int = 512
+    min_epochs: int = 0
     max_epochs: int = 512
     patience: int = 2
     encoder: str = "bilstm"   # "bilstm" or "transformer" -- see Seq2Seq
@@ -147,6 +148,7 @@ def add_compositionality_args(parser):
     group.add_argument('--comp_dropout', help='probe: dropout', type=float, default=0.033)
     group.add_argument('--comp_lr', help='probe: learning rate (Adam)', type=float, default=3.3e-4)
     group.add_argument('--comp_batch_size', help='probe: batch size', type=int, default=512)
+    group.add_argument('--comp_min_epochs', help='probe: minimum training epochs per fold before early stopping is allowed to fire (default 0: no minimum, matching prior behaviour). Has no effect if set above --comp_max_epochs.', type=int, default=0)
     group.add_argument('--comp_max_epochs', help='probe: maximum training epochs per fold (early stopping usually stops earlier)', type=int, default=512)
     group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
     group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
@@ -167,6 +169,7 @@ def hparams_from_args(args):
         dropout=args.comp_dropout,
         lr=args.comp_lr,
         batch_size=args.comp_batch_size,
+        min_epochs=args.comp_min_epochs,
         max_epochs=args.comp_max_epochs,
         patience=args.comp_patience,
         encoder=args.comp_encoder,
@@ -452,7 +455,9 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
     epoch) rather than exact-match: exact-match sits at exactly 0 during warm-up until it
     jumps, so a patience clock on exact-match would kill any run that has not yet crossed
     that transition. Loss-based stopping tracks real convergence; we still *report* the
-    best exact-match, the quantity of interest.
+    best exact-match, the quantity of interest. It cannot fire before `h.min_epochs` (default 0,
+    i.e. no minimum -- see --comp_min_epochs) regardless of how early `h.patience` would otherwise
+    allow it to.
 
     `best_val` -- the loss value that actually reaches every caller (the `loss=...` printed by
     compositionality_loo/compositionality_search, and compositionality()'s returned mean_loss) --
@@ -508,7 +513,7 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
                 stale = 0
             else:
                 stale += 1
-                if stale >= h.patience:
+                if (stale >= h.patience) and (stopped_epoch >= h.min_epochs):
                     break
     return best_acc, best_val, stopped_epoch, ever_correct, last_predicted
 
@@ -912,7 +917,7 @@ SEARCH_SPACE = {
 }
 
 
-def _sample_hparams(rng, max_epochs, patience, encoder, loss_per_example, focal_gamma):
+def _sample_hparams(rng, min_epochs, max_epochs, patience, encoder, loss_per_example, focal_gamma):
     def pick(space):
         if isinstance(space, list):
             return space[int(rng.integers(len(space)))]
@@ -930,6 +935,7 @@ def _sample_hparams(rng, max_epochs, patience, encoder, loss_per_example, focal_
         dropout=pick(SEARCH_SPACE["dropout"]),
         lr=pick(SEARCH_SPACE["lr"]),
         batch_size=int(pick(SEARCH_SPACE["batch_size"])),
+        min_epochs=min_epochs,
         max_epochs=max_epochs,
         patience=patience,
         encoder=encoder,                     # fixed for the whole search, like max_epochs/patience -- not sampled
@@ -977,7 +983,7 @@ def main(global_args=None, remaining_args=None):
     best_score, best_h = None, None
     history = []
     for trial in range(args.comp_search_trials):
-        h = _sample_hparams(rng, args.comp_max_epochs, args.comp_patience, args.comp_encoder, args.comp_loss_per_example, args.comp_focal_gamma)
+        h = _sample_hparams(rng, args.comp_min_epochs, args.comp_max_epochs, args.comp_patience, args.comp_encoder, args.comp_loss_per_example, args.comp_focal_gamma)
         score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.seed, return_epochs=True)
         history.append({"score": score, "loss": loss, "stopped_epochs": stopped_epochs, **asdict(h)})
         if (best_score is None) or (score > best_score):
