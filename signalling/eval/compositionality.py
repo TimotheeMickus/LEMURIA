@@ -1013,7 +1013,7 @@ def _render_tokens(ids, id2tok):
     return " ".join((id2tok[i] if ((i is not None) and (0 <= i < len(id2tok)) and (id2tok[i] is not None)) else str(i)) for i in ids)
 
 
-def _write_per_item_csv(path, pred_strs, pred_idxs, src_seqs, per_item, id2tok, notation, meta=None):
+def _write_per_item_csv(path, pred_strs, pred_idxs, src_seqs, tgt_seqs, per_item, id2tok, meta=None):
     """meta: optional dict of run/probe info (e.g. the HParams used, n_folds, seed), written as
     leading '# key: value' comment lines before the CSV header -- readable as plain text, and
     skippable by e.g. pandas.read_csv(path, comment='#')."""
@@ -1022,14 +1022,14 @@ def _write_per_item_csv(path, pred_strs, pred_idxs, src_seqs, per_item, id2tok, 
         for k, v in (meta or {}).items():
             f.write(f"# {k}: {v}\n")
         writer = _csv.writer(f)
-        writer.writerow(["pred_idx", "pred_str", "target_notation", "signal", "prediction", "loss", "score"])
+        writer.writerow(["pred_idx", "pred_str", "target", "signal", "prediction", "loss", "score"])
         for it in per_item:
             i = it['index']
             predicted = "" if (it['predicted'] is None) else _render_tokens(it['predicted'], id2tok)
             writer.writerow([
                 "" if (pred_idxs[i] is None) else pred_idxs[i],
                 pred_strs[i],
-                notation,
+                _render_tokens(tgt_seqs[i], id2tok),
                 " ".join(map(str, src_seqs[i])),
                 predicted,
                 f"{it['loss']:.4f}",
@@ -1108,6 +1108,7 @@ def main_loo(global_args=None, remaining_args=None):
         out_csv = args.comp_signals_csv.with_name(args.comp_signals_csv.stem + ".comp_loo.csv")
     meta = {f"comp_{k}": v for k, v in asdict(hparams).items()}
     meta.update({
+        "comp_target_notation": args.comp_target_notation,  # governs the 'target'/'prediction' columns below
         "n_folds": n_folds,
         "comp_runs_per_item": args.comp_runs_per_item,
         "seed": args.seed,
@@ -1115,7 +1116,7 @@ def main_loo(global_args=None, remaining_args=None):
         "aggregate_exact_match": f"{mean_acc:.4f}",
         "aggregate_loss": f"{mean_loss:.4f}",
     })
-    _write_per_item_csv(out_csv, pred_strs, pred_idxs, [p[0] for p in pairs], per_item, id2tok, args.comp_target_notation,
+    _write_per_item_csv(out_csv, pred_strs, pred_idxs, [p[0] for p in pairs], [p[1] for p in pairs], per_item, id2tok,
                         meta=meta)
     print(f"[comp-loo] wrote per-signal results to {out_csv}")
 
