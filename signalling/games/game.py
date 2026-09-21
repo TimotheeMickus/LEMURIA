@@ -83,6 +83,11 @@ class Game(metaclass=ABCMeta):
     def autologger(self):
         pass
 
+    # Fetches the batch for one training step. Overridable so a concrete game can customize how
+    # training batches are sourced (e.g. AlexBeth's --replay_period) without touching this loop.
+    def _get_training_batch(self, data_iterator):
+        return data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
+
     # Trains the model for one epoch of `steps_per_epoch` steps (each step processes a batch)
     def train_epoch(self, data_iterator, epoch_index, steps_per_epoch=1000, event_writer=None):
         """
@@ -102,7 +107,7 @@ class Game(metaclass=ABCMeta):
             for iter_index in range(start_index, end_index):
                 self.start_episode()
 
-                batch = data_iterator.get_batch(data_type='train', keep_category=self.autologger.log_lang_progress) # If `self.autologger.log_lang_progress` is True, the autologger will need to access the categories of the images in the batch.
+                batch = self._get_training_batch(data_iterator)
 
                 optimization, *external_output = self.compute_interaction(batch, epoch_index=epoch_index, iter_index=iter_index)
 

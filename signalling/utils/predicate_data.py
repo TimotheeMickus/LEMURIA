@@ -3,6 +3,7 @@ import torch
 import itertools
 import random
 
+from collections import OrderedDict, namedtuple
 from multiprocessing import shared_memory
 
 try:
@@ -459,6 +460,79 @@ class FailureBasedDistribution:
 
         return np.random.choice(a=allowed_predicates_idx, size=nb, p=dist)
 
+
+# --------------------------------------------------------------------------- #
+# --replay_period: replaying recently-failed training instances
+# --------------------------------------------------------------------------- #
+
+# A single training instance (one batch row: a predicate plus its full candidate set), stored in
+# its already graph-converted form (see GraphConverter.convert) -- exactly what a normal batch row
+# looks like once it comes back from Dataset.get_batch, so a ReplayInstance can be dropped straight
+# into a replay batch with no candidate regeneration needed. All fields are plain (nested) Python
+# lists/ints, never tensors or Candidate objects: this only ever lives in the main process (see
+# Dataset.build_replay_batch), so there is no multiprocessing-serialisation concern to design
+# around, unlike Batch itself.
+ReplayInstance = namedtuple("ReplayInstance", ["predicate_idx", "node_idx", "edge_idx", "graph_sizes", "truth"])
+
+
+# A hashable identity for a training instance, used to detect "the same instance failed again"
+# (rather than "the same predicate happened to recur with different candidates"). Derived from the
+# already-converted graph indices rather than from the source Candidate objects, since Candidate/
+# Property/Value objects are exactly the things Batch itself avoids carrying around (see Batch's
+# docstring comment) and are not needed here anyway -- two instances with the same predicate and
+# the same graph encoding of their candidates are the same instance.
+# predicate_idx: int ; node_idx, edge_idx: (nested) list[int] for one batch row.
+def replay_instance_key(predicate_idx, node_idx, edge_idx):
+    return (
+        int(predicate_idx),
+        tuple(tuple(row) for row in node_idx),
+        tuple(tuple(tuple(r) for r in mat) for mat in edge_idx),
+    )
+
+
+class RecentFailuresBuffer:
+    """
+    Bounded, deduplicated record of the most recently *failed* training instances, used by
+    --replay_period to build "replay" batches that specifically re-test instances the model is
+    currently getting wrong, instead of a fresh random batch.
+
+    Semantics:
+      * `upsert` records a fresh failure: if the instance is already present, its old occurrence is
+        dropped and it is reinserted as the most recent -- so a repeatedly-failing instance stays
+        "young" indefinitely (as long as it keeps being retested and keeps failing), rather than
+        ageing out because of unrelated failures elsewhere.
+      * `remove` drops an instance as soon as it is answered correctly again, from any batch.
+      * Capacity (`max_size`) is enforced only on a genuine net-new insertion -- renewing an
+        existing entry never grows the buffer -- by evicting the single oldest entry.
+    This is the standard LRU-cache technique (a dict for O(1) key lookup/removal, ordered so the
+    oldest/newest ends are also O(1) to find), just with removals also triggered externally (on
+    success) rather than only by capacity pressure.
+    """
+    def __init__(self, max_size):
+        assert (max_size > 0), f"max_size must be positive, got {max_size}."
+        self.max_size = max_size
+        self._entries = OrderedDict() # key -> ReplayInstance, oldest-first
+
+    def __len__(self):
+        return len(self._entries)
+
+    # key: hashable (see replay_instance_key) ; payload: ReplayInstance
+    def upsert(self, key, payload):
+        is_new = (key not in self._entries)
+        if(not is_new): del self._entries[key] # drop the old occurrence...
+        self._entries[key] = payload           # ...then (re)insert as most recent.
+        if(is_new and (len(self._entries) > self.max_size)):
+            self._entries.popitem(last=False) # evict the oldest.
+
+    # No-op if `key` is not currently in the buffer.
+    def remove(self, key):
+        self._entries.pop(key, None)
+
+    # All currently-stored instances (<= max_size of them), oldest-first. Read-only.
+    def payloads(self):
+        return list(self._entries.values())
+
+
 class GraphConverter:
     object_token='<obj>'
     padding_token='<pad>'
@@ -810,6 +884,67 @@ class Dataset(SeqAsyncDataset):
         #    size, data_type, allow_indeterminate, num_candidates, candidate_sampling, # request arguments
         #    self.overfit_pool, self.predicates, self.properties # resource arguments
         #)
+
+    # Assembles a batch for --replay_period: `buffer_instances` (already-graph-converted
+    # ReplayInstance·s, typically RecentFailuresBuffer.payloads()) are used as-is -- no candidate
+    # regeneration needed -- and any shortfall against `size` is padded with freshly generated rows,
+    # exactly like a normal batch. Always synchronous: unlike get_batch, this never goes through the
+    # asynchronous worker pipeline (there is nothing for a worker to do for the replayed rows, and
+    # the padding portion alone is not worth the pipeline's request/prefetch machinery -- see
+    # --replay_period's design discussion).
+    # buffer_instances: list[ReplayInstance]
+    def build_replay_batch(self, buffer_instances, size=None, allow_indeterminate=None, num_candidates=None,
+                            predicate_sampling=None, candidate_sampling=None, device=None, pin_memory=False,
+                            allowed_predicates_idx=None):
+        if(size is None): size = self.batch_size
+        if(allow_indeterminate is None): allow_indeterminate = self.allow_indeterminate
+        assert (not allow_indeterminate), ("--replay_period does not support --allow_indeterminate: candidate "
+            "graphs are only guaranteed the same padding width across replayed and freshly generated rows "
+            "when every candidate has every property assigned.")
+        if(num_candidates is None): num_candidates = self.num_candidates
+        if(predicate_sampling is None): predicate_sampling = self.predicate_sampling
+        if(candidate_sampling is None): candidate_sampling = self.candidate_sampling
+
+        if(allowed_predicates_idx is None):
+            if not np.all(self.predicate_sampling_mask):
+                allowed_predicates_idx = tuple(np.flatnonzero(self.predicate_sampling_mask).tolist())
+
+        used = list(buffer_instances)[:size]
+        predicate_idx = [inst.predicate_idx for inst in used]
+        node_idx = [inst.node_idx for inst in used]
+        edge_idx = [inst.edge_idx for inst in used]
+        graph_sizes = [inst.graph_sizes for inst in used]
+        truths = [inst.truth for inst in used]
+
+        n_pad = size - len(used)
+        if(n_pad > 0):
+            pad_idx, pad_predicates = self.selectPredicates(n_pad, predicate_sampling, allowed_predicates_idx=allowed_predicates_idx)
+            pad_candidates, pad_truths = [], []
+            for predicate in pad_predicates:
+                if(candidate_sampling == 'balanced'):
+                    candidates, truth = self.generateCandidatesBalanced(predicate, num_candidates, allow_indeterminate)
+                elif(candidate_sampling == 'random'):
+                    candidates, truth = self.generateCandidates(predicate, num_candidates, allow_indeterminate)
+                else:
+                    raise ValueError(f"Candidate sampling strategy unknown: {candidate_sampling}.")
+                pad_candidates.append(candidates)
+                pad_truths.append(truth)
+
+            pad_node_idx, pad_edge_idx, pad_graph_sizes = self.graph_converter.convert(pad_candidates)
+
+            predicate_idx = predicate_idx + [int(i) for i in pad_idx]
+            node_idx = node_idx + list(pad_node_idx)
+            edge_idx = edge_idx + list(pad_edge_idx)
+            graph_sizes = graph_sizes + list(pad_graph_sizes)
+            truths = truths + pad_truths
+
+        batch = Batch(size=size, predicate=[self.predicates[i] for i in predicate_idx], predicate_idx=predicate_idx,
+                      candidate=None, node_idx=node_idx, edge_idx=edge_idx, graph_sizes=graph_sizes, candidate_truth=truths)
+
+        if(device is None): device = self.device
+        batch.tensorize(device=device, pin_memory=pin_memory)
+
+        return batch
 
     @staticmethod
     def _generate_batch(

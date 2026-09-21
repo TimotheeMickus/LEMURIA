@@ -209,6 +209,9 @@ def get_args(remaining_args=None):
     # Population variant (defined in games/population.py).
     add_population_args(arg_parser, 'askers', 'retrievers')
 
+    group = arg_parser.add_argument_group(title='Replay buffer', description='arguments relative to replaying recently-failed training instances')
+    group.add_argument('--replay_period', help='every N-th training batch is a "replay" batch built from the buffer of recently-failed training instances (a predicate plus its full candidate set) instead of a fresh random one; the rest are unchanged. Unset (default) disables the feature entirely, leaving training exactly as without this flag. Requires pop_size 1-1 (i.e. no --pop_size/--pop_reset_period, or explicitly 1-1) and is incompatible with --allow_indeterminate and --overfit.', type=int, default=None)
+
     # Training loop (shared) + a predicate-specific training knob.
     training = cli.add_training_args(arg_parser)
     training.add_argument('--keep_training', help='after training, if max accuracy is below 1.0, interactively ask for extra epochs (0 to stop)', action='store_true')
@@ -234,6 +237,26 @@ def get_args(remaining_args=None):
     add_compositionality_args(arg_parser)
 
     args = arg_parser.parse_args(remaining_args)
+
+    if(args.replay_period is not None):
+        from .games.population import parse_pop_pair
+        if(args.replay_period <= 0):
+            raise ValueError(f"--replay_period must be a positive integer, got {args.replay_period}.")
+        if((args.pop_size is not None) or (args.pop_reset_period is not None)):
+            n, m = parse_pop_pair(args.pop_size, default=(2, 2)) # matches AlexBethPopulation's own default_size
+            if((n, m) != (1, 1)):
+                raise ValueError(
+                    f"--replay_period requires a population of size 1-1 (i.e. no --pop_size/--pop_reset_period at "
+                    f"all, or --pop_size 1-1); got pop_size={args.pop_size!r}, pop_reset_period={args.pop_reset_period!r} "
+                    f"(resolves to {n}-{m}). The replay buffer assumes a single, stable asker/retriever pair -- an "
+                    f"instance that failed against one population pair may not even be hard for another.")
+        if(args.allow_indeterminate):
+            raise ValueError("--replay_period is incompatible with --allow_indeterminate (candidate graphs are only "
+                "guaranteed the same padding width across replayed and freshly generated rows when every candidate "
+                "has every property assigned).")
+        if(args.overfit):
+            raise ValueError("--replay_period is incompatible with --overfit (the replay buffer's padding rows are "
+                "freshly generated and would not respect the fixed overfitting pool).")
 
     # Snapshot of the parser defaults, used by `build_run_name` so that a run name only advertises the arguments that were actually changed.
     args._arg_defaults = vars(arg_parser.parse_args([]))

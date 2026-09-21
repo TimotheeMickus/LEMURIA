@@ -125,6 +125,14 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         self.debug = args.debug
         self.signal_dump_dir = signal_dump_dir # str|None
 
+        # --replay_period: every `_replay_period`-th training batch is a "replay" batch built from
+        # `_replay_buffer` (recently-failed training instances) instead of a fresh random one. None
+        # (default; also the case for checkpoints saved before this feature existed) disables it
+        # entirely -- _get_training_batch then falls back to the exact previous behaviour.
+        self._replay_period = getattr(args, 'replay_period', None)
+        self._replay_step = 0
+        self._replay_buffer = predicate_data.RecentFailuresBuffer(max_size=dataset.batch_size) if (self._replay_period is not None) else None
+
         # Pretraining: either None (no pretraining) or an object encapsulating the whole procedure.
         # The driver runs it via game.run_pretraining(); load() never does, so loading a trained
         # model does not re-pretrain.
@@ -312,10 +320,50 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
 
         return asker_outcome, retriever_outcome
 
+    # Overrides Game._get_training_batch. See --replay_period.
+    def _get_training_batch(self, data_iterator):
+        if(self._replay_period is None):
+            return super()._get_training_batch(data_iterator)
+
+        self._replay_step += 1
+        if((self._replay_step % self._replay_period) != 0):
+            return super()._get_training_batch(data_iterator)
+
+        return data_iterator.build_replay_batch(self._replay_buffer.payloads())
+
+    # Updates the --replay_period failure buffer from one training batch (random or replay alike --
+    # this does not distinguish between them, matching the agreed semantics: any training instance
+    # that fails is upserted, any that succeeds is removed, regardless of where it came from).
+    # An "instance" is one batch row (a predicate plus its full candidate set); it counts as correct
+    # only if the retriever's argmax decision is right for every one of its candidates, exactly like
+    # evaluate()'s own accuracy computation. Pure bookkeeping: no gradient flows through this call,
+    # and it never influences the actual training loss.
+    # batch: Batch (post-tensorize) ; retriever_scores, truth_targets: (batch, candidates)
+    @torch.no_grad()
+    def _update_replay_buffer(self, batch, retriever_scores, truth_targets):
+        row_correct = torch.isclose(misc.selecting(retriever_scores, argmax=True)["actions"], truth_targets).all(dim=1).tolist()
+
+        predicate_idx = batch.predicate_idx.tolist()
+        node_idx = batch.node_idx.tolist()
+        edge_idx = batch.edge_idx.tolist()
+        graph_sizes = batch.graph_sizes.tolist()
+        truths = truth_targets.tolist()
+
+        for i in range(batch.size):
+            key = predicate_data.replay_instance_key(predicate_idx[i], node_idx[i], edge_idx[i])
+            if(row_correct[i]):
+                self._replay_buffer.remove(key)
+            else:
+                self._replay_buffer.upsert(key, predicate_data.ReplayInstance(
+                    predicate_idx[i], node_idx[i], edge_idx[i], graph_sizes[i], truths[i]))
+
     # batch: Batch
     def compute_interaction(self, batch, **kwargs):
         asker_outcome, retriever_outcome = self(batch)
         truth_targets = batch.candidate_truth
+
+        if(self._replay_buffer is not None):
+            self._update_replay_buffer(batch, retriever_outcome.scores, truth_targets)
 
         # Alex's part
         (asker_loss, asker_perf, asker_rewards) = self.compute_asker_loss(asker_outcome, retriever_outcome.scores, truth_targets, meanings=batch.predicate_idx)
