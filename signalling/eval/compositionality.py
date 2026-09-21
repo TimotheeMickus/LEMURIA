@@ -532,9 +532,12 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
     Returns (mean_acc, mean_loss, per_item). mean_acc/mean_loss are the mean over runs of the
     per-run fold-averaged score/loss, exactly as `compositionality` computes them (so the two
     functions' aggregate numbers are directly comparable). per_item is a list aligned with `pairs`,
-    each entry a dict: {'index': i, 'score': float in [0, 1], 'n_correct': int, 'n_runs': int,
-    'predicted': list[int] or None}. 'predicted' is the most recent wrong decoding seen for that
-    item (None if it was recovered in every run).
+    each entry a dict: {'index': i, 'score': float in [0, 1], 'loss': float, 'n_correct': int,
+    'n_runs': int, 'predicted': list[int] or None}. 'score'/'loss' are each item's own held-out
+    exact-match/loss (see _run_one_fold_detailed), averaged over the `n_runs` repeats -- exact for
+    leave-one-out (n_folds == n, the default: each fold IS that one item), an average over its
+    fold's other held-out items otherwise. 'predicted' is the most recent wrong decoding seen for
+    that item (None if it was recovered in every run).
     """
     n = len(pairs)
     n_folds = n if (n_folds is None) else n_folds
@@ -545,6 +548,7 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
 
     data = _Data(pairs, spec, device)
     correct_counts = [0] * n
+    loss_sum = [0.0] * n
     last_predicted = [None] * n
     run_scores, run_losses = [], []
 
@@ -570,6 +574,7 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
             fold_losses.append(val_loss)
             for local_i, global_i in enumerate(test_idx):
                 global_i = int(global_i)
+                loss_sum[global_i] += val_loss
                 if ever_correct[local_i]:
                     correct_counts[global_i] += 1
                 else:
@@ -590,6 +595,7 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
         {
             'index': i,
             'score': correct_counts[i] / n_runs,
+            'loss': loss_sum[i] / n_runs,
             'n_correct': correct_counts[i],
             'n_runs': n_runs,
             'predicted': (None if (correct_counts[i] == n_runs) else last_predicted[i]),
@@ -973,19 +979,18 @@ def _write_per_item_csv(path, pred_strs, pred_idxs, src_seqs, per_item, id2tok, 
         for k, v in (meta or {}).items():
             f.write(f"# {k}: {v}\n")
         writer = _csv.writer(f)
-        writer.writerow(["pred_idx", "pred_str", "signal", "target_notation", "score", "n_correct", "n_runs", "predicted"])
+        writer.writerow(["pred_idx", "pred_str", "target_notation", "signal", "prediction", "loss", "score"])
         for it in per_item:
             i = it['index']
             predicted = "" if (it['predicted'] is None) else _render_tokens(it['predicted'], id2tok)
             writer.writerow([
                 "" if (pred_idxs[i] is None) else pred_idxs[i],
                 pred_strs[i],
-                " ".join(map(str, src_seqs[i])),
                 notation,
-                f"{it['score']:.4f}",
-                it['n_correct'],
-                it['n_runs'],
+                " ".join(map(str, src_seqs[i])),
                 predicted,
+                f"{it['loss']:.4f}",
+                f"{it['score']:.4f}",
             ])
 
 
