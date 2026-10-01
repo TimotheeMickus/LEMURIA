@@ -152,12 +152,19 @@ def add_compositionality_args(parser):
                         '(1 - p_t) / (1 - p_worst), same endpoints (1 for the worst token, in [0, 1] for the rest) '
                         'via a different curve in between. Only has an effect when --comp_focal_gamma > 0.',
                         choices=['absolute', 'difference', 'ratio'], default='absolute')
-    group.add_argument('--comp_no_normalization', help='probe: skip the calibration of the compositionality loss. '
-                        'By default (with --eval_compositionality), before training the probe is also run on the control '
+    group.add_argument('--eval_encodability', help='during evaluation, measure the encodability of the emergent language: '
+                        'the same probe as --eval_compositionality (same --comp_* hyperparameters), but in the other direction, '
+                        'i.e. trained to produce the emergent signal from the predicate in Polish notation. Logged as '
+                        '"eval/encodability_{acc,loss}" (and "eval/encodability_loss_normalized", using the same two calibration '
+                        'values as the compositionality loss, unless --comp_no_normalization). Independent of --eval_compositionality.',
+                        action='store_true')
+    group.add_argument('--comp_no_normalization', help='probe: skip the calibration of the compositionality (and encodability) loss. '
+                        'By default (with --eval_compositionality or --eval_encodability), before training the probe is also run on the control '
                         'language (signal = reverse-Polish encoding of the predicate) and on a random permutation of it '
                         '(the same signals randomly re-assigned to predicates), and "eval/compositionality_loss_normalized" '
                         '= (loss - control_loss) / (permuted_loss - control_loss) is logged alongside '
-                        '"eval/compositionality_loss" (0 = as good as the control language, 1 = as bad as its permutation). '
+                        '"eval/compositionality_loss" (0 = as good as the control language, 1 = as bad as its permutation); '
+                        'likewise "eval/encodability_loss_normalized" with --eval_encodability (same two calibration values). '
                         'With this flag, neither the calibration nor the normalised loss is computed.',
                         action='store_true')
     group.add_argument('--comp_embed_dim', help='probe: token embedding dimension', type=int, default=64)
@@ -700,10 +707,13 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
 # ----------------------------------------------------------------------------- #
 
 @torch.no_grad()
-def emergent_pairs(asker, dataset, device, batch_size=256):
+def emergent_pairs(asker, dataset, device, batch_size=256, target="meaning"):
     """
     (predicate, emergent-signal) pairs: run the asker (eval/argmax) on every predicate
     index and pair each produced signal with the Polish encoding of the predicate.
+    target: "meaning" (the default; compositionality): src = signal, tgt = Polish predicate.
+        "signal" (encodability): src = Polish predicate, tgt = signal without its trailing EOS
+        (the probe appends its own EOS, here the asker's EOS id).
     Returns (pairs, spec).
     """
     vocab = PredicateVocab(dataset)
@@ -723,9 +733,23 @@ def emergent_pairs(asker, dataset, device, batch_size=256):
     if was_training:
         asker.train()
 
-    targets = [vocab.encode(pred.polish()) for pred in dataset.predicates]
-    pairs = list(zip(signals, targets))
+    meanings = [vocab.encode(pred.polish()) for pred in dataset.predicates]
 
+    if(target == "signal"):
+        # Every emergent signal ends with exactly one EOS (forced at the maximum length).
+        signals = [(sig[:-1] if (sig[-1] == asker.eos_index) else sig) for sig in signals]
+        pairs = list(zip(meanings, signals))
+        spec = Spec(
+            src_vocab_size=vocab.size,
+            src_pad_id=vocab.pad_id,
+            tgt_vocab_size=asker.alphabet_size,   # base_alphabet_size + 3, covers EOS, padding and BOS
+            tgt_pad_id=asker.padding_idx,
+            tgt_bos_id=asker.bos_index,
+            tgt_eos_id=asker.eos_index,
+        )
+        return pairs, spec
+
+    pairs = list(zip(signals, meanings))
     spec = Spec(
         src_vocab_size=asker.alphabet_size,   # base_alphabet_size + 3, covers every symbol id
         src_pad_id=asker.padding_idx,
@@ -735,6 +759,11 @@ def emergent_pairs(asker, dataset, device, batch_size=256):
         tgt_eos_id=vocab.eos_id,
     )
     return pairs, spec
+
+
+def swap_pairs(pairs):
+    """Swaps src and tgt of every pair. Only valid as-is when src and tgt share a vocabulary (e.g. the control languages, whose spec is then unchanged)."""
+    return [(tgt, src) for (src, tgt) in pairs]
 
 
 def reverse_polish_pairs(dataset):

@@ -98,9 +98,11 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
         # Compositionality probe (biLSTM->LSTM seq2seq): measured during evaluation when enabled.
         self.eval_compositionality = args.eval_compositionality
-        self._comp_hparams = compositionality.hparams_from_args(args) if self.eval_compositionality else None
-        # Calibration of the compositionality loss (disabled by --comp_no_normalization): probe losses on the control language and on its random permutation, computed once, lazily, at the first evaluation (i.e. the one before training). (control_loss, permuted_loss) once computed.
-        self._comp_normalize = self.eval_compositionality and (not getattr(args, "comp_no_normalization", False))
+        # Encodability probe: the same probe in the other direction (predicate -> emergent signal), with the same hyperparameters.
+        self.eval_encodability = getattr(args, "eval_encodability", False)
+        self._comp_hparams = compositionality.hparams_from_args(args) if (self.eval_compositionality or self.eval_encodability) else None
+        # Calibration of the compositionality (and encodability) loss (disabled by --comp_no_normalization): probe losses on the control language and on its random permutation, computed once, lazily, at the first evaluation (i.e. the one before training). (control_loss, permuted_loss) once computed. Shared by both directions (the two directions are equally hard on the control languages).
+        self._comp_normalize = (self.eval_compositionality or self.eval_encodability) and (not getattr(args, "comp_no_normalization", False))
         self._comp_calibration = None
         # DEBUG FEATURE (--eval_oracle_language): replace the emergent language with a known-compositional "control"/oracle language (the reverse-Polish encoding of the predicate during fancy evaluation. This is a debugging/diagnostic aid; it shows what the language metrics report for a language that is compositional by construction (an upper-bound sanity check). Applied to the compositionality probe and topographic similarity.
         self.eval_oracle_language = args.eval_oracle_language
@@ -263,6 +265,9 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             "eval/compositionality_acc",
             "eval/compositionality_loss",
             "eval/compositionality_loss_normalized",
+            "eval/encodability_acc",
+            "eval/encodability_loss",
+            "eval/encodability_loss_normalized",
             "eval/scrambling-resistance",
             "eval/topsim_extensional_norm_levenshtein",
             "eval/topsim_extensional_norm_levenshtein_p",
@@ -499,13 +504,15 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         return (loss, perf)
 
     # Measures the compositionality of the emergent language: the asker produces one signal per predicate, and a seq2seq probe is trained (5-fold CV, early stopping) to reconstruct the predicate in Polish notation from the signal. Returns the mean over folds of each fold's best held-out exact-match rate (a float in [0, 1]) and best held-out loss, as an (accuracy, loss) pair.
-    def _compute_compositionality(self):
+    # target="signal" measures encodability instead: the same probe, trained to produce the signal from the predicate in Polish notation.
+    def _compute_compositionality(self, target="meaning"):
         device = next(self.asker.parameters()).device
         if(self.eval_oracle_language):
             # Oracle: feed the probe the reverse-Polish encoding of each predicate instead of the emergent signal (targets stay in Polish notation); this is exactly the compositional control language, so the probe should reconstruct it near-perfectly.
             pairs, spec = compositionality.reverse_polish_pairs(self._dataset)
+            if(target == "signal"): pairs = compositionality.swap_pairs(pairs)
         else:
-            pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device)
+            pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device, target=target)
         return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._args.run_seed)
 
     # Probe losses (control_loss, permuted_loss) on the control language (reverse-Polish signals) and on its random permutation (same signals randomly re-assigned to predicates). Computed once and cached; used to normalise the compositionality loss so that the control language maps to 0 and its permutation to 1.
@@ -690,17 +697,20 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         log('eval/vocab_used', eval_vocab_used)
 
         # Compositionality: can a generic seq2seq learner recover each predicate (in Polish notation) from its emergent signal? Reported as the 5-fold-CV exact-match rate ('eval/compositionality_acc') and the corresponding held-out loss ('eval/compositionality_loss').
-        compositionality_acc = float("nan")
-        compositionality_loss = float("nan")
-        compositionality_loss_normalized = float("nan")
-        if(self.eval_compositionality):
-            if(self._comp_normalize): control_loss, permuted_loss = self._compositionality_calibration() # Computed (and printed) once, at the first evaluation, i.e. before training.
-            compositionality_acc, compositionality_loss = self._compute_compositionality()
-            log('eval/compositionality_acc', compositionality_acc)
-            log('eval/compositionality_loss', compositionality_loss)
-            if(self._comp_normalize):
-                compositionality_loss_normalized = (compositionality_loss - control_loss) / (permuted_loss - control_loss)
-                log('eval/compositionality_loss_normalized', compositionality_loss_normalized)
+        # Encodability: the same probe in the other direction (can it produce each emergent signal from the predicate?), reported as 'eval/encodability_{acc,loss}'.
+        # Both losses are also normalised with the same two calibration values ('eval/{compositionality,encodability}_loss_normalized').
+        probe_results = {} # metric prefix -> (acc, loss, normalized loss)
+        if(self._comp_normalize): control_loss, permuted_loss = self._compositionality_calibration() # Computed (and printed) once, at the first evaluation, i.e. before training.
+        for prefix, enabled, target in [("compositionality", self.eval_compositionality, "meaning"), ("encodability", self.eval_encodability, "signal")]:
+            acc, loss, loss_normalized = float("nan"), float("nan"), float("nan")
+            if(enabled):
+                acc, loss = self._compute_compositionality(target=target)
+                log(f'eval/{prefix}_acc', acc)
+                log(f'eval/{prefix}_loss', loss)
+                if(self._comp_normalize):
+                    loss_normalized = (loss - control_loss) / (permuted_loss - control_loss)
+                    log(f'eval/{prefix}_loss_normalized', loss_normalized)
+            probe_results[prefix] = (acc, loss, loss_normalized)
         
         avg_accuracy = eval_accuracy
         if(avg_accuracy > self.max_perf): self.max_perf = avg_accuracy
@@ -829,9 +839,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
                 "eval/asker_entropy": float(eval_asker_entropy),
                 "eval/signal_length": float(eval_signal_length),
                 "eval/vocab_used": eval_vocab_used,
-                "eval/compositionality_acc": float(compositionality_acc),
-                "eval/compositionality_loss": float(compositionality_loss),
-                "eval/compositionality_loss_normalized": float(compositionality_loss_normalized),
+                **{f"eval/{prefix}_{name}": float(value) for prefix, values in probe_results.items() for name, value in zip(("acc", "loss", "loss_normalized"), values)},
                 "eval/scrambling-resistance": scrambling_ratio,
                 "eval/topsim_extensional_norm_levenshtein": topsim_ext_levenshtein,
                 "eval/topsim_extensional_norm_levenshtein_p": topsim_ext_levenshtein_p,

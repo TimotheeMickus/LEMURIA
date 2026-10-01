@@ -243,6 +243,9 @@ def setup_wandb_logging(autologger, enabled, project, run_name, args):
     wandb.define_metric("eval/compositionality_loss", summary="min")
     wandb.define_metric("eval/compositionality_loss_normalized", summary="min")
     wandb.define_metric("eval/compositionality_acc", summary="max")
+    wandb.define_metric("eval/encodability_loss", summary="min")
+    wandb.define_metric("eval/encodability_loss_normalized", summary="min")
+    wandb.define_metric("eval/encodability_acc", summary="max")
 
     write_to_summary = autologger._write
 
