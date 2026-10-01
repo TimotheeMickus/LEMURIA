@@ -241,6 +241,7 @@ def setup_wandb_logging(autologger, enabled, project, run_name, args):
     # so a W&B sweep optimising 'eval/compositionality_loss' targets the best language the run reached
     # rather than a noisy final-epoch value. Harmless when these metrics are never logged.
     wandb.define_metric("eval/compositionality_loss", summary="min")
+    wandb.define_metric("eval/compositionality_loss_normalized", summary="min")
     wandb.define_metric("eval/compositionality_acc", summary="max")
 
     write_to_summary = autologger._write

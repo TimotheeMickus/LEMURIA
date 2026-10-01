@@ -152,6 +152,14 @@ def add_compositionality_args(parser):
                         '(1 - p_t) / (1 - p_worst), same endpoints (1 for the worst token, in [0, 1] for the rest) '
                         'via a different curve in between. Only has an effect when --comp_focal_gamma > 0.',
                         choices=['absolute', 'difference', 'ratio'], default='absolute')
+    group.add_argument('--comp_no_normalization', help='probe: skip the calibration of the compositionality loss. '
+                        'By default (with --eval_compositionality), before training the probe is also run on the control '
+                        'language (signal = reverse-Polish encoding of the predicate) and on a random permutation of it '
+                        '(the same signals randomly re-assigned to predicates), and "eval/compositionality_loss_normalized" '
+                        '= (loss - control_loss) / (permuted_loss - control_loss) is logged alongside '
+                        '"eval/compositionality_loss" (0 = as good as the control language, 1 = as bad as its permutation). '
+                        'With this flag, neither the calibration nor the normalised loss is computed.',
+                        action='store_true')
     group.add_argument('--comp_embed_dim', help='probe: token embedding dimension', type=int, default=64)
     group.add_argument('--comp_hidden_dim', help='probe: LSTM hidden dimension', type=int, default=64)
     group.add_argument('--comp_num_layers', help='probe: number of LSTM layers (encoder and decoder)', type=int, default=1)
@@ -745,6 +753,20 @@ def reverse_polish_pairs(dataset):
         tgt_bos_id=vocab.bos_id,
         tgt_eos_id=vocab.eos_id,
     )
+    return pairs, spec
+
+
+def permuted_reverse_polish_pairs(dataset, seed=None):
+    """
+    "Anti-control" language: the reverse-Polish signals of the control language (see
+    `reverse_polish_pairs`), randomly re-assigned to the predicates (a random permutation of the
+    signals; targets stay in Polish notation). Same signal inventory as the control, but no
+    systematic signal->meaning relation, so the probe should do no better than memorisation allows.
+    Returns (pairs, spec).
+    """
+    pairs, spec = reverse_polish_pairs(dataset)
+    perm = np.random.default_rng(seed).permutation(len(pairs))
+    pairs = [(pairs[int(j)][0], tgt) for j, (_, tgt) in zip(perm, pairs)]
     return pairs, spec
 
 
