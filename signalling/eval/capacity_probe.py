@@ -113,7 +113,7 @@ def add_capacity_probe_args(parser):
     return group
 
 
-# Lean argument parser for `--do capacity_probe`. Like `compositionality_search`, it only needs the
+# Lean argument parser for `--do capacity_probe`. Like `decodability_search`, it only needs the
 # dataset knobs, a device, and its own hyperparameters -- not the whole predicate-game parser.
 def get_args(remaining_args):
     parser = argparse.ArgumentParser(

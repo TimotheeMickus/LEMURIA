@@ -10,13 +10,13 @@ import pprint
 import sys
 
 # The subcommands that own a full argument parser of their own (built in their get_args). For these,
-# `--help` is handed through so that the subcommand's own arguments are shown. `compositionality_search`
+# `--help` is handed through so that the subcommand's own arguments are shown. `decodability_search`
 # reuses the predicate game's parser (see eval/compositionality.main); the eval subcommands declare the
 # arguments they use (and inherit the shared top-level ones via cli.inherit_top_level).
 SUBCOMMANDS_WITH_OWN_PARSER = {
-    'image_signalling_game', 'predicate_signalling_game', 'compositionality_search',
+    'image_signalling_game', 'predicate_signalling_game', 'decodability_search',
     'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation',
-    'capacity_probe', 'compositionality_loo',
+    'capacity_probe', 'decodability_loo',
 }
 
 def get_args():
@@ -26,7 +26,7 @@ def get_args():
 
     arg_parser.add_argument('-h', '--help', action='store_true', help="show this help message and exit (with --do <game>, shows that game's own arguments)")
 
-    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'predicate_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation', 'compositionality_search', 'compositionality_loo', 'capacity_probe'])
+    arg_parser.add_argument('--do', help='what to do', type=str, choices=['image_signalling_game', 'predicate_signalling_game', 'evaluate_language', 'visualize', 'compute_correlation', 'threeway_correlation', 'decodability_search', 'decodability_loo', 'capacity_probe'])
     
     group = arg_parser.add_argument_group(title='Display', description='arguments relative to displayed information')
     # TODO: refactor logging: --quiet vs. --display quiet?
@@ -85,10 +85,10 @@ if(__name__ == "__main__"):
     elif(args.do == 'predicate_signalling_game'):
         from .predicate_signalling_game import main
         main(args, remaining_args)
-    elif(args.do == 'compositionality_search'):
+    elif(args.do == 'decodability_search'):
         from .eval.compositionality import main
         main(args, remaining_args)
-    elif(args.do == 'compositionality_loo'):
+    elif(args.do == 'decodability_loo'):
         from .eval.compositionality import main_loo as main
         main(args, remaining_args)
     elif(args.do == 'capacity_probe'):

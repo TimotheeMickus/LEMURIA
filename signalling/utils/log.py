@@ -237,12 +237,12 @@ def setup_wandb_logging(autologger, enabled, project, run_name, args):
 
     wandb_run = wandb.init(project=project, name=run_name, config=_wandb_config_from_args(args))
 
-    # Summarise the compositionality metrics by their best value over the run (not the last epoch),
-    # so a W&B sweep optimising 'eval/compositionality_loss' targets the best language the run reached
+    # Summarise the decodability and encodability metrics by their best value over the run (not the last epoch),
+    # so a W&B sweep optimising 'eval/decodability_loss' targets the best language the run reached
     # rather than a noisy final-epoch value. Harmless when these metrics are never logged.
-    wandb.define_metric("eval/compositionality_loss", summary="min")
-    wandb.define_metric("eval/compositionality_loss_normalized", summary="min")
-    wandb.define_metric("eval/compositionality_acc", summary="max")
+    wandb.define_metric("eval/decodability_loss", summary="min")
+    wandb.define_metric("eval/decodability_loss_normalized", summary="min")
+    wandb.define_metric("eval/decodability_acc", summary="max")
     wandb.define_metric("eval/encodability_loss", summary="min")
     wandb.define_metric("eval/encodability_loss_normalized", summary="min")
     wandb.define_metric("eval/encodability_acc", summary="max")

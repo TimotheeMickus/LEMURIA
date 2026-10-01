@@ -1,13 +1,14 @@
 """
-Compositionality probe for the predicate signalling game.
+Compositionality probes for the predicate signalling game: decodability and encodability.
 
 Given (predicate, signal) pairs, we train a small sequence-to-sequence model
 (encoder + LSTM decoder) to reconstruct the predicate written in Polish
-(prefix) notation from the signal, and we measure the
+(prefix) notation from the signal (decodability), and we measure the
 fraction of held-out predicates that are reconstructed *exactly*. This is a
 standard "can a learner recover the meaning from the signal?" probe: a language
 is compositional to the extent that a generic learner generalises the
-signal->meaning mapping to unseen signals.
+signal->meaning mapping to unseen signals. Encodability is the same probe in the
+other direction (reconstructing the signal from the predicate; see `emergent_pairs`).
 
 Public entry points
 --------------------
@@ -30,15 +31,15 @@ emergent_pairs(asker, dataset, device) -> (pairs, spec)
     signal, and pairs it with the Polish-notation encoding of the predicate.
 
 main(global_args, remaining_args)
-    `--do compositionality_search`: random hyperparameter search. To find good
+    `--do decodability_search`: random hyperparameter search. To find good
     probe hyperparameters we tune on the *reverse-Polish* control language (the
     signal for a predicate is its reverse-Polish encoding), a language that is
     compositional by construction, so the search rewards hyperparameters that let
     the probe recover composition when it is present.
 
 main_loo(global_args, remaining_args)
-    `--do compositionality_loo`: leave-one-out (or n-fold, user-specified)
-    cross-validated compositionality probe on a dumped emergent language
+    `--do decodability_loo`: leave-one-out (or n-fold, user-specified)
+    cross-validated decodability probe on a dumped emergent language
     (--comp_signals_csv). Writes a per-signal CSV alongside the aggregate score.
 
 Efficiency notes
@@ -123,7 +124,7 @@ class HParams:
 def add_compositionality_args(parser):
     import pathlib
     group = parser.add_argument_group(title='Compositionality', description='compositionality probe (encoder -> LSTM decoder) and its hyperparameter search')
-    group.add_argument('--eval_compositionality', help='during evaluation, measure the compositionality of the emergent language (5-fold CV exact-match) and log it as "compositionality"', action='store_true')
+    group.add_argument('--eval_decodability', help='during evaluation, measure the decodability of the emergent language (can the probe recover the predicate from the signal? 5-fold CV exact-match) and log it as "eval/decodability_{acc,loss}"', action='store_true')
     group.add_argument('--comp_encoder', help='probe: encoder architecture. "bilstm" (default) is inherently order-sensitive '
                         '(a signal and its reverse generally encode to different states). "transformer" is a self-attention '
                         'encoder with learned positional embeddings: attention is permutation-EQUIVARIANT and position only '
@@ -153,17 +154,17 @@ def add_compositionality_args(parser):
                         'via a different curve in between. Only has an effect when --comp_focal_gamma > 0.',
                         choices=['absolute', 'difference', 'ratio'], default='absolute')
     group.add_argument('--eval_encodability', help='during evaluation, measure the encodability of the emergent language: '
-                        'the same probe as --eval_compositionality (same --comp_* hyperparameters), but in the other direction, '
+                        'the same probe as --eval_decodability (same --comp_* hyperparameters), but in the other direction, '
                         'i.e. trained to produce the emergent signal from the predicate in Polish notation. Logged as '
                         '"eval/encodability_{acc,loss}" (and "eval/encodability_loss_normalized", using the same two calibration '
-                        'values as the compositionality loss, unless --comp_no_normalization). Independent of --eval_compositionality.',
+                        'values as the decodability loss, unless --comp_no_normalization). Independent of --eval_decodability.',
                         action='store_true')
-    group.add_argument('--comp_no_normalization', help='probe: skip the calibration of the compositionality (and encodability) loss. '
-                        'By default (with --eval_compositionality or --eval_encodability), before training the probe is also run on the control '
+    group.add_argument('--comp_no_normalization', help='probe: skip the calibration of the decodability and encodability losses. '
+                        'By default (with --eval_decodability or --eval_encodability), before training the probe is also run on the control '
                         'language (signal = reverse-Polish encoding of the predicate) and on a random permutation of it '
-                        '(the same signals randomly re-assigned to predicates), and "eval/compositionality_loss_normalized" '
+                        '(the same signals randomly re-assigned to predicates), and "eval/decodability_loss_normalized" '
                         '= (loss - control_loss) / (permuted_loss - control_loss) is logged alongside '
-                        '"eval/compositionality_loss" (0 = as good as the control language, 1 = as bad as its permutation); '
+                        '"eval/decodability_loss" (0 = as good as the control language, 1 = as bad as its permutation); '
                         'likewise "eval/encodability_loss_normalized" with --eval_encodability (same two calibration values). '
                         'With this flag, neither the calibration nor the normalised loss is computed.',
                         action='store_true')
@@ -176,13 +177,13 @@ def add_compositionality_args(parser):
     group.add_argument('--comp_min_epochs', help='probe: minimum training epochs per fold before early stopping is allowed to fire (default 0: no minimum, matching prior behaviour). Has no effect if set above --comp_max_epochs.', type=int, default=0)
     group.add_argument('--comp_max_epochs', help='probe: maximum training epochs per fold (early stopping usually stops earlier)', type=int, default=512)
     group.add_argument('--comp_patience', help='probe: early-stopping patience in epochs (stop when held-out exact-match has not improved for this many epochs)', type=int, default=2)
-    group.add_argument('--comp_search_trials', help='compositionality_search: number of random hyperparameter trials', type=int, default=30)
-    group.add_argument('--comp_search_out', help='compositionality_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
-    group.add_argument('--comp_signals_csv', help="compositionality_search / compositionality_loo: read the emergent language from a dumped-signals CSV (columns 'signal' and 'pred_str', the kind produced by --dump_signals) instead of the synthetic control language. When set, no dataset parameters are needed and the dataset is not built.", type=pathlib.Path, default=None)
-    group.add_argument('--comp_target_notation', help="compositionality_search / compositionality_loo: predicate serialisation used as the probe target when --comp_signals_csv is given", choices=['polish', 'reverse_polish'], default='polish')
-    group.add_argument('--comp_n_folds', help="compositionality_loo: number of CV folds. Omit for leave-one-out (n_folds = number of distinct signals), the default and most precise setting; pass a smaller number to trade precision for speed.", type=int, default=None)
-    group.add_argument('--comp_runs_per_item', help="compositionality_loo: number of independent repeats of the whole CV procedure (fresh fold shuffle and probe init each time). Each signal's reported score is the fraction of runs in which it was exactly recovered, which smooths out the noise of any single stochastic training run.", type=int, default=1)
-    group.add_argument('--comp_out_csv', help="compositionality_loo: path to write the per-signal results CSV. Defaults to '<comp_signals_csv stem>.comp_loo.csv' next to the input file.", type=pathlib.Path, default=None)
+    group.add_argument('--comp_search_trials', help='decodability_search: number of random hyperparameter trials', type=int, default=30)
+    group.add_argument('--comp_search_out', help='decodability_search: optional path to write the best hyperparameters (and history) as JSON', type=pathlib.Path, default=None)
+    group.add_argument('--comp_signals_csv', help="decodability_search / decodability_loo: read the emergent language from a dumped-signals CSV (columns 'signal' and 'pred_str', the kind produced by --dump_signals) instead of the synthetic control language. When set, no dataset parameters are needed and the dataset is not built.", type=pathlib.Path, default=None)
+    group.add_argument('--comp_target_notation', help="decodability_search / decodability_loo: predicate serialisation used as the probe target when --comp_signals_csv is given", choices=['polish', 'reverse_polish'], default='polish')
+    group.add_argument('--comp_n_folds', help="decodability_loo: number of CV folds. Omit for leave-one-out (n_folds = number of distinct signals), the default and most precise setting; pass a smaller number to trade precision for speed.", type=int, default=None)
+    group.add_argument('--comp_runs_per_item', help="decodability_loo: number of independent repeats of the whole CV procedure (fresh fold shuffle and probe init each time). Each signal's reported score is the fraction of runs in which it was exactly recovered, which smooths out the noise of any single stochastic training run.", type=int, default=1)
+    group.add_argument('--comp_out_csv', help="decodability_loo: path to write the per-signal results CSV. Defaults to '<comp_signals_csv stem>.comp_loo.csv' next to the input file.", type=pathlib.Path, default=None)
     return group
 
 
@@ -508,7 +509,7 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
     allow it to.
 
     `best_val` -- the loss value that actually reaches every caller (the `loss=...` printed by
-    compositionality_loo/compositionality_search, and compositionality()'s returned mean_loss) --
+    decodability_loo/decodability_search, and compositionality()'s returned mean_loss) --
     is always computed on the HELD-OUT instances (`test_idx`), never on `train_idx`: the mean, over
     those held-out instances, of each instance's own mean per-token NLL (see _seq_loss/_val_loss),
     taken at whichever epoch that quantity was lowest. The training loss computed each step below is
@@ -711,7 +712,7 @@ def emergent_pairs(asker, dataset, device, batch_size=256, target="meaning"):
     """
     (predicate, emergent-signal) pairs: run the asker (eval/argmax) on every predicate
     index and pair each produced signal with the Polish encoding of the predicate.
-    target: "meaning" (the default; compositionality): src = signal, tgt = Polish predicate.
+    target: "meaning" (the default; decodability): src = signal, tgt = Polish predicate.
         "signal" (encodability): src = Polish predicate, tgt = signal without its trailing EOS
         (the probe appends its own EOS, here the asker's EOS id).
     Returns (pairs, spec).
@@ -901,7 +902,7 @@ def csv_pairs(path, notation="polish", return_strs=False):
     # contribute exactly one (signal, target) pair -- matching emergent_pairs. Keeping the duplicate
     # rows would let the probe's k-fold cross-validation place identical (signal, target) pairs in
     # both the training and held-out folds, leaking the answer and greatly inflating the reported
-    # compositionality. We therefore keep the first occurrence of each predicate. A later occurrence
+    # decodability. We therefore keep the first occurrence of each predicate. A later occurrence
     # with a DIFFERENT signal (the source language isn't actually a pure function of the predicate
     # in this file -- e.g. several epochs/languages concatenated, or non-deterministic decoding)
     # is not fatal: we warn and keep the first-seen signal.
@@ -987,7 +988,7 @@ def csv_pairs(path, notation="polish", return_strs=False):
 
 
 # ----------------------------------------------------------------------------- #
-# Random hyperparameter search ( --do compositionality_search )
+# Random hyperparameter search ( --do decodability_search )
 # ----------------------------------------------------------------------------- #
 
 # Reasonable bounds for the probe.
@@ -1029,14 +1030,14 @@ def _sample_hparams(rng, min_epochs, max_epochs, patience, encoder, loss_per_exa
     )
 
 
-# Lean argument parser for `--do compositionality_search`. Unlike a training run, the search only
+# Lean argument parser for `--do decodability_search`. Unlike a training run, the search only
 # needs to build the control-language dataset (Data group; skipped entirely with --comp_signals_csv),
 # pick a device, and read the Compositionality knobs -- so it declares exactly those, rather than
 # reusing the whole predicate-game parser (which would document dozens of irrelevant training/model
 # arguments in --help).
 def get_args(remaining_args):
     parser = argparse.ArgumentParser(
-        prog="signalling --do compositionality_search",
+        prog="signalling --do decodability_search",
         description="Random hyperparameter search for the compositionality probe. Tunes the probe on a "
                     "compositional-by-construction language: the reverse-Polish control language built from the "
                     "dataset, or a dumped emergent language via --comp_signals_csv (in which case no dataset is built).")
@@ -1097,7 +1098,7 @@ def main(global_args=None, remaining_args=None):
 
 
 # ----------------------------------------------------------------------------- #
-# Leave-one-out / n-fold diagnostic probe ( --do compositionality_loo )
+# Leave-one-out / n-fold diagnostic probe ( --do decodability_loo )
 # ----------------------------------------------------------------------------- #
 
 def _render_tokens(ids, id2tok):
@@ -1128,15 +1129,15 @@ def _write_per_item_csv(path, pred_strs, pred_idxs, src_seqs, tgt_seqs, per_item
             ])
 
 
-# Lean argument parser for `--do compositionality_loo`: only the Compositionality knobs plus
+# Lean argument parser for `--do decodability_loo`: only the Compositionality knobs plus
 # --device are needed -- the signals and target predicates come entirely from --comp_signals_csv,
-# so (unlike compositionality_search) no dataset arguments are declared at all.
+# so (unlike decodability_search) no dataset arguments are declared at all.
 def get_args_loo(remaining_args):
     parser = argparse.ArgumentParser(
-        prog="signalling --do compositionality_loo",
-        description="Leave-one-out (or n-fold, user-chosen) cross-validated compositionality probe on a "
+        prog="signalling --do decodability_loo",
+        description="Leave-one-out (or n-fold, user-chosen) cross-validated decodability probe on a "
                     "saved emergent language (a dumped-signals CSV, see --dump_signals). Reports both an "
-                    "aggregate compositionality estimate and, per signal, whether the probe could recover "
+                    "aggregate decodability estimate and, per signal, whether the probe could recover "
                     "it from the others -- i.e. which individual signals are compositional and which are not.")
     cli.add_perf_args(parser)              # --device
     add_compositionality_args(parser)      # the Compositionality group (--comp_* etc.)
@@ -1160,7 +1161,7 @@ def main_loo(global_args=None, remaining_args=None):
     device = args.device
 
     if(args.comp_signals_csv is None):
-        raise SystemExit("--do compositionality_loo requires --comp_signals_csv <path to a dumped-signals CSV, see --dump_signals>.")
+        raise SystemExit("--do decodability_loo requires --comp_signals_csv <path to a dumped-signals CSV, see --dump_signals>.")
 
     pairs, spec, pred_strs, pred_idxs, id2tok = csv_pairs(args.comp_signals_csv, notation=args.comp_target_notation, return_strs=True)
 
