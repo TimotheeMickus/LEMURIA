@@ -141,7 +141,7 @@ def do(args):
         # If the model has not reached a certain performance threshold during training, an empty "FAILURE" file is created.
         performance_threshold = 0.9
         if(model.max_perf < performance_threshold):
-            print("This run has failed (max perf = {model.max_perf} < {performance_threshold}).")
+            print(f"This run has failed (max perf = {model.max_perf} < {performance_threshold}).")
             if(not args.no_summary):
                 filename = run_summary_dir / "FAILURE"
                 open(filename, 'a').close()
@@ -221,7 +221,7 @@ def get_args(remaining_args=None):
     pre.add_argument('--pretrain', help='pretrain each agent on the predicate/candidate satisfaction task before training: askers keep their predicate encoder and are temporarily paired with a candidate encoder (same --candidate_encoder choice as retrievers), retrievers keep their candidate encoder and are temporarily paired with a predicate embedding. Temporary modules are discarded afterwards. Reinitialized agents (population reset) are pretrained again.', action='store_true')
 
     group = arg_parser.add_argument_group(title='Eval', description='arguments relative to evaluation routines')
-    group.add_argument('--correct_only', help='analyse the language constisting of the signals produced in successful rounds only', action='store_true')
+    group.add_argument('--correct_only', help='not supported in the predicate game (the language is evaluated as one signal per predicate, independently of the eval rounds); raises an error if set', action='store_true')
     group.add_argument('--jaccard', help='enable Jaccard-based topsim metrics (more expensive)', action='store_true')
     group.add_argument('--eval_oracle_language', help="debug feature: during fancy evaluation, replace the emergent language with a known-compositional 'oracle'/control language (an upper-bound sanity check, not part of normal runs). In AlexBeth this is the reverse-Polish encoding of the predicate. Applied to the compositionality probe and topographic similarity; signal dumping and scrambling resistance keep using the emergent language.", action='store_true')
     group.add_argument('--dump_predicate_perf', help='dump per-predicate performance tables and log them as a W&B artifact', action='store_true')
@@ -257,6 +257,9 @@ def get_args(remaining_args=None):
         if(args.overfit):
             raise ValueError("--replay_period is incompatible with --overfit (the replay buffer's padding rows are "
                 "freshly generated and would not respect the fixed overfitting pool).")
+
+    if(args.correct_only):
+        raise ValueError("--correct_only is not supported in the predicate signalling game: the language is evaluated as one signal per predicate, independently of the success of the eval rounds.")
 
     # Snapshot of the parser defaults, used by `build_run_name` so that a run name only advertises the arguments that were actually changed.
     args._arg_defaults = vars(arg_parser.parse_args([]))

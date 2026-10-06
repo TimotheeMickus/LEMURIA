@@ -708,31 +708,47 @@ def compositionality_per_item(pairs, spec, hparams, device, seed=None, n_folds=N
 # ----------------------------------------------------------------------------- #
 
 @torch.no_grad()
-def emergent_pairs(asker, dataset, device, batch_size=256, target="meaning"):
+@torch.no_grad()
+def emergent_language(asker, n, device, batch_size=256):
+    """
+    The emergent language as a function predicate -> signal: run the asker (eval/argmax) exactly
+    once on every predicate index 0..n-1, in batches of `batch_size`.
+    Returns (signals, entropy): signals[i] is the signal (list[int], including the trailing EOS)
+    for predicate i; entropy[i] (np.array of shape (n,)) is the asker's average per-symbol policy
+    entropy while producing it.
+    """
+    was_training = asker.training
+    asker.eval()
+    signals, entropy = [], []
+    for start in range(0, n, batch_size):
+        idx = torch.arange(start, min(start + batch_size, n), device=device)
+        outcome = asker(idx)
+        signal, length = outcome.action               # (B, L) long, (B, 1)
+        signal = signal.cpu()
+        length = length.view(-1).cpu()
+        for i in range(signal.size(0)):
+            L = max(1, int(length[i].item()))         # includes the trailing EOS; always >= 1
+            signals.append(signal[i, :L].tolist())
+        entropy.append(outcome.entropy.view(-1).cpu())
+    if was_training:
+        asker.train()
+    return signals, torch.cat(entropy).numpy()
+
+
+def emergent_pairs(asker, dataset, device, batch_size=256, target="meaning", signals=None):
     """
     (predicate, emergent-signal) pairs: run the asker (eval/argmax) on every predicate
     index and pair each produced signal with the Polish encoding of the predicate.
     target: "meaning" (the default; decodability): src = signal, tgt = Polish predicate.
         "signal" (encodability): src = Polish predicate, tgt = signal without its trailing EOS
         (the probe appends its own EOS, here the asker's EOS id).
+    signals: optional, the output of emergent_language (one signal per predicate index), to avoid
+        recomputing it.
     Returns (pairs, spec).
     """
     vocab = PredicateVocab(dataset)
-    n = len(dataset.predicates)
-
-    was_training = asker.training
-    asker.eval()
-    signals = []
-    for start in range(0, n, batch_size):
-        idx = torch.arange(start, min(start + batch_size, n), device=device)
-        signal, length = asker(idx).action           # (B, L) long, (B, 1)
-        signal = signal.cpu()
-        length = length.view(-1).cpu()
-        for i in range(signal.size(0)):
-            L = max(1, int(length[i].item()))         # includes the trailing EOS; always >= 1
-            signals.append(signal[i, :L].tolist())
-    if was_training:
-        asker.train()
+    if(signals is None):
+        signals, _ = emergent_language(asker, len(dataset.predicates), device, batch_size=batch_size)
 
     meanings = [vocab.encode(pred.polish()) for pred in dataset.predicates]
 

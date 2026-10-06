@@ -93,7 +93,6 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         self.dump_signal_mode = args.dump_signals
         self.dump_predicate_perf = args.dump_predicate_perf
         self._eval_metrics_rows = [] if(args.dump_eval_metrics) else None # Either None or one row per evaluate() call (epoch-level aggregate metrics).
-        self.correct_only = args.correct_only # Whether to perform the fancy language evaluation using only correct signals (i.e., the one that leads to successful communication).
         self.use_jaccard_eval = args.jaccard
         self._topsim_correl_only = True # If True, skips the Mantel permutations (fast; correlation only, no p/z).
         # Decodability probe (biLSTM->LSTM seq2seq, signal -> predicate): measured during evaluation when enabled.
@@ -505,14 +504,15 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
 
     # Measures the decodability of the emergent language: the asker produces one signal per predicate, and a seq2seq probe is trained (5-fold CV, early stopping) to reconstruct the predicate in Polish notation from the signal. Returns the mean over folds of each fold's best held-out exact-match rate (a float in [0, 1]) and best held-out loss, as an (accuracy, loss) pair.
     # target="signal" measures encodability instead: the same probe, trained to produce the signal from the predicate in Polish notation.
-    def _compute_compositionality(self, target="meaning"):
+    # signals: optional, one emergent signal per predicate index (see compositionality.emergent_language).
+    def _compute_compositionality(self, target="meaning", signals=None):
         device = next(self.asker.parameters()).device
         if(self.eval_oracle_language):
             # Oracle: feed the probe the reverse-Polish encoding of each predicate instead of the emergent signal (targets stay in Polish notation); this is exactly the compositional control language, so the probe should reconstruct it near-perfectly.
             pairs, spec = compositionality.reverse_polish_pairs(self._dataset)
             if(target == "signal"): pairs = compositionality.swap_pairs(pairs)
         else:
-            pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device, target=target)
+            pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device, target=target, signals=signals)
         return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._args.run_seed)
 
     # Probe losses (control_loss, permuted_loss) on the control language (reverse-Polish signals) and on its random permutation (same signals randomly re-assigned to predicates). Computed once and cached; used to normalise the decodability and encodability losses so that the control language maps to 0 and its permutation to 1.
@@ -564,28 +564,13 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         total_perf = 0.0 # average probability of the retriever selecting correctly
         total_accuracy = 0.0 # average accuracy of the retriever argmax selection
         total_entropy = 0.0
-        total_asker_entropy = 0.0
-        total_signal_length = 0.0
         # Scrambling resistance = preserved correctness after shuffling / original correctness.
         perf_scrambled = 0.0
         perf_baseline = 0.0
-        # Count symbol usage across eval batches.
-        total_vocab_counts = None
-
-        # Cache for signal dumps.
-        dump_cache = None
-        if(self.dump_signal_mode):
-            dump_cache = {
-                "signals": [],
-                "predicate_ids": [],
-            }
-
-        # Cache for language-level eval metrics.
-        eval_cache = None
-        eval_cache = dump_cache if(dump_cache is not None) else {
-            "signals": [],
-            "predicate_ids": [],
-        }
+        # Per-predicate round statistics (indexed by predicate index): number of eval rounds and sum of the per-round accuracies.
+        num_predicates = len(self._dataset.predicates)
+        pred_rounds = np.zeros(num_predicates, dtype=np.int64)
+        pred_acc_sum = np.zeros(num_predicates)
 
         batch_numbers = range(nb_batch)
         if(self.autologger.display == 'tqdm'): batch_numbers = tqdm.tqdm(batch_numbers, desc='Eval.')
@@ -602,7 +587,6 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             dist = retriever_selecting["dist"] # RMK: dist.logits == retriever_outcome.scores
             
             entropy = dist.entropy().mean().item()
-            asker_entropy = asker_outcome.entropy.mean().item()
             
             retriever_loss = F.binary_cross_entropy_with_logits(retriever_outcome.scores, truth_targets, reduction='mean').item()
 
@@ -618,23 +602,11 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             failure = (1.0 - correct_prob).view(-1).cpu().numpy() # Shape: (batch_size * num_candidates)
             data_loader.failure_based_distribution.update(predicate_idx, failure, new_epoch=(batch_index == 0))
 
-            # `signal_length`: average length (including EOS) of the signals in this batch.
-            signal_length = asker_outcome.action[1].float().mean().item()
-            # `total_vocab_counts`: count symbols used in signals (excluding EOS and padding).
-            signal_tokens = asker_outcome.action[0]
-            max_len = signal_tokens.size(1)
-            positions = torch.arange(max_len, device=signal_tokens.device).unsqueeze(0) # int tensor of shape (1, max_len)
-            signal_lens = asker_outcome.action[1].int().view(-1)
-            in_signal = positions < (signal_lens.unsqueeze(1) - 1) # boolean tensor of shape (batch_size, max_len), True for positions strictly before EOS in each signal
-            if in_signal.any():
-                used_tokens = signal_tokens[in_signal]
-                vocab_counts = torch.bincount(used_tokens, minlength=self.full_alphabet_size).to("cpu")
-                vocab_counts[self.asker.eos_index] = 0
-                vocab_counts[self.asker.padding_idx] = 0
-                if(total_vocab_counts is None): # TODO Instead of doing this, initialise `total_vocab_counts` correctly.
-                    total_vocab_counts = vocab_counts
-                else:
-                    total_vocab_counts += vocab_counts
+            # Per-predicate round statistics.
+            accuracy_per_item = correct_pred.mean(dim=1).cpu().numpy() # Shape: (batch_size,) mean across candidates
+            batch_pred_idx = batch.predicate_idx.cpu().numpy()
+            np.add.at(pred_rounds, batch_pred_idx, 1)
+            np.add.at(pred_acc_sum, batch_pred_idx, accuracy_per_item)
 
             # Stores row-level performance for predicate diagnostics only when requested.
             if(self.dump_predicate_perf):
@@ -652,29 +624,20 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             total_perf += perf * batch_items
             total_accuracy += accuracy * batch_items
             total_entropy += entropy * batch_items
-            total_asker_entropy += asker_entropy * batch_items
-            total_signal_length += signal_length * batch_items
 
             # Scrambling resistance: how much correctness is kept when the symbol order isshuffled. High retention suggests the semantics rely less on order/composition.
             kept, base = self._scrambling_resistance(batch, asker_outcome.action[0], asker_outcome.action[1], correct_prob)
             perf_scrambled += kept
             perf_baseline += base
 
-            # Caches signals once so dump and fancy eval can reuse them.
-            # If `correct_only` is True, only correct items are cached.
-            cache = dump_cache if(dump_cache is not None) else eval_cache
-            if(cache is not None):
-                batch_signals = asker_outcome.action[0].detach().clone()
-                batch_lens = asker_outcome.action[1].detach().clone()
-                accuracy_per_item = correct_pred.mean(dim=1) # (batch,) mean across candidates
-                for i in range(batch_signals.size(0)):
-                    if(self.correct_only and (not torch.isclose(accuracy_per_item[i], torch.tensor(1.0, device=accuracy_per_item.device)))):
-                        # not: (accuracy_per_item[i].item() < 0.5):
-                        continue # Skips low accuracy items.
-                    # Truncates padding away from signals.
-                    signal = batch_signals[i].tolist()[:batch_lens[i].item()]
-                    cache["signals"].append(signal)
-                    cache["predicate_ids"].append(int(batch.predicate_idx[i]))
+        # --- the emergent language --- #
+        #                               #
+        # The language proper: exactly one signal per predicate (Alex alone, eval/argmax), for every predicate (including those not yet unlocked by the depth curriculum). Used for the signal dump and for all the metrics that do not involve Beth.
+        device = next(self.asker.parameters()).device
+        language, language_entropy = compositionality.emergent_language(self.asker, num_predicates, device, batch_size=batch_size)
+        # The Beth-free metrics are computed over the predicates currently in use (i.e., those the eval rounds are sampled from).
+        in_use_mask = data_loader.predicate_sampling_mask.copy() # Copied, as the depth curriculum may update the mask further below.
+        in_use_idx = np.flatnonzero(in_use_mask)
 
         # --- logging and stdout --- #
         #                            #
@@ -683,10 +646,12 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         eval_perf = total_perf / total_items
         eval_accuracy = total_accuracy / total_items
         eval_retriever_entropy = total_entropy / total_items
-        eval_asker_entropy = total_asker_entropy / total_items
-        eval_signal_length = total_signal_length / total_items
-        if(total_vocab_counts is None): eval_vocab_used = 0
-        else: eval_vocab_used = int((total_vocab_counts > 0).sum().item())
+        eval_asker_entropy = float(language_entropy[in_use_idx].mean())
+        eval_signal_length = float(np.mean([len(language[i]) for i in in_use_idx])) # Including EOS.
+        # Symbols used in the signals (excluding EOS and padding).
+        used_symbols = set(symbol for i in in_use_idx for symbol in language[i][:-1])
+        used_symbols -= {self.asker.eos_index, self.asker.padding_idx}
+        eval_vocab_used = len(used_symbols)
         
         log('eval/retriever_loss', eval_retriever_loss)
         log('eval/perf', eval_perf)
@@ -704,7 +669,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         for prefix, enabled, target in [("decodability", self.eval_decodability, "meaning"), ("encodability", self.eval_encodability, "signal")]:
             acc, loss, loss_normalized = float("nan"), float("nan"), float("nan")
             if(enabled):
-                acc, loss = self._compute_compositionality(target=target)
+                acc, loss = self._compute_compositionality(target=target, signals=language)
                 log(f'eval/{prefix}_acc', acc)
                 log(f'eval/{prefix}_loss', loss)
                 if(self._comp_normalize):
@@ -753,14 +718,11 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         # Topographic similarity
         # Extensional meaning is a binary vector over candidate IDs; used with Hamming distance.
         # Intensional meaning is the predicate embedding ("what the robots think"); used with cosine distance.
-        if((eval_cache is not None) and (len(eval_cache["signals"]) > 1)):
-            num_predicates = len(self._dataset.predicates)
-            sample_size = min(256, num_predicates)
-            sample = list(zip(eval_cache["signals"], eval_cache["predicate_ids"])) # sample = [([s0, s1], id0), ([s2], id1), ...]
-            random.shuffle(sample)
-            sample = sample[:sample_size]
-            sample_signals = [tuple(s) for (s, _) in sample]
-            sample_pred_ids = [int(pid) for (_, pid) in sample]
+        if(len(in_use_idx) > 1):
+            # A sample of (distinct) predicates from the language.
+            sample_size = min(256, len(in_use_idx))
+            sample_pred_ids = [int(pid) for pid in random.sample(in_use_idx.tolist(), sample_size)]
+            sample_signals = [tuple(language[pid]) for pid in sample_pred_ids]
 
             # Oracle: replace the emergent signals with the reverse-Polish encoding of each
             # predicate (meaning side is left untouched). The dump cache is not affected.
@@ -895,8 +857,9 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
                     self._best_eval_perf = eval_perf
                 self._prev_eval_perf = eval_perf
         
-        # Dumps signals into file every epoch or on the last epoch, depending on the flag.
-        if(self.signal_dump_dir and (dump_cache is not None) and (
+        # Dumps the language (one signal per predicate) into a file every epoch or on the last epoch, depending on the flag.
+        # `eval_acc` is the predicate's average accuracy over this evaluation's rounds (empty if it was not sampled); `in_use` says whether the predicate was in use during this evaluation (depth curriculum).
+        if(self.signal_dump_dir and self.dump_signal_mode and (
             (self.dump_signal_mode == 'all') or 
             ((self.dump_signal_mode == 'last') and (epoch_index == (self.epochs - 1))) or
             ((self.dump_signal_mode in ('when_hike', 'when_hike_strict')) and (
@@ -906,12 +869,13 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
             )):
             filename = os.path.join(self.signal_dump_dir, f"signals.e{epoch_index}.csv")
             rows = [
-                [' '.join(map(str, signal)), pred_idx, str(self._dataset.predicates[pred_idx])]
-                for signal, pred_idx in zip(
-                    dump_cache["signals"],
-                    dump_cache["predicate_ids"],
-                )
+                [
+                    ' '.join(map(str, signal)), pred_idx, str(self._dataset.predicates[pred_idx]),
+                    int(self._dataset.predicate_depths[pred_idx]), int(in_use_mask[pred_idx]),
+                    (pred_acc_sum[pred_idx] / pred_rounds[pred_idx]) if(pred_rounds[pred_idx] > 0) else '',
+                ]
+                for pred_idx, signal in enumerate(language)
             ]
-            dump_signals_csv(filename, ['signal', 'pred_idx', 'pred_str'], rows)
+            dump_signals_csv(filename, ['signal', 'pred_idx', 'pred_str', 'depth', 'in_use', 'eval_acc'], rows)
         
         return
