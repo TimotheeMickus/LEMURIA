@@ -510,7 +510,7 @@ class AlexBeth(VocabularyPenaltyMixin, SignallingEvalMixin, Game):
         if(self.eval_oracle_language):
             # Oracle: feed the probe the reverse-Polish encoding of each predicate instead of the emergent signal (targets stay in Polish notation); this is exactly the compositional control language, so the probe should reconstruct it near-perfectly.
             pairs, spec = compositionality.reverse_polish_pairs(self._dataset)
-            if(target == "signal"): pairs = compositionality.swap_pairs(pairs)
+            if(target == "signal"): pairs, spec = compositionality.swap_pairs(pairs), compositionality.swapped_spec(spec)
         else:
             pairs, spec = compositionality.emergent_pairs(self.asker, self._dataset, device, target=target, signals=signals)
         return compositionality.compositionality(pairs, spec, self._comp_hparams, device, seed=self._args.run_seed)

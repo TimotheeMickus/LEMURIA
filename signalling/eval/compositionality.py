@@ -53,7 +53,7 @@ Efficiency notes
 
 import json
 import argparse
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 
 import numpy as np
 import torch
@@ -98,6 +98,12 @@ class Spec:
     tgt_pad_id: int
     tgt_bos_id: int
     tgt_eos_id: int
+    # Set only when the target is a predicate (decodability): its notation ("polish" or
+    # "reverse_polish") and the ids of the two operators, used by --comp_constrained_decoding.
+    # None when the target is a signal (encodability), which has no grammar to enforce.
+    tgt_grammar: str = None
+    tgt_neg_id: int = None
+    tgt_conj_id: int = None
 
 
 @dataclass
@@ -117,6 +123,8 @@ class HParams:
                                # already-confident tokens -- see _token_losses / --comp_focal_gamma
     focal_relative: str = "absolute"  # "absolute" (default, original), "difference", or "ratio" --
                                        # see _token_losses / --comp_focal_relative
+    constrained_decoding: bool = False  # True: greedy decoding only produces well-formed predicates
+                                         # -- see _GrammarMask / --comp_constrained_decoding
 
 
 # Command-line arguments for the compositionality probe and its hyperparameter search. Kept next to
@@ -153,6 +161,15 @@ def add_compositionality_args(parser):
                         '(1 - p_t) / (1 - p_worst), same endpoints (1 for the worst token, in [0, 1] for the rest) '
                         'via a different curve in between. Only has an effect when --comp_focal_gamma > 0.',
                         choices=['absolute', 'difference', 'ratio'], default='absolute')
+    group.add_argument('--comp_constrained_decoding', help='probe: at evaluation, restrict greedy decoding to '
+                        'well-formed predicates (every operator gets exactly its number of arguments, in the target '
+                        'notation, within the maximum target length), by masking at each step the tokens that would '
+                        'make the output ill-formed. Only syntax is enforced -- every well-formed predicate remains '
+                        'possible -- so this cannot leak which predicate a signal means; it only turns would-be '
+                        'malformed outputs into well-formed (usually still wrong) ones. Affects exact-match only '
+                        '(training and the reported loss are teacher-forced and unchanged). No effect when the '
+                        'target is a signal (encodability).',
+                        action='store_true')
     group.add_argument('--eval_encodability', help='during evaluation, measure the encodability of the emergent language: '
                         'the same probe as --eval_decodability (same --comp_* hyperparameters), but in the other direction, '
                         'i.e. trained to produce the emergent signal from the predicate in Polish notation. Logged as '
@@ -202,6 +219,7 @@ def hparams_from_args(args):
         loss_per_example=args.comp_loss_per_example,
         focal_gamma=args.comp_focal_gamma,
         focal_relative=args.comp_focal_relative,
+        constrained_decoding=getattr(args, "comp_constrained_decoding", False), # Older checkpoints lack it.
     )
 
 
@@ -299,18 +317,25 @@ class Seq2Seq(nn.Module):
         return self.out(self.dropout(out))
 
     # Batched greedy decoding. Returns produced token ids (B, <=max_len).
+    # constrained: only produce well-formed predicates (see _GrammarMask); ignored if the target has
+    # no grammar (spec.tgt_grammar is None).
     @torch.no_grad()
-    def greedy_decode(self, src, src_len, max_len):
+    def greedy_decode(self, src, src_len, max_len, constrained=False):
         state = self.encode(src, src_len)
         batch = src.size(0)
         device = src.device
 
+        grammar = _GrammarMask(self.spec, batch, device) if (constrained and (self.spec.tgt_grammar is not None)) else None
         tok = torch.full((batch, 1), self.spec.tgt_bos_id, dtype=torch.long, device=device)
         finished = torch.zeros(batch, dtype=torch.bool, device=device)
         outputs = []
-        for _ in range(max_len):
+        for step in range(max_len):
             out, state = self.decoder(self.tgt_emb(tok), state)   # (B, 1, H)
-            nxt = self.out(out.squeeze(1)).argmax(dim=-1)         # (B,)
+            logits = self.out(out.squeeze(1))                     # (B, V)
+            if(grammar is not None):
+                logits = logits.masked_fill(~grammar.allowed(max_len - step), float("-inf"))
+            nxt = logits.argmax(dim=-1)                           # (B,)
+            if(grammar is not None): grammar.update(nxt)
             nxt = nxt.masked_fill(finished, self.spec.tgt_pad_id)
             outputs.append(nxt)
             finished = finished | (nxt == self.spec.tgt_eos_id)
@@ -323,6 +348,56 @@ class Seq2Seq(nn.Module):
 # ----------------------------------------------------------------------------- #
 # Tensorization and cross-validated training
 # ----------------------------------------------------------------------------- #
+
+class _GrammarMask:
+    """
+    Incremental well-formedness check for greedy decoding of a predicate (--comp_constrained_decoding).
+
+    Each sequence is tracked by a single counter:
+      polish:         `count` = number of arguments still missing (starts at 1); an atom fills one
+                      (-1), NEG fills one and opens one (0), CONJ fills one and opens two (+1); the
+                      predicate is complete -- and EOS then the only allowed token -- when it reaches 0.
+      reverse_polish: `count` = stack height (starts at 0); an atom pushes (+1), NEG needs >= 1
+                      operand (0), CONJ needs >= 2 (-1); EOS is allowed iff the stack holds exactly 1.
+    A token is also disallowed if the predicate could then no longer be completed within the
+    remaining steps (polish: `count` atoms + EOS; reverse_polish: `count` - 1 CONJs + EOS), so some
+    token is always allowed and every output is well-formed. PAD and BOS are never allowed.
+    """
+    def __init__(self, spec, batch, device):
+        V = spec.tgt_vocab_size
+        self.polish = (spec.tgt_grammar == "polish")
+        assert self.polish or (spec.tgt_grammar == "reverse_polish"), spec.tgt_grammar
+        self.eos_id = spec.tgt_eos_id
+        special = torch.zeros(V, dtype=torch.bool, device=device)
+        special[[spec.tgt_pad_id, spec.tgt_bos_id, spec.tgt_eos_id]] = True
+        self.content = ~special                                          # (V,) atoms and operators
+        # Per-token change of the counter (0 for special tokens) and, for reverse Polish, minimal stack height.
+        self.delta = torch.full((V,), -1 if self.polish else 1, dtype=torch.long, device=device)
+        self.delta[special] = 0
+        self.delta[spec.tgt_neg_id] = 0
+        self.delta[spec.tgt_conj_id] = 1 if self.polish else -1
+        self.min_stack = torch.zeros(V, dtype=torch.long, device=device)
+        self.min_stack[spec.tgt_neg_id] = 1
+        self.min_stack[spec.tgt_conj_id] = 2
+        self.count = torch.full((batch,), 1 if self.polish else 0, dtype=torch.long, device=device)
+
+    # remaining: number of decoding steps left, the current one included -> (B, V) bool
+    def allowed(self, remaining):
+        new = self.count.unsqueeze(1) + self.delta.unsqueeze(0)          # (B, V) counter after each token
+        if(self.polish):
+            ok = (self.count > 0).unsqueeze(1) & ((new + 1) <= (remaining - 1))
+            eos_ok = (self.count == 0)
+        else:
+            ok = (self.count.unsqueeze(1) >= self.min_stack.unsqueeze(0)) & (new <= (remaining - 1))
+            eos_ok = (self.count == 1)
+        ok = ok & self.content.unsqueeze(0)
+        ok[:, self.eos_id] = eos_ok
+        return ok
+
+    # nxt: (B,) tokens just produced
+    def update(self, nxt):
+        self.count = self.count + self.delta[nxt]
+
 
 class _Data:
     """Pre-padded tensors for the whole pair set, shared across folds."""
@@ -362,8 +437,9 @@ class _Data:
 
 
 @torch.no_grad()
-def _exact_match_per_item(model, data, idx, spec, decode_batch=256):
-    """Per-item exact-match correctness and greedy-decoded predictions for `idx` (lists aligned with `idx`)."""
+def _exact_match_per_item(model, data, idx, spec, decode_batch=256, constrained=False):
+    """Per-item exact-match correctness and greedy-decoded predictions for `idx` (lists aligned with `idx`).
+    constrained: only decode well-formed predicates (see --comp_constrained_decoding)."""
     model.eval()
     device = data.src.device
     eos, pad = spec.tgt_eos_id, spec.tgt_pad_id
@@ -372,7 +448,7 @@ def _exact_match_per_item(model, data, idx, spec, decode_batch=256):
     for start in range(0, len(idx), decode_batch):
         rows = idx[start:start + decode_batch]
         rows_t = torch.as_tensor(rows, dtype=torch.long, device=device)
-        produced = model.greedy_decode(data.src[rows_t], data.src_len[rows_t], data.max_decode_len).tolist()
+        produced = model.greedy_decode(data.src[rows_t], data.src_len[rows_t], data.max_decode_len, constrained=constrained).tolist()
         for offset, (row, seq) in enumerate(zip(rows, produced)):
             out = []
             for tok in seq:
@@ -386,9 +462,9 @@ def _exact_match_per_item(model, data, idx, spec, decode_batch=256):
 
 
 @torch.no_grad()
-def _exact_match(model, data, idx, spec, decode_batch=256):
+def _exact_match(model, data, idx, spec, decode_batch=256, constrained=False):
     """Fraction of `idx` whose greedy decoding equals the gold token sequence exactly."""
-    correct, _ = _exact_match_per_item(model, data, idx, spec, decode_batch=decode_batch)
+    correct, _ = _exact_match_per_item(model, data, idx, spec, decode_batch=decode_batch, constrained=constrained)
     return sum(correct) / len(idx) if len(idx) > 0 else 0.0
 
 
@@ -548,7 +624,7 @@ def _run_one_fold_detailed(data, train_idx, test_idx, spec, h, device, seed):
                 loss.backward()
                 optimizer.step()
 
-            correct, predicted = _exact_match_per_item(model, data, test_idx, spec, decode_batch=eval_batch)
+            correct, predicted = _exact_match_per_item(model, data, test_idx, spec, decode_batch=eval_batch, constrained=h.constrained_decoding)
             best_acc = max(best_acc, sum(correct) / len(test_idx) if len(test_idx) > 0 else 0.0)
             for i, ok in enumerate(correct):
                 if ok:
@@ -774,13 +850,23 @@ def emergent_pairs(asker, dataset, device, batch_size=256, target="meaning", sig
         tgt_pad_id=vocab.pad_id,
         tgt_bos_id=vocab.bos_id,
         tgt_eos_id=vocab.eos_id,
+        tgt_grammar="polish",
+        tgt_neg_id=vocab.s2i[predicate_data.NEGATION_TOKEN],
+        tgt_conj_id=vocab.s2i[predicate_data.CONJUNCTION_TOKEN],
     )
     return pairs, spec
 
 
 def swap_pairs(pairs):
-    """Swaps src and tgt of every pair. Only valid as-is when src and tgt share a vocabulary (e.g. the control languages, whose spec is then unchanged)."""
+    """Swaps src and tgt of every pair. Only valid as-is when src and tgt share a vocabulary (e.g. the control languages, whose spec is then
+    unchanged except for its target grammar, which no longer applies: see `swapped_spec`)."""
     return [(tgt, src) for (src, tgt) in pairs]
+
+
+def swapped_spec(spec):
+    """The spec to use with `swap_pairs(pairs)`: the same vocabulary, but the target is now treated as a signal (no grammar to
+    enforce), as for the encodability of an emergent language."""
+    return replace(spec, tgt_grammar=None, tgt_neg_id=None, tgt_conj_id=None)
 
 
 def reverse_polish_pairs(dataset):
@@ -798,6 +884,9 @@ def reverse_polish_pairs(dataset):
         tgt_pad_id=vocab.pad_id,
         tgt_bos_id=vocab.bos_id,
         tgt_eos_id=vocab.eos_id,
+        tgt_grammar="polish",
+        tgt_neg_id=vocab.s2i[predicate_data.NEGATION_TOKEN],
+        tgt_conj_id=vocab.s2i[predicate_data.CONJUNCTION_TOKEN],
     )
     return pairs, spec
 
@@ -993,6 +1082,9 @@ def csv_pairs(path, notation="polish", return_strs=False):
         tgt_pad_id=tgt_pad_id,
         tgt_bos_id=tgt_bos_id,
         tgt_eos_id=tgt_eos_id,
+        tgt_grammar=notation,
+        tgt_neg_id=s2i[NEG],
+        tgt_conj_id=s2i[CONJ],
     )
     if(return_strs):
         # id2tok: maps a target token id back to its string, for rendering a predicted sequence (see
@@ -1018,7 +1110,7 @@ SEARCH_SPACE = {
 }
 
 
-def _sample_hparams(rng, min_epochs, max_epochs, patience, encoder, loss_per_example, focal_gamma, focal_relative):
+def _sample_hparams(rng, min_epochs, max_epochs, patience, encoder, loss_per_example, focal_gamma, focal_relative, constrained_decoding=False):
     def pick(space):
         if isinstance(space, list):
             return space[int(rng.integers(len(space)))]
@@ -1043,6 +1135,7 @@ def _sample_hparams(rng, min_epochs, max_epochs, patience, encoder, loss_per_exa
         loss_per_example=loss_per_example,   # ditto
         focal_gamma=focal_gamma,             # ditto
         focal_relative=focal_relative,       # ditto
+        constrained_decoding=constrained_decoding,  # ditto
     )
 
 
@@ -1085,7 +1178,7 @@ def main(global_args=None, remaining_args=None):
     best_score, best_h = None, None
     history = []
     for trial in range(args.comp_search_trials):
-        h = _sample_hparams(rng, args.comp_min_epochs, args.comp_max_epochs, args.comp_patience, args.comp_encoder, args.comp_loss_per_example, args.comp_focal_gamma, args.comp_focal_relative)
+        h = _sample_hparams(rng, args.comp_min_epochs, args.comp_max_epochs, args.comp_patience, args.comp_encoder, args.comp_loss_per_example, args.comp_focal_gamma, args.comp_focal_relative, args.comp_constrained_decoding)
         score, loss, stopped_epochs = compositionality(pairs, spec, h, device, seed=args.seed, return_epochs=True)
         history.append({"score": score, "loss": loss, "stopped_epochs": stopped_epochs, **asdict(h)})
         if (best_score is None) or (score > best_score):
