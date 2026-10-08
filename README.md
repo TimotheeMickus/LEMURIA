@@ -25,3 +25,7 @@ If this repository was useful for your research, please consider citing our publ
     abstract = "Emergent language games are experimental protocols designed to model how communication may arise among a group of agents. In this paper, we focus on how to improve performances of neural agents playing a signaling game: a sender is exposed to an image and generates a sequence of symbols that is transmitted to a receiver, which uses it to distinguish between two images, one that is semantically related to the original image, and one that is not. We consider multiple design choices, such as pretraining the visual components of the agents, introducing regularization terms, how to sample training items from the dataset, and we study how these different choices impact the behavior and performances of the agents. To that end, we introduce a number of automated metrics to measure the properties of the emergent language. We find that some implementation choices are always beneficial, and that the information that is conveyed by the agents{'} messages is shaped not only by the game, but also by the overall design of the agents as well as seemingly unrelated implementation choices.",
 }
 ```
+
+### License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
